@@ -1,0 +1,28 @@
+name = "vocotrial"
+compatibility_date = "2026-04-26"
+compatibility_flags = ["nodejs_compat"]
+pages_build_output_dir = "dist"
+
+# Because this file exists, Pages takes plain-text vars from here and the
+# dashboard will only accept Secrets. So the split is:
+#
+#   here      the model ids below — not sensitive, they ship in every request
+#   dashboard OPENAI_API_KEY, GOOGLE_API_KEY   (encrypted, per environment)
+#
+# Locally, put the two keys in .dev.vars (gitignored) and run `npm run dev:api`.
+#
+# The keys stay server-side by construction: functions/api/session/* exchange
+# them for a short-lived credential and only that reaches the browser. Neither
+# key is ever readable from the client, so a leaked page cannot spend the
+# account.
+[vars]
+# Live model ids. They sit here rather than in the source so a model bump is a
+# dashboard/redeploy change, not a code change — these APIs are still moving
+# and the ids get renamed. VERIFY BOTH against current provider docs before
+# the first real deploy; a wrong id fails at connect time with a 400.
+OPENAI_REALTIME_MODEL = "gpt-realtime"
+GEMINI_LIVE_MODEL = "gemini-live-2.5-flash-preview"
+
+# Voice for the OpenAI session. Gemini's voice is set in the setup message
+# the browser sends (src/realtime/gemini.ts).
+OPENAI_REALTIME_VOICE = "marin"

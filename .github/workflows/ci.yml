@@ -1,0 +1,36 @@
+name: CI vocoTrial
+
+# This repo is deployed by Cloudflare Pages' own Git integration, which builds
+# and ships every push to main. This workflow deliberately does NOT deploy — it
+# only gates the build, so a broken commit shows up here instead of silently
+# reaching production.
+#
+# Do not add `wrangler pages deploy` back: with a wrangler.toml present, the
+# two deploy paths fight over configuration and the CI one loses in ways that
+# are quiet (see sciptomondo, where a deploy workflow failed 41 times in a row
+# while Cloudflare quietly did the real deploys).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run build
+
+      - run: npm run typecheck
+
+      - run: npm run typecheck:functions
