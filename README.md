@@ -81,6 +81,38 @@ npm run typecheck:functions   # functions/, against workers-types
 npm run lint
 ```
 
+## Status
+
+| Path | State |
+| --- | --- |
+| SPA, `_headers`, `_redirects`, Git-integration deploys | working |
+| Same-origin gate (`403` on a forged Origin) | working |
+| `/api/session/openai` | working — mints against `gpt-realtime` and `gpt-realtime-mini` |
+| `/api/session/gemini` | mints, but the token is refused by the Live socket — see below |
+| Actual voice conversation | untested; needs a browser |
+
+### The Gemini path is blocked on auth
+
+The ephemeral token mints fine and then the Live WebSocket refuses it. Probed
+across both API versions, both parameter names, and with and without the
+`auth_tokens/` prefix:
+
+```
+?access_token=…  →  1008 "Method doesn't allow unregistered callers"
+?key=…           →  1007 "API key not valid"
+```
+
+Because the socket never gets past auth, no Gemini model id can be confirmed
+either — and `auth_tokens` accepts any model string, so minting proves nothing.
+Every Gemini entry in [src/realtime/models.ts](src/realtime/models.ts) is
+therefore marked unverified, including the 3.1 Flash Live id, which is a guess
+extrapolated from Google's naming pattern.
+
+The likely fix is to drop ephemeral tokens and proxy the WebSocket through the
+Worker: `GOOGLE_API_KEY` still never reaches the browser, but audio then hops
+through Cloudflare instead of going direct, which costs latency and Worker
+time. That trade is a decision, not a patch, so it is left open.
+
 ## Known edges
 
 - **Auth.** The gate in `_middleware.ts` blocks other *sites* from spending our

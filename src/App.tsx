@@ -168,6 +168,7 @@ export default function App() {
             {visibleModels(provider).map((model) => (
               <option key={model.key} value={model.key} className="bg-slate-900">
                 {model.label}
+                {model.unverified ? ' (unverified id)' : ''}
               </option>
             ))}
           </select>
