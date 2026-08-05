@@ -51,18 +51,26 @@ export async function onRequestPost(
       // makes handing it to a browser safe: the holder can talk to *this*
       // agent and nothing else. Without constraints the token would be a
       // general-purpose key to the Live API on our account.
-      liveConnectConstraints: {
+      //
+      // The field is `bidiGenerateContentSetup`, and the nesting is flat —
+      // no `config` wrapper, and responseModalities sits under
+      // generationConfig. The Python SDK calls this `live_connect_constraints`
+      // with a nested config, which is the SDK's own shape, not the REST
+      // one; sending that spelling gets "Unknown name" and a 400. Verified
+      // against the v1alpha discovery document:
+      //   https://generativelanguage.googleapis.com/$discovery/rest?version=v1alpha
+      bidiGenerateContentSetup: {
         model: `models/${model}`,
-        config: {
+        generationConfig: {
           responseModalities: ['AUDIO'],
-          systemInstruction: {
-            parts: [{ text: AGENT_INSTRUCTIONS }],
-          },
-          // Both sides of the conversation as text, so the UI has something
-          // to render. Off by default — audio-only is the cheaper path.
-          inputAudioTranscription: {},
-          outputAudioTranscription: {},
         },
+        systemInstruction: {
+          parts: [{ text: AGENT_INSTRUCTIONS }],
+        },
+        // Both sides of the conversation as text, so the UI has something to
+        // render. Off by default — audio-only is the cheaper path.
+        inputAudioTranscription: {},
+        outputAudioTranscription: {},
       },
     }),
   });

@@ -106,12 +106,28 @@ export default function App() {
   const busy = status === 'connecting';
   const live = status === 'live';
 
+  // Deployment id, not commit: retrying a build or changing a secret redeploys
+  // the same commit, and those are exactly the redeploys worth telling apart.
+  const buildTitle = [
+    __BUILD_INFO__.deploy && `deployment ${__BUILD_INFO__.deploy}`,
+    __BUILD_INFO__.commit && `commit ${__BUILD_INFO__.commit}`,
+    __BUILD_INFO__.branch,
+    `built ${__BUILD_INFO__.builtAt}`,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
+      <span
+        title={buildTitle}
+        className="fixed right-3 top-3 z-50 rounded-md border border-slate-800 bg-slate-900/80 px-2 py-1 font-mono text-[11px] leading-none text-slate-500 backdrop-blur"
+      >
+        {__BUILD_INFO__.label}
+      </span>
       <div className="mx-auto flex min-h-screen max-w-2xl flex-col gap-6 px-6 py-10">
-        <header className="flex items-baseline justify-between">
+        <header>
           <h1 className="text-2xl font-semibold tracking-tight">vocoTrial</h1>
-          <span className="font-mono text-xs text-slate-500">{__APP_VERSION__}</span>
         </header>
 
         <div className="flex gap-2">
