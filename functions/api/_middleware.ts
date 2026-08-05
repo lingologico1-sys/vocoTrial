@@ -17,9 +17,7 @@
 export interface GateEnv {
   OPENAI_API_KEY?: string;
   GOOGLE_API_KEY?: string;
-  OPENAI_REALTIME_MODEL?: string;
   OPENAI_REALTIME_VOICE?: string;
-  GEMINI_LIVE_MODEL?: string;
 }
 
 export function json(body: unknown, status = 200): Response {

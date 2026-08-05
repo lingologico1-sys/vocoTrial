@@ -1,4 +1,6 @@
-export type Provider = 'openai' | 'gemini';
+import type { Provider } from './models';
+
+export type { Provider };
 
 export type SessionStatus = 'idle' | 'connecting' | 'live' | 'closed' | 'error';
 
@@ -38,8 +40,16 @@ export interface SessionCredentials {
  * key exists in this bundle; this is the only way the client gets to speak to
  * either API.
  */
-export async function mintCredentials(provider: Provider): Promise<SessionCredentials> {
-  const response = await fetch(`/api/session/${provider}`, { method: 'POST' });
+export async function mintCredentials(
+  provider: Provider,
+  modelKey: string,
+): Promise<SessionCredentials> {
+  const response = await fetch(`/api/session/${provider}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    // A key, never a model id — the Worker owns the mapping. See models.ts.
+    body: JSON.stringify({ model: modelKey }),
+  });
 
   if (!response.ok) {
     let message = `Session request failed (${response.status})`;

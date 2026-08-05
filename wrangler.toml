@@ -16,13 +16,11 @@ pages_build_output_dir = "dist"
 # key is ever readable from the client, so a leaked page cannot spend the
 # account.
 [vars]
-# Live model ids. They sit here rather than in the source so a model bump is a
-# dashboard/redeploy change, not a code change — these APIs are still moving
-# and the ids get renamed. VERIFY BOTH against current provider docs before
-# the first real deploy; a wrong id fails at connect time with a 400.
-OPENAI_REALTIME_MODEL = "gpt-realtime"
-GEMINI_LIVE_MODEL = "gemini-live-2.5-flash-preview"
-
+# The model ids used to live here. They moved to src/realtime/models.ts once
+# the UI grew a picker: the browser and the Worker have to agree on the list,
+# and a var can only carry one value. The Worker still owns the mapping — the
+# client sends a key like "gemini-flash", never a raw model id.
+#
 # Voice for the OpenAI session. Gemini's voice is set in the setup message
 # the browser sends (src/realtime/gemini.ts).
 OPENAI_REALTIME_VOICE = "marin"

@@ -1,4 +1,5 @@
 import { AGENT_INSTRUCTIONS } from './_agent';
+import { readJson, resolveModel } from './_resolve';
 import { type GateEnv, json } from '../_middleware';
 
 /**
@@ -12,7 +13,6 @@ import { type GateEnv, json } from '../_middleware';
  */
 
 const CLIENT_SECRETS_URL = 'https://api.openai.com/v1/realtime/client_secrets';
-const DEFAULT_MODEL = 'gpt-realtime';
 const DEFAULT_VOICE = 'marin';
 
 interface ClientSecretResponse {
@@ -23,13 +23,17 @@ interface ClientSecretResponse {
 export async function onRequestPost(
   context: EventContext<GateEnv, string, Record<string, unknown>>,
 ): Promise<Response> {
-  const { env } = context;
+  const { request, env } = context;
 
   if (!env.OPENAI_API_KEY) {
     return json({ error: 'OPENAI_API_KEY is not configured', code: 'no_key' }, 500);
   }
 
-  const model = env.OPENAI_REALTIME_MODEL || DEFAULT_MODEL;
+  const resolved = resolveModel(await readJson(request), 'openai');
+  if (resolved.error) {
+    return json({ error: resolved.error, code: 'bad_model' }, 400);
+  }
+  const model = resolved.id;
 
   const upstream = await fetch(CLIENT_SECRETS_URL, {
     method: 'POST',

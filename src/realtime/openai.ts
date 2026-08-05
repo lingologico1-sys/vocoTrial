@@ -19,10 +19,13 @@ interface RealtimeEvent {
   error?: { message?: string };
 }
 
-export async function startOpenAiSession(handlers: SessionHandlers): Promise<VoiceSession> {
+export async function startOpenAiSession(
+  handlers: SessionHandlers,
+  modelKey: string,
+): Promise<VoiceSession> {
   handlers.onStatus('connecting');
 
-  const { token, model } = await mintCredentials('openai');
+  const { token, model } = await mintCredentials('openai', modelKey);
 
   const pc = new RTCPeerConnection();
   const audio = new Audio();

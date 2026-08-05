@@ -24,10 +24,13 @@ interface LiveMessage {
   goAway?: { timeLeft?: string };
 }
 
-export async function startGeminiSession(handlers: SessionHandlers): Promise<VoiceSession> {
+export async function startGeminiSession(
+  handlers: SessionHandlers,
+  modelKey: string,
+): Promise<VoiceSession> {
   handlers.onStatus('connecting');
 
-  const { token, model } = await mintCredentials('gemini');
+  const { token, model } = await mintCredentials('gemini', modelKey);
 
   const mic = new MicCapture();
   const player = new PcmPlayer();
@@ -52,7 +55,7 @@ export async function startGeminiSession(handlers: SessionHandlers): Promise<Voi
   const ready = new Promise<void>((resolve, reject) => {
     socket.onopen = () => {
       // The model and the rest of the config are already bound to the token
-      // server-side (liveConnectConstraints), so setup only has to name the
+      // server-side (bidiGenerateContentSetup), so setup only has to name the
       // model. If Google ever rejects this as under-specified, mirror the
       // constraint config from functions/api/session/gemini.ts here verbatim —
       // it has to match what the token was minted with, not merely be valid.

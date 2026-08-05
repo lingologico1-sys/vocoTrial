@@ -1,4 +1,5 @@
 import { AGENT_INSTRUCTIONS } from './_agent';
+import { readJson, resolveModel } from './_resolve';
 import { type GateEnv, json } from '../_middleware';
 
 /**
@@ -14,7 +15,6 @@ import { type GateEnv, json } from '../_middleware';
  */
 
 const API_BASE = 'https://generativelanguage.googleapis.com/v1alpha';
-const DEFAULT_MODEL = 'gemini-live-2.5-flash-preview';
 
 /** How long the token may be used to *open* a session. */
 const NEW_SESSION_WINDOW_MS = 2 * 60 * 1000;
@@ -28,13 +28,17 @@ interface AuthTokenResponse {
 export async function onRequestPost(
   context: EventContext<GateEnv, string, Record<string, unknown>>,
 ): Promise<Response> {
-  const { env } = context;
+  const { request, env } = context;
 
   if (!env.GOOGLE_API_KEY) {
     return json({ error: 'GOOGLE_API_KEY is not configured', code: 'no_key' }, 500);
   }
 
-  const model = env.GEMINI_LIVE_MODEL || DEFAULT_MODEL;
+  const resolved = resolveModel(await readJson(request), 'gemini');
+  if (resolved.error) {
+    return json({ error: resolved.error, code: 'bad_model' }, 400);
+  }
+  const model = resolved.id;
   const now = Date.now();
 
   const upstream = await fetch(`${API_BASE}/auth_tokens?key=${env.GOOGLE_API_KEY}`, {

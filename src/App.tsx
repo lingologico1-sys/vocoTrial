@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Mic, MicOff, PhoneOff, Radio } from 'lucide-react';
 import { startOpenAiSession } from './realtime/openai';
 import { startGeminiSession } from './realtime/gemini';
+import { defaultModelKey, visibleModels } from './realtime/models';
 import type { Provider, SessionStatus, TranscriptDelta, VoiceSession } from './realtime/types';
 
 interface Turn {
@@ -26,6 +27,11 @@ const STATUS_LABEL: Record<SessionStatus, string> = {
 
 export default function App() {
   const [provider, setProvider] = useState<Provider>('gemini');
+  // Keyed by provider so switching back and forth remembers each side's pick.
+  const [modelKeys, setModelKeys] = useState<Record<Provider, string>>({
+    gemini: defaultModelKey('gemini'),
+    openai: defaultModelKey('openai'),
+  });
   const [status, setStatus] = useState<SessionStatus>('idle');
   const [detail, setDetail] = useState<string | null>(null);
   const [speaking, setSpeaking] = useState(false);
@@ -81,10 +87,11 @@ export default function App() {
     };
 
     try {
+      const modelKey = modelKeys[provider];
       session.current =
         provider === 'openai'
-          ? await startOpenAiSession(handlers)
-          : await startGeminiSession(handlers);
+          ? await startOpenAiSession(handlers, modelKey)
+          : await startGeminiSession(handlers, modelKey);
     } catch (error) {
       session.current = null;
       setStatus('error');
@@ -147,6 +154,24 @@ export default function App() {
             </button>
           ))}
         </div>
+
+        <label className="flex items-center gap-3 rounded-lg border border-slate-800 px-4 py-2.5">
+          <span className="text-xs uppercase tracking-wide text-slate-500">Model</span>
+          <select
+            value={modelKeys[provider]}
+            onChange={(event) =>
+              setModelKeys((current) => ({ ...current, [provider]: event.target.value }))
+            }
+            disabled={live || busy}
+            className="flex-1 bg-transparent text-sm text-slate-200 outline-none disabled:opacity-40"
+          >
+            {visibleModels(provider).map((model) => (
+              <option key={model.key} value={model.key} className="bg-slate-900">
+                {model.label}
+              </option>
+            ))}
+          </select>
+        </label>
 
         <div className="flex items-center gap-3 rounded-lg border border-slate-800 px-4 py-3">
           <Radio
