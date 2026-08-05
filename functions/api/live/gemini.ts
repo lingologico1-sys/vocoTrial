@@ -101,21 +101,44 @@ export async function onRequest(
     }),
   );
 
+  /**
+   * Forwards a frame, normalising whatever the runtime handed us.
+   *
+   * `event.data` is not always a string or ArrayBuffer here — Google's frames
+   * arrive as Blobs, and `send()` turns a Blob into the literal text
+   * "[object Blob]", which is what the browser received before this existed.
+   *
+   * Sends go through a per-direction promise chain because the Blob conversion
+   * is async: forwarding without one lets a converted frame overtake a
+   * synchronous one, and a Live stream reordered by even one frame is audible.
+   */
+  const forwarder = (target: WebSocket) => {
+    let chain: Promise<void> = Promise.resolve();
+    return (data: unknown) => {
+      chain = chain
+        .then(async () => {
+          const payload =
+            typeof data === 'string' || data instanceof ArrayBuffer
+              ? data
+              : await new Response(data as BodyInit).arrayBuffer();
+          target.send(payload);
+        })
+        .catch(() => {
+          // The peer went away mid-flight; the close handlers tear the pair down.
+        });
+    };
+  };
+
+  const toGoogle = forwarder(google);
+  const toClient = forwarder(fromWorker);
+
   fromWorker.addEventListener('message', (event) => {
     if (typeof event.data === 'string' && event.data.includes('"setup"')) return;
-    try {
-      google.send(event.data);
-    } catch {
-      // Upstream went away; the close handlers below tear the pair down.
-    }
+    toGoogle(event.data);
   });
 
   google.addEventListener('message', (event) => {
-    try {
-      fromWorker.send(event.data);
-    } catch {
-      // Browser went away.
-    }
+    toClient(event.data);
   });
 
   // Either side closing must close the other, or the survivor leaks for the
