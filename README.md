@@ -92,7 +92,7 @@ npm run lint
 | `/api/session/openai` | mints ephemeral secrets correctly |
 | `/api/live/gemini` | **working** — relays the Live socket; reaches `setupComplete` on both models |
 | `/api/live/models` | lists the ids Google will actually accept for `bidiGenerateContent` |
-| OpenAI voice conversation | **working** — confirmed from a browser on `gpt-realtime` |
+| OpenAI voice conversation | **working** — confirmed from a browser on `gpt-realtime` and `gpt-realtime-mini` |
 | Gemini handshake | **working** — 12/12 connections reached `setupComplete` |
 | Gemini audio in a browser | untested; needs a mic |
 
@@ -106,10 +106,9 @@ of a 3.1 id, and OpenAI's `client_secrets` minted a deliberate
 rejects a hand-rolled SDP offer before it reads the model, so that proves
 nothing either.
 
-`gpt-realtime` is confirmed by a real browser call. Both Gemini ids come from
+Both OpenAI ids are confirmed by real browser calls. Both Gemini ids come from
 Google's own catalogue via `/api/live/models` and reach `setupComplete`, so they
-are confirmed too. Only `gpt-realtime-mini` is still marked `unverified` — one
-dropdown change away from the same treatment.
+are confirmed too. Nothing in the picker is marked `unverified` today.
 
 Do not guess a Gemini id. Two rounds of plausible-looking guesses were both
 wrong, including `gemini-live-3.1-flash-preview`, whose word order looks right

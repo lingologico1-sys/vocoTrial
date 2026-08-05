@@ -55,7 +55,7 @@ export const MODELS: ModelChoice[] = [
     provider: 'openai',
     label: 'GPT Realtime Mini',
     id: 'gpt-realtime-mini',
-    unverified: true,
+    // Confirmed the same way as gpt-realtime: a browser called and connected.
   },
 ];
 
@@ -73,9 +73,9 @@ export const MODELS: ModelChoice[] = [
  *    the model, returning the same "Invalid SDP offer." for a junk id as for a
  *    real one — so it discriminates nothing without a real WebRTC stack.
  *
- * gpt-realtime is therefore confirmed by the only means available: a browser
- * placed a call and it connected. gpt-realtime-mini is one dropdown change away
- * from the same treatment.
+ * Both OpenAI ids are therefore confirmed by the only means available: a browser
+ * placed a call and it connected. Nothing here is unverified today; the flag
+ * stays for the next id that gets added ahead of a real call.
  *
  * The Gemini ids came from Google's own catalogue rather than from guessing —
  * POST /api/live/models lists everything whose supportedGenerationMethods
