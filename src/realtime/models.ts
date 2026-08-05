@@ -50,7 +50,7 @@ export const MODELS: ModelChoice[] = [
     provider: 'openai',
     label: 'GPT Realtime',
     id: 'gpt-realtime',
-    unverified: true,
+    // Confirmed the only way it can be: a real call from a browser connected.
   },
   {
     key: 'openai-realtime-mini',
@@ -62,39 +62,26 @@ export const MODELS: ModelChoice[] = [
 ];
 
 /**
- * WHY EVERY ID HERE IS MARKED UNVERIFIED
+ * WHAT "UNVERIFIED" MEANS HERE
  *
- * Not "probably wrong" — unchecked. Every layer that could confirm a model id
- * was tried against the deployed site and none of them can, so the marking says
- * so rather than implying a confidence nobody earned.
+ * Unchecked, not suspect. A model id can only be confirmed by a call that
+ * actually connects, because nothing earlier in the chain looks at it:
  *
- * Neither provider validates the model when issuing a credential:
+ *  - Neither provider validates the model when issuing a credential. Google's
+ *    `auth_tokens` accepted four mutually exclusive spellings of a 3.1 id, and
+ *    OpenAI's `client_secrets` minted a deliberate `gpt-realtime-no-such-model`
+ *    exactly like the real ones.
+ *  - OpenAI's /realtime/calls rejects a hand-rolled SDP offer before reading
+ *    the model, returning the same "Invalid SDP offer." for a junk id as for a
+ *    real one — so it discriminates nothing without a real WebRTC stack.
  *
- *  - Google's `auth_tokens` accepts ANY model string. Four mutually exclusive
- *    spellings of a 3.1 id all minted.
- *  - OpenAI's `client_secrets` does too: a deliberate `gpt-realtime-no-such-model`
- *    minted exactly like the real ids.
+ * gpt-realtime is therefore confirmed by the only means available: a browser
+ * placed a call and it connected. gpt-realtime-mini is one dropdown change away
+ * from the same treatment.
  *
- * And neither transport gets far enough to judge it:
- *
- *  - Gemini's Live socket refuses the ephemeral token before setup. Probed
- *    across both API versions and both parameter names, with and without the
- *    "auth_tokens/" prefix:
- *      ?access_token=...  ->  1008 "Method doesn't allow unregistered callers"
- *      ?key=...           ->  1007 "API key not valid"
- *  - OpenAI's /realtime/calls rejects a hand-rolled SDP offer before looking at
- *    the model — the junk id returns the same "Invalid SDP offer." as the real
- *    ones, so it discriminates nothing without a real WebRTC stack.
- *
- * What that leaves: the OpenAI ids get their first real test from a browser
- * making an actual call, so open the deployed site and try one. The Gemini ids
- * cannot be tested at all until the auth problem is fixed — likely by dropping
- * ephemeral tokens and proxying the socket through the Worker, which keeps
- * GOOGLE_API_KEY server-side but routes audio through Cloudflare. That is a
- * real architectural trade, so it is a decision rather than a patch.
- *
- * Clear the `unverified` flag on an id the moment a call actually connects with
- * it. The flag is visible in the picker, so leaving a stale one is misleading.
+ * The Gemini ids stay unverified until a call connects through the proxy in
+ * functions/api/live/gemini.ts. Clear the flag the moment one does — it shows
+ * in the picker, so a stale marking misleads.
  */
 
 export function findModel(key: string): ModelChoice | undefined {

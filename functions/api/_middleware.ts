@@ -84,6 +84,14 @@ export async function onRequest(
     return json({ error: 'Forbidden', code: 'cross_origin' }, 403);
   }
 
+  // A WebSocket upgrade is a GET, and its 101 response carries a live socket
+  // that cannot survive being copied into a new Response. So it skips both the
+  // POST rule and the CORS wrapper below — but not the origin check above,
+  // which is the one that matters here.
+  if (request.headers.get('Upgrade')?.toLowerCase() === 'websocket') {
+    return next();
+  }
+
   // Preflight reveals nothing and carries no body; answer it directly.
   if (request.method === 'OPTIONS') {
     return withCors(new Response(null, { status: 204 }), origin);

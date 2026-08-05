@@ -1,16 +1,26 @@
 import { MicCapture, PcmPlayer, decodeBase64, encodeBase64 } from './audio';
-import { mintCredentials, type SessionHandlers, type VoiceSession } from './types';
+import type { SessionHandlers, VoiceSession } from './types';
 
 /**
- * Gemini Live over the BidiGenerateContent WebSocket.
+ * Gemini Live, through our own Worker.
+ *
+ * The socket is same-origin: functions/api/live/gemini.ts relays it to Google
+ * with the API key attached, because Google's ephemeral tokens are refused as
+ * credentials on this account and so cannot be handed to a browser. The Worker
+ * also sends the setup message, so this file never does — it streams audio and
+ * listens.
  *
  * Unlike the OpenAI path there is no WebRTC doing the media work, so this file
  * owns the whole loop: mic -> int16 -> base64 -> socket, and socket -> base64
  * -> int16 -> scheduled playback. See src/realtime/audio.ts for both halves.
  */
 
-const WS_BASE =
-  'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent';
+function liveSocketUrl(modelKey: string): string {
+  const url = new URL('/api/live/gemini', window.location.href);
+  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+  url.searchParams.set('model', modelKey);
+  return url.toString();
+}
 
 interface LiveMessage {
   setupComplete?: Record<string, never>;
@@ -30,8 +40,6 @@ export async function startGeminiSession(
 ): Promise<VoiceSession> {
   handlers.onStatus('connecting');
 
-  const { token, model } = await mintCredentials('gemini', modelKey);
-
   const mic = new MicCapture();
   const player = new PcmPlayer();
   // Creating the output context inside the click that started the session is
@@ -39,7 +47,7 @@ export async function startGeminiSession(
   await player.resume();
 
   let stopped = false;
-  const socket = new WebSocket(`${WS_BASE}?access_token=${encodeURIComponent(token)}`);
+  const socket = new WebSocket(liveSocketUrl(modelKey));
   socket.binaryType = 'arraybuffer';
 
   const cleanup = () => {
@@ -53,14 +61,9 @@ export async function startGeminiSession(
   };
 
   const ready = new Promise<void>((resolve, reject) => {
-    socket.onopen = () => {
-      // The model and the rest of the config are already bound to the token
-      // server-side (bidiGenerateContentSetup), so setup only has to name the
-      // model. If Google ever rejects this as under-specified, mirror the
-      // constraint config from functions/api/session/gemini.ts here verbatim —
-      // it has to match what the token was minted with, not merely be valid.
-      socket.send(JSON.stringify({ setup: { model: `models/${model}` } }));
-    };
+    // No setup is sent from here. The Worker sends it the moment Google's side
+    // opens, and drops any setup arriving from this direction — otherwise the
+    // page could redefine the agent on a key it never gets to see.
 
     socket.onerror = () => {
       reject(new Error('Could not reach the Gemini Live socket'));
