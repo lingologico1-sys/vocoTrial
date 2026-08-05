@@ -35,15 +35,13 @@ export const MODELS: ModelChoice[] = [
     key: 'gemini-flash-31',
     provider: 'gemini',
     label: 'Gemini 3.1 Flash Live',
-    id: 'gemini-live-3.1-flash-preview',
-    unverified: true,
+    id: 'gemini-3.1-flash-live-preview',
   },
   {
-    key: 'gemini-flash',
+    key: 'gemini-native-audio',
     provider: 'gemini',
-    label: 'Gemini 2.5 Flash Live',
-    id: 'gemini-live-2.5-flash-preview',
-    unverified: true,
+    label: 'Gemini 2.5 Flash Native Audio',
+    id: 'gemini-2.5-flash-native-audio-latest',
   },
   {
     key: 'openai-realtime',
@@ -79,9 +77,12 @@ export const MODELS: ModelChoice[] = [
  * placed a call and it connected. gpt-realtime-mini is one dropdown change away
  * from the same treatment.
  *
- * The Gemini ids stay unverified until a call connects through the proxy in
- * functions/api/live/gemini.ts. Clear the flag the moment one does — it shows
- * in the picker, so a stale marking misleads.
+ * The Gemini ids came from Google's own catalogue rather than from guessing —
+ * POST /api/live/models lists everything whose supportedGenerationMethods
+ * include bidiGenerateContent. Use it before inventing an id: two rounds of
+ * plausible-looking guesses (gemini-live-3.1-flash-preview,
+ * gemini-live-2.5-flash-preview) were both wrong, and the word order is not
+ * what you would expect.
  */
 
 export function findModel(key: string): ModelChoice | undefined {
