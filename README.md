@@ -87,9 +87,22 @@ npm run lint
 | --- | --- |
 | SPA, `_headers`, `_redirects`, Git-integration deploys | working |
 | Same-origin gate (`403` on a forged Origin) | working |
-| `/api/session/openai` | working — mints against `gpt-realtime` and `gpt-realtime-mini` |
+| `/api/session/openai` | mints ephemeral secrets correctly |
 | `/api/session/gemini` | mints, but the token is refused by the Live socket — see below |
 | Actual voice conversation | untested; needs a browser |
+
+### Every model id is unverified
+
+Not "probably wrong" — unchecked. Neither provider validates the model when it
+issues a credential: Google's `auth_tokens` accepted four mutually exclusive
+spellings of a 3.1 id, and OpenAI's `client_secrets` minted a deliberate
+`gpt-realtime-no-such-model` exactly like the real ones. Neither transport gets
+far enough to judge it either (Gemini fails at auth, below; OpenAI's
+`/realtime/calls` rejects a hand-rolled SDP offer before reading the model).
+
+So the OpenAI ids get their first real test from a browser making an actual
+call. Clear the `unverified` flag in
+[src/realtime/models.ts](src/realtime/models.ts) as soon as one connects.
 
 ### The Gemini path is blocked on auth
 
@@ -101,12 +114,6 @@ across both API versions, both parameter names, and with and without the
 ?access_token=…  →  1008 "Method doesn't allow unregistered callers"
 ?key=…           →  1007 "API key not valid"
 ```
-
-Because the socket never gets past auth, no Gemini model id can be confirmed
-either — and `auth_tokens` accepts any model string, so minting proves nothing.
-Every Gemini entry in [src/realtime/models.ts](src/realtime/models.ts) is
-therefore marked unverified, including the 3.1 Flash Live id, which is a guess
-extrapolated from Google's naming pattern.
 
 The likely fix is to drop ephemeral tokens and proxy the WebSocket through the
 Worker: `GOOGLE_API_KEY` still never reaches the browser, but audio then hops

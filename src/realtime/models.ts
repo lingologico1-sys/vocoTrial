@@ -29,26 +29,15 @@ export interface ModelChoice {
   unverified?: boolean;
 }
 
+// First entry per provider is that provider's default.
 export const MODELS: ModelChoice[] = [
-  // Confirmed: mints, and OpenAI rejects a nonsense id at mint time, so a
-  // successful mint means the model exists.
   {
-    key: 'openai-realtime',
-    provider: 'openai',
-    label: 'GPT Realtime',
-    id: 'gpt-realtime',
+    key: 'gemini-flash-31',
+    provider: 'gemini',
+    label: 'Gemini 3.1 Flash Live',
+    id: 'gemini-live-3.1-flash-preview',
+    unverified: true,
   },
-  {
-    key: 'openai-realtime-mini',
-    provider: 'openai',
-    label: 'GPT Realtime Mini',
-    id: 'gpt-realtime-mini',
-  },
-
-  // Gemini ids cannot currently be verified at all — see the note below. Both
-  // are carried on the same footing: one is the id the app shipped with, the
-  // other is the 3.1 Flash Live entry, guessed from Google's own naming
-  // pattern (gemini-live-2.5-flash-preview -> gemini-live-3.1-flash-preview).
   {
     key: 'gemini-flash',
     provider: 'gemini',
@@ -57,46 +46,55 @@ export const MODELS: ModelChoice[] = [
     unverified: true,
   },
   {
-    key: 'gemini-flash-31',
-    provider: 'gemini',
-    label: 'Gemini 3.1 Flash Live',
-    id: 'gemini-live-3.1-flash-preview',
+    key: 'openai-realtime',
+    provider: 'openai',
+    label: 'GPT Realtime',
+    id: 'gpt-realtime',
     unverified: true,
   },
-
-  // Negative control. If this ever mints, then a successful mint proves nothing
-  // about the OpenAI ids above and they need checking another way.
   {
-    key: 'probe-openai-junk',
+    key: 'openai-realtime-mini',
     provider: 'openai',
-    label: 'probe',
-    id: 'gpt-realtime-no-such-model',
-    hidden: true,
+    label: 'GPT Realtime Mini',
+    id: 'gpt-realtime-mini',
+    unverified: true,
   },
 ];
 
 /**
- * WHY EVERY GEMINI ID IS MARKED UNVERIFIED
+ * WHY EVERY ID HERE IS MARKED UNVERIFIED
  *
- * There are two places a bad Gemini model id could be caught, and neither
- * currently works:
+ * Not "probably wrong" — unchecked. Every layer that could confirm a model id
+ * was tried against the deployed site and none of them can, so the marking says
+ * so rather than implying a confidence nobody earned.
  *
- *  1. Minting. `auth_tokens` accepts ANY model string — "gemini-3.1-flash-live",
- *     "gemini-live-3.1-flash-preview" and two more mutually exclusive spellings
- *     all minted successfully. It does not validate the constraint.
+ * Neither provider validates the model when issuing a credential:
  *
- *  2. The Live socket. It never gets far enough to judge the model, because it
- *     refuses the ephemeral token itself. Probed across both API versions and
- *     both parameter names, with and without the "auth_tokens/" prefix:
+ *  - Google's `auth_tokens` accepts ANY model string. Four mutually exclusive
+ *    spellings of a 3.1 id all minted.
+ *  - OpenAI's `client_secrets` does too: a deliberate `gpt-realtime-no-such-model`
+ *    minted exactly like the real ids.
  *
- *       ?access_token=...  ->  1008 "Method doesn't allow unregistered callers"
- *       ?key=...           ->  1007 "API key not valid"
+ * And neither transport gets far enough to judge it:
  *
- * So the Gemini path is blocked on authentication, not on model naming, and no
- * id can be confirmed until that is resolved. The likely fix is to stop using
- * ephemeral tokens and proxy the WebSocket through the Worker instead, which
- * keeps GOOGLE_API_KEY server-side but puts audio through Cloudflare. That is
- * a real architectural trade, so it is a decision rather than a patch.
+ *  - Gemini's Live socket refuses the ephemeral token before setup. Probed
+ *    across both API versions and both parameter names, with and without the
+ *    "auth_tokens/" prefix:
+ *      ?access_token=...  ->  1008 "Method doesn't allow unregistered callers"
+ *      ?key=...           ->  1007 "API key not valid"
+ *  - OpenAI's /realtime/calls rejects a hand-rolled SDP offer before looking at
+ *    the model — the junk id returns the same "Invalid SDP offer." as the real
+ *    ones, so it discriminates nothing without a real WebRTC stack.
+ *
+ * What that leaves: the OpenAI ids get their first real test from a browser
+ * making an actual call, so open the deployed site and try one. The Gemini ids
+ * cannot be tested at all until the auth problem is fixed — likely by dropping
+ * ephemeral tokens and proxying the socket through the Worker, which keeps
+ * GOOGLE_API_KEY server-side but routes audio through Cloudflare. That is a
+ * real architectural trade, so it is a decision rather than a patch.
+ *
+ * Clear the `unverified` flag on an id the moment a call actually connects with
+ * it. The flag is visible in the picker, so leaving a stale one is misleading.
  */
 
 export function findModel(key: string): ModelChoice | undefined {
