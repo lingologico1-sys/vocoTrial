@@ -1,5 +1,5 @@
-import { AGENT_INSTRUCTIONS } from './_agent';
-import { readJson, resolveModel } from './_resolve';
+import { agentInstructions } from './_agent';
+import { readJson, resolveLanguage, resolveModel } from './_resolve';
 import { type GateEnv, json } from '../_middleware';
 
 /**
@@ -29,11 +29,19 @@ export async function onRequestPost(
     return json({ error: 'OPENAI_API_KEY is not configured', code: 'no_key' }, 500);
   }
 
-  const resolved = resolveModel(await readJson(request), 'openai');
-  if (resolved.error) {
+  const body = await readJson(request);
+
+  const resolved = resolveModel(body, 'openai');
+  if (!resolved.ok) {
     return json({ error: resolved.error, code: 'bad_model' }, 400);
   }
-  const model = resolved.id;
+  const model = resolved.value;
+
+  const chosen = resolveLanguage(body);
+  if (!chosen.ok) {
+    return json({ error: chosen.error, code: 'bad_language' }, 400);
+  }
+  const language = chosen.value;
 
   const upstream = await fetch(CLIENT_SECRETS_URL, {
     method: 'POST',
@@ -45,11 +53,30 @@ export async function onRequestPost(
       session: {
         type: 'realtime',
         model,
-        instructions: AGENT_INSTRUCTIONS,
+        instructions: agentInstructions(language),
         audio: {
           // Without an input transcription model the API returns audio only,
           // and the UI has nothing to show for what the user just said.
-          input: { transcription: { model: 'whisper-1' } },
+          //
+          // whisper-1 is deliberate, not legacy. It transcribes the utterance
+          // whole rather than streaming it, so it can use the end of a sentence
+          // to make sense of the start — which is where a learner's speech is
+          // hardest to read. A streaming model would put words on screen sooner
+          // but commit to each guess before hearing what follows. The transcript
+          // arrives after the reply has begun; src/App.tsx orders turns by
+          // conversation item so that lag does not scramble the log.
+          //
+          // `language` stops it hedging between languages, which is the failure
+          // that costs a learner the most: a hesitant French sentence decoded as
+          // English comes back as plausible nonsense rather than as a mistake
+          // they can see. `prompt` is a style hint — see languages.ts.
+          input: {
+            transcription: {
+              model: 'whisper-1',
+              language: language.code,
+              prompt: language.sample,
+            },
+          },
           output: { voice: env.OPENAI_REALTIME_VOICE || DEFAULT_VOICE },
         },
       },

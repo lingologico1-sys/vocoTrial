@@ -1,4 +1,5 @@
 import type { Provider } from './models';
+import type { UsageTotals } from './cost';
 
 export type { Provider };
 
@@ -6,7 +7,15 @@ export type SessionStatus = 'idle' | 'connecting' | 'live' | 'closed' | 'error';
 
 export interface TranscriptDelta {
   role: 'user' | 'agent';
-  /** Text to append to that role's current turn. */
+  /**
+   * Which turn the text belongs to. Transcription can lag well behind the
+   * conversation — a batch model only transcribes the user once they stop
+   * talking, by which point the agent has answered — so a delta carrying an id
+   * lands in that turn wherever it already sits in the log. Without one it can
+   * only extend the turn still open at the end.
+   */
+  id?: string;
+  /** Text to append to that turn. */
   text: string;
   /** True when the turn is finished and the next delta starts a new one. */
   done: boolean;
@@ -17,6 +26,12 @@ export interface SessionHandlers {
   onTranscript: (delta: TranscriptDelta) => void;
   /** The agent started or stopped speaking — drives the level indicator. */
   onSpeaking?: (speaking: boolean) => void;
+  /**
+   * Running totals for the call so far, pushed every time the provider reports
+   * usage rather than once at the end. A call that dies mid-flight never sends
+   * a final figure, so the last push is the only record we get to keep.
+   */
+  onUsage?: (usage: UsageTotals) => void;
 }
 
 /**
@@ -43,12 +58,14 @@ export interface SessionCredentials {
 export async function mintCredentials(
   provider: Provider,
   modelKey: string,
+  language: string,
 ): Promise<SessionCredentials> {
   const response = await fetch(`/api/session/${provider}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    // A key, never a model id — the Worker owns the mapping. See models.ts.
-    body: JSON.stringify({ model: modelKey }),
+    // Keys, never a model id or a prompt — the Worker owns both mappings. See
+    // models.ts and languages.ts.
+    body: JSON.stringify({ model: modelKey, language }),
   });
 
   if (!response.ok) {

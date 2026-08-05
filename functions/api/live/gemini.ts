@@ -1,5 +1,6 @@
-import { AGENT_INSTRUCTIONS } from '../session/_agent';
+import { agentInstructions } from '../session/_agent';
 import { findModel } from '../../../src/realtime/models';
+import { defaultLanguageCode, findLanguage } from '../../../src/realtime/languages';
 import { type GateEnv, json } from '../_middleware';
 
 /**
@@ -43,10 +44,16 @@ export async function onRequest(
   }
 
   // Same allowlist the session routes use: a key, never a raw model id.
-  const key = new URL(request.url).searchParams.get('model') ?? '';
+  const params = new URL(request.url).searchParams;
+  const key = params.get('model') ?? '';
   const choice = findModel(key);
   if (!choice || choice.provider !== 'gemini') {
     return json({ error: `Unknown Gemini model "${key}"`, code: 'bad_model' }, 400);
+  }
+
+  const language = findLanguage(params.get('language') ?? defaultLanguageCode());
+  if (!language) {
+    return json({ error: 'Unsupported language', code: 'bad_language' }, 400);
   }
 
   /**
@@ -89,12 +96,21 @@ export async function onRequest(
    * system instruction, turning a metered key into a general-purpose assistant
    * — the browser gets to stream audio, not to redefine the agent.
    */
+  /**
+   * The language is carried by the system instruction alone, with no
+   * speechConfig.languageCode alongside it. Google documents that field as
+   * unsupported on native-audio models, which pick their language from the
+   * conversation — and one of the two models offered here is native audio, so
+   * setting it would break that call to configure the other one. Gemini's input
+   * transcription takes no language hint either way, so unlike the OpenAI path
+   * the choice steers what the agent *speaks*, not how the user is transcribed.
+   */
   google.send(
     JSON.stringify({
       setup: {
         model: `models/${choice.id}`,
         generationConfig: { responseModalities: ['AUDIO'] },
-        systemInstruction: { parts: [{ text: AGENT_INSTRUCTIONS }] },
+        systemInstruction: { parts: [{ text: agentInstructions(language) }] },
         inputAudioTranscription: {},
         outputAudioTranscription: {},
       },

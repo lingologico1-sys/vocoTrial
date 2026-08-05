@@ -2,10 +2,21 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Mic, MicOff, PhoneOff, Radio } from 'lucide-react';
 import { startOpenAiSession } from './realtime/openai';
 import { startGeminiSession } from './realtime/gemini';
-import { defaultModelKey, visibleModels } from './realtime/models';
+import { defaultModelKey, findModel, visibleModels } from './realtime/models';
+import { LANGUAGES, defaultLanguageCode } from './realtime/languages';
+import {
+  RATES_VERIFIED_ON,
+  estimateCost,
+  formatTokens,
+  formatUsd,
+  totalTokens,
+  type UsageTotals,
+} from './realtime/cost';
 import type { Provider, SessionStatus, TranscriptDelta, VoiceSession } from './realtime/types';
 
 interface Turn {
+  /** The provider's id for this turn, when it gives one. See TranscriptDelta. */
+  id?: string;
   role: 'user' | 'agent';
   text: string;
   /** Closed turns never take another delta, so a new one starts a new bubble. */
@@ -16,6 +27,18 @@ const PROVIDERS: Array<{ id: Provider; label: string }> = [
   { id: 'gemini', label: 'Gemini Live' },
   { id: 'openai', label: 'OpenAI Realtime' },
 ];
+
+/**
+ * How long a call may go with nobody talking before it hangs itself up.
+ *
+ * Audio bills per second of connection, not per word, so a forgotten tab costs
+ * exactly as much as a conversation. Generous on purpose: this is a language
+ * practice app, and a learner assembling a sentence goes quiet for a long time
+ * — the timeout is here to catch an abandoned call, not to hurry anyone.
+ */
+const IDLE_TIMEOUT_MS = 90_000;
+/** How often to test the clock. Coarse; nothing here needs to be prompt. */
+const IDLE_POLL_MS = 5_000;
 
 const STATUS_LABEL: Record<SessionStatus, string> = {
   idle: 'Not connected',
@@ -32,14 +55,28 @@ export default function App() {
     gemini: defaultModelKey('gemini'),
     openai: defaultModelKey('openai'),
   });
+  // Not keyed by provider: the language is the user's, not the model's.
+  const [language, setLanguage] = useState(defaultLanguageCode());
   const [status, setStatus] = useState<SessionStatus>('idle');
   const [detail, setDetail] = useState<string | null>(null);
   const [speaking, setSpeaking] = useState(false);
   const [muted, setMuted] = useState(false);
   const [turns, setTurns] = useState<Turn[]>([]);
+  const [usage, setUsage] = useState<UsageTotals | null>(null);
+  /**
+   * The model the *call* ran on, not the one the picker is showing. The picker
+   * unlocks the moment the call ends, so pricing the summary off it would
+   * silently reprice a finished call the instant the user browsed the dropdown.
+   */
+  const [billedModel, setBilledModel] = useState<string | null>(null);
 
   const session = useRef<VoiceSession | null>(null);
   const log = useRef<HTMLDivElement>(null);
+  /**
+   * When either side was last known to be talking. A ref, not state: it is
+   * written on nearly every audio frame and nothing renders from it.
+   */
+  const lastActivity = useRef(Date.now());
 
   useEffect(() => {
     log.current?.scrollTo({ top: log.current.scrollHeight, behavior: 'smooth' });
@@ -49,22 +86,28 @@ export default function App() {
   useEffect(() => () => session.current?.stop(), []);
 
   const appendTranscript = useCallback((delta: TranscriptDelta) => {
+    // Any transcript at all means somebody just said something.
+    lastActivity.current = Date.now();
+
     setTurns((current) => {
-      const last = current[current.length - 1];
+      const tail = current.length - 1;
+      const index = delta.id
+        ? current.findIndex((turn) => turn.id === delta.id)
+        : current[tail]?.role === delta.role && !current[tail].done
+          ? tail
+          : -1;
 
-      if (delta.done) {
-        if (last?.role === delta.role && !last.done) {
-          return [...current.slice(0, -1), { ...last, done: true }];
-        }
-        return current;
+      if (index === -1) {
+        // An id'd delta with no text opens the turn anyway: that is how a
+        // provider claims its place in the log before the words exist.
+        if (!delta.text && !delta.id) return current;
+        return [...current, { id: delta.id, role: delta.role, text: delta.text, done: delta.done }];
       }
 
-      if (!delta.text) return current;
-
-      if (last?.role === delta.role && !last.done) {
-        return [...current.slice(0, -1), { ...last, text: last.text + delta.text }];
-      }
-      return [...current, { role: delta.role, text: delta.text, done: false }];
+      const turn = current[index];
+      const next = [...current];
+      next[index] = { ...turn, text: turn.text + delta.text, done: turn.done || delta.done };
+      return next;
     });
   }, []);
 
@@ -72,6 +115,8 @@ export default function App() {
     setTurns([]);
     setDetail(null);
     setMuted(false);
+    setUsage(null);
+    setBilledModel(findModel(modelKeys[provider])?.id ?? null);
 
     const handlers = {
       onStatus: (next: SessionStatus, message?: string) => {
@@ -83,15 +128,22 @@ export default function App() {
         }
       },
       onTranscript: appendTranscript,
-      onSpeaking: setSpeaking,
+      onSpeaking: (next: boolean) => {
+        lastActivity.current = Date.now();
+        setSpeaking(next);
+      },
+      onUsage: setUsage,
     };
 
     try {
       const modelKey = modelKeys[provider];
+      // Set before awaiting: the clock starts at the moment of connecting, so a
+      // call nobody ever speaks into still times out.
+      lastActivity.current = Date.now();
       session.current =
         provider === 'openai'
-          ? await startOpenAiSession(handlers, modelKey)
-          : await startGeminiSession(handlers, modelKey);
+          ? await startOpenAiSession(handlers, modelKey, language)
+          : await startGeminiSession(handlers, modelKey, language);
     } catch (error) {
       session.current = null;
       setStatus('error');
@@ -99,10 +151,31 @@ export default function App() {
     }
   };
 
-  const hangUp = () => {
+  const hangUp = (reason?: string) => {
     session.current?.stop();
     session.current = null;
+    // stop() drives onStatus('closed'), which clears detail — so say why after,
+    // not before, or the message is wiped the moment it is set.
+    if (reason) setDetail(reason);
   };
+
+  /**
+   * Hangs up a call nobody is on.
+   *
+   * Polls a timestamp rather than resetting a timer on every frame: activity
+   * arrives many times a second during speech, and rescheduling a timeout that
+   * often is a lot of churn to answer a question this coarse.
+   */
+  useEffect(() => {
+    if (status !== 'live') return;
+
+    const timer = setInterval(() => {
+      if (Date.now() - lastActivity.current < IDLE_TIMEOUT_MS) return;
+      hangUp(`Ended automatically after ${IDLE_TIMEOUT_MS / 1000}s with no one talking`);
+    }, IDLE_POLL_MS);
+
+    return () => clearInterval(timer);
+  }, [status]);
 
   const toggleMute = () => {
     const next = !muted;
@@ -112,6 +185,24 @@ export default function App() {
 
   const busy = status === 'connecting';
   const live = status === 'live';
+
+  // A reserved turn whose transcript never arrived holds its place in the
+  // ordering but has nothing to draw.
+  const spoken = turns.filter((turn) => turn.text);
+
+  // Only after the call, and only if the provider actually reported something.
+  const ended = status === 'closed' || status === 'error';
+  const summary =
+    ended && usage && billedModel && totalTokens(usage) > 0
+      ? {
+          usage,
+          cost: estimateCost(billedModel, usage),
+          truncated: status === 'error',
+          // The relay leg is a property of the call that ran, so it is read off
+          // the billed model for the same reason the rates are.
+          relayed: billedModel.startsWith('gemini'),
+        }
+      : null;
 
   // Deployment id, not commit: retrying a build or changing a secret redeploys
   // the same commit, and those are exactly the redeploys worth telling apart.
@@ -156,6 +247,23 @@ export default function App() {
         </div>
 
         <label className="flex items-center gap-3 rounded-lg border border-slate-800 px-4 py-2.5">
+          <span className="text-xs uppercase tracking-wide text-slate-500">Practising</span>
+          <select
+            value={language}
+            onChange={(event) => setLanguage(event.target.value)}
+            disabled={live || busy}
+            className="flex-1 bg-transparent text-sm text-slate-200 outline-none disabled:opacity-40"
+          >
+            {LANGUAGES.map((choice) => (
+              <option key={choice.code} value={choice.code} className="bg-slate-900">
+                {choice.label}
+                {choice.endonym !== choice.label ? ` · ${choice.endonym}` : ''}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label className="flex items-center gap-3 rounded-lg border border-slate-800 px-4 py-2.5">
           <span className="text-xs uppercase tracking-wide text-slate-500">Model</span>
           <select
             value={modelKeys[provider]}
@@ -195,12 +303,12 @@ export default function App() {
           ref={log}
           className="flex-1 space-y-3 overflow-y-auto rounded-lg border border-slate-800 p-4"
         >
-          {turns.length === 0 && (
+          {spoken.length === 0 && (
             <p className="text-sm text-slate-600">
               Start the call and talk. The transcript appears here.
             </p>
           )}
-          {turns.map((turn, index) => (
+          {spoken.map((turn, index) => (
             <div
               key={index}
               className={turn.role === 'user' ? 'text-right' : 'text-left'}
@@ -218,6 +326,56 @@ export default function App() {
           ))}
         </div>
 
+        {summary && (
+          <div className="rounded-lg border border-slate-800 p-4">
+            <div className="flex items-baseline justify-between">
+              <span className="text-xs uppercase tracking-wide text-slate-500">
+                Estimated cost
+              </span>
+              <span className="font-mono text-lg text-slate-100">
+                {summary.cost.priced ? formatUsd(summary.cost.usd) : '—'}
+              </span>
+            </div>
+
+            {summary.cost.priced ? (
+              <table className="mt-3 w-full text-xs text-slate-400">
+                <tbody>
+                  {summary.cost.lines.map((line) => (
+                    <tr key={line.label}>
+                      <td className="py-0.5">
+                        <span title={line.hint} className="cursor-help decoration-slate-700 decoration-dotted underline-offset-2 hover:underline">
+                          {line.label}
+                        </span>
+                      </td>
+                      <td className="py-0.5 text-right font-mono">
+                        {formatTokens(line.tokens)}
+                      </td>
+                      <td className="py-0.5 text-right font-mono text-slate-600">
+                        ${line.rate}/M
+                      </td>
+                      <td className="py-0.5 text-right font-mono text-slate-300">
+                        {formatUsd(line.usd)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : (
+              <p className="mt-2 text-xs text-slate-500">
+                {formatTokens(totalTokens(summary.usage))} tokens on {billedModel}, which has
+                no rates in the table.
+              </p>
+            )}
+
+            <p className="mt-3 text-[11px] leading-relaxed text-slate-600">
+              Provider-reported tokens at {RATES_VERIFIED_ON} list prices — an estimate, not
+              your bill.
+              {summary.relayed && ' Excludes the Cloudflare Worker time the relay bills.'}
+              {summary.truncated && ' The call ended abnormally, so the final usage may be missing.'}
+            </p>
+          </div>
+        )}
+
         <div className="flex gap-3">
           {live ? (
             <>
@@ -231,7 +389,7 @@ export default function App() {
               </button>
               <button
                 type="button"
-                onClick={hangUp}
+                onClick={() => hangUp()}
                 className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-rose-600 px-4 py-3 text-sm font-medium hover:bg-rose-500"
               >
                 <PhoneOff size={16} />

@@ -1,4 +1,5 @@
 import { MicCapture, PcmPlayer, decodeBase64, encodeBase64 } from './audio';
+import { addUsage, emptyUsage, totalTokens, type UsageTotals } from './cost';
 import type { SessionHandlers, VoiceSession } from './types';
 
 /**
@@ -15,15 +16,37 @@ import type { SessionHandlers, VoiceSession } from './types';
  * -> int16 -> scheduled playback. See src/realtime/audio.ts for both halves.
  */
 
-function liveSocketUrl(modelKey: string): string {
+function liveSocketUrl(modelKey: string, language: string): string {
   const url = new URL('/api/live/gemini', window.location.href);
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
   url.searchParams.set('model', modelKey);
+  // A socket carries no body, so the setup the Worker sends on our behalf can
+  // only be parameterised through the query string.
+  url.searchParams.set('language', language);
   return url.toString();
+}
+
+/** One entry of promptTokensDetails / responseTokensDetails. */
+interface ModalityTokenCount {
+  modality?: string;
+  tokenCount?: number;
+}
+
+interface UsageMetadata {
+  totalTokenCount?: number;
+  promptTokensDetails?: ModalityTokenCount[];
+  responseTokensDetails?: ModalityTokenCount[];
+  /**
+   * Vertex spells the response side "candidates" where the Gemini API says
+   * "response". Both are read so the switch to Vertex does not silently zero
+   * the output half of every estimate.
+   */
+  candidatesTokensDetails?: ModalityTokenCount[];
 }
 
 interface LiveMessage {
   setupComplete?: Record<string, never>;
+  usageMetadata?: UsageMetadata;
   serverContent?: {
     modelTurn?: { parts?: Array<{ inlineData?: { data?: string; mimeType?: string } }> };
     inputTranscription?: { text?: string };
@@ -34,9 +57,37 @@ interface LiveMessage {
   goAway?: { timeLeft?: string };
 }
 
+/**
+ * Folds a usageMetadata frame into billing buckets.
+ *
+ * Unrecognised modalities are priced as audio. Google documents the details
+ * arrays as modality-tagged but does not enumerate the tags, and every other
+ * caveat on this readout already errs low — the Worker leg is unbilled, a dead
+ * socket loses the tail — so the one unknown left is rounded the expensive way
+ * rather than quietly dropped.
+ */
+function readUsage(meta: UsageMetadata): UsageTotals {
+  const usage = emptyUsage();
+
+  for (const entry of meta.promptTokensDetails ?? []) {
+    const count = entry.tokenCount ?? 0;
+    if (entry.modality === 'TEXT') usage.textInput += count;
+    else usage.audioInput += count;
+  }
+
+  for (const entry of meta.responseTokensDetails ?? meta.candidatesTokensDetails ?? []) {
+    const count = entry.tokenCount ?? 0;
+    if (entry.modality === 'TEXT') usage.textOutput += count;
+    else usage.audioOutput += count;
+  }
+
+  return usage;
+}
+
 export async function startGeminiSession(
   handlers: SessionHandlers,
   modelKey: string,
+  language: string,
 ): Promise<VoiceSession> {
   handlers.onStatus('connecting');
 
@@ -46,8 +97,34 @@ export async function startGeminiSession(
   // what keeps autoplay policy from suspending it later.
   await player.resume();
 
+  /**
+   * Cumulative or per-turn? Google's docs do not say.
+   *
+   * "The total number of consumed tokens" reads cumulative, and the field name
+   * agrees, but nothing in the reference commits to it — and the two readings
+   * differ by the whole length of the call. So both are accumulated and the
+   * stream itself decides: totals that only ever climb are a running total and
+   * the last frame wins; a total that drops proves the frames are per-turn, and
+   * from then on the sum is the answer.
+   */
+  let perTurn = false;
+  let summed = emptyUsage();
+  let latest = emptyUsage();
+  let highWater = 0;
+
+  const recordUsage = (meta: UsageMetadata) => {
+    const frame = readUsage(meta);
+    const total = meta.totalTokenCount ?? totalTokens(frame);
+    if (total < highWater) perTurn = true;
+    highWater = Math.max(highWater, total);
+
+    summed = addUsage(summed, frame);
+    latest = frame;
+    handlers.onUsage?.(perTurn ? summed : latest);
+  };
+
   let stopped = false;
-  const socket = new WebSocket(liveSocketUrl(modelKey));
+  const socket = new WebSocket(liveSocketUrl(modelKey, language));
   socket.binaryType = 'arraybuffer';
 
   const cleanup = () => {
@@ -94,6 +171,10 @@ export async function startGeminiSession(
       } catch {
         return;
       }
+
+      // Usage rides alongside whatever else the frame carries, including the
+      // frames we return early from below, so it is read first.
+      if (message.usageMetadata) recordUsage(message.usageMetadata);
 
       if (message.setupComplete) {
         handlers.onStatus('live');
