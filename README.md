@@ -90,9 +90,11 @@ npm run lint
 | SPA, `_headers`, `_redirects`, Git-integration deploys | working |
 | Same-origin gate (`403` on a forged Origin) | working |
 | `/api/session/openai` | mints ephemeral secrets correctly |
-| `/api/live/gemini` | proxies the Live socket; replaces the ephemeral-token design — see below |
+| `/api/live/gemini` | **working** — relays the Live socket; reaches `setupComplete` on both models |
+| `/api/live/models` | lists the ids Google will actually accept for `bidiGenerateContent` |
 | OpenAI voice conversation | **working** — confirmed from a browser on `gpt-realtime` |
-| Gemini voice conversation | needs a browser test against the new proxy |
+| Gemini handshake | **working** — 12/12 connections reached `setupComplete` |
+| Gemini audio in a browser | untested; needs a mic |
 
 ### Which model ids are actually confirmed
 
@@ -104,9 +106,14 @@ of a 3.1 id, and OpenAI's `client_secrets` minted a deliberate
 rejects a hand-rolled SDP offer before it reads the model, so that proves
 nothing either.
 
-`gpt-realtime` is confirmed by a real browser call. Everything else is marked
-`unverified` in the picker. Clear the flag as soon as a call connects with it —
-a stale marking misleads.
+`gpt-realtime` is confirmed by a real browser call. Both Gemini ids come from
+Google's own catalogue via `/api/live/models` and reach `setupComplete`, so they
+are confirmed too. Only `gpt-realtime-mini` is still marked `unverified` — one
+dropdown change away from the same treatment.
+
+Do not guess a Gemini id. Two rounds of plausible-looking guesses were both
+wrong, including `gemini-live-3.1-flash-preview`, whose word order looks right
+and is not. Ask `/api/live/models` instead.
 
 ### Why Gemini is proxied and OpenAI is not
 
