@@ -1,5 +1,6 @@
 import type { Provider } from './models';
 import type { UsageTotals } from './cost';
+import { UnauthorizedError, reportExpired } from './auth';
 
 export type { Provider };
 
@@ -76,6 +77,14 @@ export async function mintCredentials(
     } catch {
       // Non-JSON error page — the status alone is the best we can say.
     }
+
+    // The cookie lapsed or was cleared. Send the user back to the gate rather
+    // than reporting this as a session failure they can do nothing about.
+    if (response.status === 401) {
+      reportExpired();
+      throw new UnauthorizedError(message);
+    }
+
     throw new Error(message);
   }
 

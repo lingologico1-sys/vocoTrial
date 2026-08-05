@@ -1,5 +1,6 @@
 import { MicCapture, PcmPlayer, decodeBase64, encodeBase64 } from './audio';
 import { addUsage, emptyUsage, totalTokens, type UsageTotals } from './cost';
+import { UnauthorizedError, checkSession, reportExpired } from './auth';
 import type { SessionHandlers, VoiceSession } from './types';
 
 /**
@@ -94,8 +95,24 @@ export async function startGeminiSession(
   const mic = new MicCapture();
   const player = new PcmPlayer();
   // Creating the output context inside the click that started the session is
-  // what keeps autoplay policy from suspending it later.
+  // what keeps autoplay policy from suspending it later. Nothing may be awaited
+  // before this line, or the resume lands in a later task than the click.
   await player.resume();
+
+  /**
+   * The session cookie is checked here rather than being left to the upgrade.
+   *
+   * A WebSocket upgrade rejected with a 401 reaches the browser as an untyped
+   * error event with no status attached — the spec withholds it — so a lapsed
+   * cookie would otherwise surface as "could not reach the Gemini Live socket"
+   * and send someone debugging the relay instead of signing back in.
+   */
+  const { authed } = await checkSession();
+  if (!authed) {
+    player.close();
+    reportExpired();
+    throw new UnauthorizedError();
+  }
 
   /**
    * Cumulative or per-turn? Google's docs do not say.

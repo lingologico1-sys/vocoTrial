@@ -21,6 +21,15 @@ The one rule the whole design turns on: **the provider API keys never reach the
 browser.** Anything in a JS bundle is public, and a leaked Realtime key is a
 metered bill.
 
+The site is private, behind a single shared password. What that gate protects is
+the account, not the UI: a stranger who never loads the page can still spend the
+keys by calling `/api/*` directly, so the check lives in the middleware and the
+sign-in screen is only the polite version of it. The credential is an HttpOnly
+cookie carrying an HMAC of its own expiry rather than the password — a browser
+cannot set custom headers on a WebSocket handshake, and a cookie is the one
+credential that rides both the `fetch` and the socket. See
+[functions/api/auth/_cookie.ts](functions/api/auth/_cookie.ts).
+
 OpenAI lets us honour that cheaply: the Worker trades the key for a short-lived
 `ek_…` secret, and audio then flows browser-to-OpenAI with no hop through
 Cloudflare. Gemini cannot — its ephemeral tokens are refused on this account
@@ -29,7 +38,9 @@ the key private at the cost of a latency leg.
 
 | Path | What it does |
 | --- | --- |
-| [functions/api/_middleware.ts](functions/api/_middleware.ts) | Same-origin gate in front of every `/api/*` route; POST-only except WebSocket upgrades |
+| [functions/api/_middleware.ts](functions/api/_middleware.ts) | Same-origin **and** session-cookie gate in front of every `/api/*` route; POST-only except WebSocket upgrades |
+| [functions/api/auth/](functions/api/auth/) | Trades the site password for a signed session cookie |
+| [src/PasswordGate.tsx](src/PasswordGate.tsx) | The sign-in screen. Cosmetic — the middleware is what actually refuses |
 | [functions/api/session/openai.ts](functions/api/session/openai.ts) | Mints an OpenAI Realtime client secret (`ek_…`) |
 | [functions/api/live/gemini.ts](functions/api/live/gemini.ts) | Relays the Gemini Live socket to Google with the API key attached |
 | [functions/api/session/_agent.ts](functions/api/session/_agent.ts) | The agent persona, server-side so a visitor cannot rewrite it |
@@ -48,14 +59,19 @@ gates the build.
    pick `lingologico1-sys/vocoTrial`.
 2. Build command `npm run build`, output directory `dist`. Cloudflare reads the
    rest from [wrangler.toml](wrangler.toml).
-3. **Settings → Variables and Secrets**, add two **Secrets** (encrypted, not
+3. **Settings → Variables and Secrets**, add three **Secrets** (encrypted, not
    plain text) to Production *and* Preview:
+   - `SITE_PASSWORD`
    - `OPENAI_API_KEY`
    - `GOOGLE_API_KEY`
 
    They have to go in the dashboard: because `wrangler.toml` exists, Pages takes
    plain-text vars from that file and the dashboard will only accept Secrets.
 4. Push to `main`. Every push deploys; every PR gets a preview URL.
+
+Set `SITE_PASSWORD` **before** the first deploy that includes the gate. It fails
+closed, so a deployment without it locks out everyone, you included — the sign-in
+screen says as much rather than looking like a wrong password.
 
 Model ids are not configuration — they live in
 [src/realtime/models.ts](src/realtime/models.ts), because the picker and the
@@ -65,7 +81,7 @@ server allowlist have to agree and a var can only hold one value.
 
 ```bash
 npm install
-cp .dev.vars.example .dev.vars   # then paste in the two real keys
+cp .dev.vars.example .dev.vars   # then paste in the password and the two keys
 npm run dev:api                  # SPA + functions, which is what you want
 ```
 
@@ -89,6 +105,7 @@ npm run lint
 | --- | --- |
 | SPA, `_headers`, `_redirects`, Git-integration deploys | working |
 | Same-origin gate (`403` on a forged Origin) | working |
+| Password gate (`401` on every `/api/*` without a cookie, fetch and WebSocket alike) | working — verified against `wrangler pages dev`, including a tampered cookie and an unset `SITE_PASSWORD` |
 | `/api/session/openai` | mints ephemeral secrets correctly |
 | `/api/live/gemini` | **working** — relays the Live socket; reaches `setupComplete` on both models |
 | `/api/live/models` | lists the ids Google will actually accept for `bidiGenerateContent` |
