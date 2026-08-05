@@ -21,8 +21,13 @@ import { type GateEnv, json } from '../_middleware';
  * choose — see the setup handling below.
  */
 
+/**
+ * https, not wss. A Worker opens an outbound WebSocket by fetching with an
+ * Upgrade header, and the Fetch API refuses any scheme but http(s) — a wss://
+ * URL here throws "Fetch API cannot load" before the request is made.
+ */
 const UPSTREAM =
-  'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent';
+  'https://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent';
 
 export async function onRequest(
   context: EventContext<GateEnv, string, Record<string, unknown>>,
@@ -44,13 +49,29 @@ export async function onRequest(
     return json({ error: `Unknown Gemini model "${key}"`, code: 'bad_model' }, 400);
   }
 
-  const upstream = await fetch(`${UPSTREAM}?key=${env.GOOGLE_API_KEY}`, {
-    headers: { Upgrade: 'websocket' },
-  });
+  /**
+   * The key rides in the query string because that is the only credential form
+   * Google's Live endpoint accepts, so anything logged about this request has
+   * to be scrubbed first. It is not hypothetical: the wss:// bug above threw a
+   * TypeError whose message quoted the whole URL, and the key went straight
+   * into the Worker log with it.
+   */
+  const scrub = (text: string) => text.split(env.GOOGLE_API_KEY!).join('<redacted>');
+
+  const upstreamUrl = new URL(UPSTREAM);
+  upstreamUrl.searchParams.set('key', env.GOOGLE_API_KEY);
+
+  let upstream: Response;
+  try {
+    upstream = await fetch(upstreamUrl.toString(), { headers: { Upgrade: 'websocket' } });
+  } catch (error) {
+    console.error('gemini live fetch failed', scrub(error instanceof Error ? error.message : String(error)));
+    return json({ error: 'Could not reach Google', code: 'upstream' }, 502);
+  }
 
   const google = upstream.webSocket;
   if (!google) {
-    console.error('gemini live upgrade failed', upstream.status, await upstream.text());
+    console.error('gemini live upgrade failed', upstream.status, scrub(await upstream.text()));
     return json({ error: 'Google refused the socket', code: 'upstream' }, 502);
   }
 
