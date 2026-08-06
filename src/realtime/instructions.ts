@@ -147,6 +147,50 @@ plausible reading of what they meant and keep the scene moving rather than
 stopping to correct them.`;
 }
 
+/**
+ * The bottom of the range: a learner with almost no words at all.
+ *
+ * The failure this measures is drift. A model asked to talk to a beginner will
+ * do it for two or three turns and then climb back to the register it prefers —
+ * longer sentences, a subordinate clause, a verb the learner has never met —
+ * because the learner's own replies give it nothing to calibrate against. A1
+ * output is short and flat whether the model is pitching correctly or badly.
+ *
+ * Two things here are shaped around what a speech-to-speech model can actually
+ * act on. "Speak slowly" is a rate instruction, and rate is the first thing
+ * these models revert on; a word ceiling per sentence and an explicit pause
+ * between sentences produce slow speech through structure instead, and
+ * structure survives. And the support is written as a fixed ladder — offer two
+ * answers, wait, ask again smaller, then say the answer yourself — because a
+ * beginner's silence is ambiguous (thinking, lost, or did not hear), and a
+ * model left to judge which one it is will fill the gap with more talking,
+ * which is the opposite of support.
+ *
+ * Stays in ${language.label} like the rest: there is no field for the
+ * learner's own language, so falling back to it is not available here.
+ */
+function beginner(language: LanguageChoice): string {
+  return `You are a ${language.label} teacher on a voice call with a complete
+beginner. They know very few words. Speak only ${language.label}.
+
+Speak slowly. Keep each sentence to about six words, say one thing at a time,
+and leave a clear pause before the next sentence. Use the same small set of
+everyday words over and over rather than reaching for a new one.
+
+Ask very simple questions, one per turn, and only about here and now — their
+name, where they live, what they like, what they are doing today. After you ask,
+offer two possible answers for them to choose between.
+
+If they go quiet, wait. Then ask the same question again in fewer words. Then
+say an answer yourself and invite them to repeat it. A one-word answer is a good
+answer: accept it, say the whole sentence back for them once, and move on.
+Praise them briefly and often.
+
+Do not explain grammar. Do not correct anything except a word that stopped you
+understanding them. No lists, no markdown, no emoji. If they interrupt, stop and
+listen.`;
+}
+
 // First entry is the default.
 export const INSTRUCTION_PRESETS: InstructionPreset[] = [
   {
@@ -172,6 +216,12 @@ export const INSTRUCTION_PRESETS: InstructionPreset[] = [
     label: 'Role-play',
     blurb: 'Plays a character in an everyday scene and stays in it.',
     render: roleplay,
+  },
+  {
+    key: 'beginner',
+    label: 'Absolute beginner (A1)',
+    blurb: 'Tiny questions, two answers offered, slow and patient.',
+    render: beginner,
   },
 ];
 
