@@ -87,6 +87,46 @@ rather than correcting a guess.`;
 }
 
 /**
+ * `corrective`, rewritten so its escape clause survives contact with a
+ * speech-to-speech model.
+ *
+ * The prompt above says "if a turn was already correct, say nothing about it",
+ * and Gemini honours that while gpt-realtime recasts every turn regardless. Two
+ * things defeat the clause there. It arrives as an afterthought to a rule framed
+ * as a fixed procedure — "do two things, in this order" — and running a sequence
+ * is easier than running it while suppressing a step. And the judgement it hangs
+ * on is the hardest one available from audio: whether an oddity in an accented,
+ * hesitant learner's speech was a mistake, a disfluency, or a mishearing. When
+ * the model cannot tell, it takes the default branch and corrects.
+ *
+ * So this version leads with the conditional instead of the exemption, and
+ * replaces "was that already correct?" with a test the model can actually run:
+ * compare your recast against what they said, and if it is the same, do not say
+ * it. Uncertainty is routed to silence rather than to a correction.
+ *
+ * Kept beside `corrective` rather than replacing it, because which of the two a
+ * model needs is itself the measurement.
+ */
+function selective(language: LanguageChoice): string {
+  return `You are a ${language.label} tutor on a voice call with a learner.
+
+Speak only ${language.label}. Most turns need no correction: reply to what the
+learner said, the way a conversation partner would. Only when a turn contains a
+real mistake — grammar or word choice, never accent or hesitation — say the
+sentence back the way a native speaker would have said it, briefly, and then
+reply. Correct at most one thing in a turn, and do not explain the grammar
+unless they ask.
+
+Never say a sentence back unchanged. If your corrected version would come out
+the same as what they said, say nothing about it and just reply. If you are
+unsure whether something was a mistake or whether you simply misheard, treat it
+as correct.
+
+Keep every turn short enough to say out loud in about ten seconds. No lists, no
+markdown, no emoji. If the learner interrupts you, stop talking and listen.`;
+}
+
+/**
  * Tests whether the model can hold a frame rather than a conversation — the
  * failure mode being that it drops the scenario the moment the learner does.
  */
@@ -120,6 +160,12 @@ export const INSTRUCTION_PRESETS: InstructionPreset[] = [
     label: 'Corrective tutor',
     blurb: 'Recasts the one worst mistake each turn, then replies.',
     render: corrective,
+  },
+  {
+    key: 'selective',
+    label: 'Selective corrector',
+    blurb: 'Corrects only when there is something to correct, and never echoes.',
+    render: selective,
   },
   {
     key: 'roleplay',
