@@ -1,5 +1,11 @@
-import { agentInstructions } from './_agent';
-import { readJson, resolveLanguage, resolveModel } from './_resolve';
+import { openAiSession } from './_providerConfig';
+import {
+  readJson,
+  resolveInstructions,
+  resolveLanguage,
+  resolveModel,
+  resolveSettings,
+} from './_resolve';
 import { type GateEnv, json } from '../_middleware';
 
 /**
@@ -35,7 +41,8 @@ export async function onRequestPost(
   if (!resolved.ok) {
     return json({ error: resolved.error, code: 'bad_model' }, 400);
   }
-  const model = resolved.value;
+  const choice = resolved.value;
+  const model = choice.id;
 
   const chosen = resolveLanguage(body);
   if (!chosen.ok) {
@@ -43,44 +50,34 @@ export async function onRequestPost(
   }
   const language = chosen.value;
 
+  const written = resolveInstructions(body, language);
+  if (!written.ok) {
+    return json({ error: written.error, code: 'bad_instructions' }, 400);
+  }
+
+  const settings = resolveSettings(body, choice);
+
+  /**
+   * The env var is the fallback voice, not the voice. It stays because it is
+   * how a deployment sets its own default without a code change; a voice picked
+   * in the panel simply arrives already set in `settings` and wins.
+   *
+   * Everything else about the session — transcription, turn detection, speaking
+   * rate — is assembled in _providerConfig.ts, which is also where the reasoning
+   * behind each default lives.
+   */
+  const session = openAiSession(model, written.value, language, {
+    voice: env.OPENAI_REALTIME_VOICE || DEFAULT_VOICE,
+    ...settings,
+  });
+
   const upstream = await fetch(CLIENT_SECRETS_URL, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${env.OPENAI_API_KEY}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({
-      session: {
-        type: 'realtime',
-        model,
-        instructions: agentInstructions(language),
-        audio: {
-          // Without an input transcription model the API returns audio only,
-          // and the UI has nothing to show for what the user just said.
-          //
-          // whisper-1 is deliberate, not legacy. It transcribes the utterance
-          // whole rather than streaming it, so it can use the end of a sentence
-          // to make sense of the start — which is where a learner's speech is
-          // hardest to read. A streaming model would put words on screen sooner
-          // but commit to each guess before hearing what follows. The transcript
-          // arrives after the reply has begun; src/App.tsx orders turns by
-          // conversation item so that lag does not scramble the log.
-          //
-          // `language` stops it hedging between languages, which is the failure
-          // that costs a learner the most: a hesitant French sentence decoded as
-          // English comes back as plausible nonsense rather than as a mistake
-          // they can see. `prompt` is a style hint — see languages.ts.
-          input: {
-            transcription: {
-              model: 'whisper-1',
-              language: language.code,
-              prompt: language.sample,
-            },
-          },
-          output: { voice: env.OPENAI_REALTIME_VOICE || DEFAULT_VOICE },
-        },
-      },
-    }),
+    body: JSON.stringify({ session }),
   });
 
   if (!upstream.ok) {

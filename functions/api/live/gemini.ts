@@ -1,4 +1,5 @@
-import { agentInstructions } from '../session/_agent';
+import { geminiSetup } from '../session/_providerConfig';
+import { resolveInstructions, resolveSettings } from '../session/_resolve';
 import { findModel } from '../../../src/realtime/models';
 import { defaultLanguageCode, findLanguage } from '../../../src/realtime/languages';
 import { type GateEnv, json } from '../_middleware';
@@ -29,6 +30,36 @@ import { type GateEnv, json } from '../_middleware';
  */
 const UPSTREAM =
   'https://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent';
+
+/**
+ * How long to wait for the browser's config frame before setting up without it.
+ *
+ * A socket carries no request body, so instructions and settings arrive as the
+ * first frame the client sends rather than in the URL — they are far too long
+ * for a query string. That makes the handshake dependent on a client that knows
+ * to send one, and a cached older bundle does not. Rather than hang forever
+ * waiting, fall back to the defaults after this long and let the call proceed.
+ */
+const CONFIG_GRACE_MS = 3_000;
+
+/**
+ * Reads a `{"config": …}` opening frame, or reports that this is not one.
+ *
+ * `null` means "not a config frame" and is distinct from a config frame with
+ * nothing in it, which means "use the defaults" and is a perfectly ordinary
+ * thing for the client to send.
+ */
+function readConfigFrame(data: unknown): { config: unknown } | null {
+  if (typeof data !== 'string') return null;
+
+  try {
+    const parsed = JSON.parse(data) as Record<string, unknown> | null;
+    if (!parsed || typeof parsed !== 'object' || !('config' in parsed)) return null;
+    return { config: parsed.config ?? {} };
+  } catch {
+    return null;
+  }
+}
 
 export async function onRequest(
   context: EventContext<GateEnv, string, Record<string, unknown>>,
@@ -89,35 +120,6 @@ export async function onRequest(
   fromWorker.accept();
 
   /**
-   * The Worker sends setup itself, and drops any the browser tries to send.
-   *
-   * This is what the ephemeral token's `bidiGenerateContentSetup` used to
-   * guarantee. Without it, a visitor could open this socket and send their own
-   * system instruction, turning a metered key into a general-purpose assistant
-   * — the browser gets to stream audio, not to redefine the agent.
-   */
-  /**
-   * The language is carried by the system instruction alone, with no
-   * speechConfig.languageCode alongside it. Google documents that field as
-   * unsupported on native-audio models, which pick their language from the
-   * conversation — and one of the two models offered here is native audio, so
-   * setting it would break that call to configure the other one. Gemini's input
-   * transcription takes no language hint either way, so unlike the OpenAI path
-   * the choice steers what the agent *speaks*, not how the user is transcribed.
-   */
-  google.send(
-    JSON.stringify({
-      setup: {
-        model: `models/${choice.id}`,
-        generationConfig: { responseModalities: ['AUDIO'] },
-        systemInstruction: { parts: [{ text: agentInstructions(language) }] },
-        inputAudioTranscription: {},
-        outputAudioTranscription: {},
-      },
-    }),
-  );
-
-  /**
    * Forwards a frame, normalising whatever the runtime handed us.
    *
    * `event.data` is not always a string or ArrayBuffer here — Google's frames
@@ -148,7 +150,61 @@ export async function onRequest(
   const toGoogle = forwarder(google);
   const toClient = forwarder(fromWorker);
 
+  /**
+   * The Worker composes setup, from a config the browser is allowed to write.
+   *
+   * The client never sends a `setup` frame of its own — one arriving from that
+   * direction is still dropped below. That is not about the prompt any more,
+   * which the panel now sets on purpose: it is that `setup` also names the
+   * *model*, and the model is what decides which meter the key is spent
+   * against. The browser gets to say what the agent should do; the allowlist in
+   * models.ts says what it may cost.
+   *
+   * The language is carried by the system instruction alone — see the note in
+   * settings.ts on why no speechConfig.languageCode is sent. Gemini's input
+   * transcription takes no language hint either way, so unlike the OpenAI path
+   * the choice steers what the agent *speaks*, not how the user is transcribed.
+   */
+  let setupSent = false;
+
+  const sendSetup = (config: unknown): boolean => {
+    if (setupSent) return true;
+    setupSent = true;
+    clearTimeout(grace);
+
+    const written = resolveInstructions(config, language);
+    if (!written.ok) {
+      // The upgrade has already happened, so there is no JSON body left to
+      // refuse with. A close reason is the only channel that reaches the user,
+      // and src/realtime/gemini.ts surfaces it verbatim.
+      try {
+        fromWorker.close(1008, written.error);
+        google.close(1000, 'setup refused');
+      } catch {
+        /* already closed */
+      }
+      return false;
+    }
+
+    google.send(
+      JSON.stringify({
+        setup: geminiSetup(choice.id, written.value, resolveSettings(config, choice)),
+      }),
+    );
+    return true;
+  };
+
+  const grace = setTimeout(() => sendSetup(null), CONFIG_GRACE_MS);
+
   fromWorker.addEventListener('message', (event) => {
+    if (!setupSent) {
+      const frame = readConfigFrame(event.data);
+      // A config frame is consumed here; anything else means this client is not
+      // going to send one, so set up with the defaults and pass the frame on.
+      if (!sendSetup(frame ? frame.config : null)) return;
+      if (frame) return;
+    }
+
     if (typeof event.data === 'string' && event.data.includes('"setup"')) return;
     toGoogle(event.data);
   });
@@ -177,6 +233,11 @@ export async function onRequest(
   };
   bridgeClose(google, fromWorker);
   bridgeClose(fromWorker, google);
+
+  // A call that dies during the handshake must not leave the grace timer armed:
+  // it would fire into a closed socket and throw out of a bare setTimeout.
+  fromWorker.addEventListener('close', () => clearTimeout(grace));
+  google.addEventListener('close', () => clearTimeout(grace));
 
   return new Response(null, { status: 101, webSocket: toBrowser });
 }

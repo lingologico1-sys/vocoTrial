@@ -1,5 +1,10 @@
 import { addUsage, emptyUsage, type UsageTotals } from './cost';
-import { mintCredentials, type SessionHandlers, type VoiceSession } from './types';
+import {
+  mintCredentials,
+  type SessionConfig,
+  type SessionHandlers,
+  type VoiceSession,
+} from './types';
 
 /**
  * OpenAI Realtime over WebRTC.
@@ -77,10 +82,13 @@ export async function startOpenAiSession(
   handlers: SessionHandlers,
   modelKey: string,
   language: string,
+  config: SessionConfig = {},
 ): Promise<VoiceSession> {
   handlers.onStatus('connecting');
 
-  const { token, model } = await mintCredentials('openai', modelKey, language);
+  // The whole session — prompt, voice, turn detection — is configured on the
+  // credential, so nothing below has to know what the panel was set to.
+  const { token, model } = await mintCredentials('openai', modelKey, language, config);
 
   const pc = new RTCPeerConnection();
   const audio = new Audio();

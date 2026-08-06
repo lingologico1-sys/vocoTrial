@@ -1,7 +1,7 @@
 import { MicCapture, PcmPlayer, decodeBase64, encodeBase64 } from './audio';
 import { addUsage, emptyUsage, totalTokens, type UsageTotals } from './cost';
 import { UnauthorizedError, checkSession, reportExpired } from './auth';
-import type { SessionHandlers, VoiceSession } from './types';
+import type { SessionConfig, SessionHandlers, VoiceSession } from './types';
 
 /**
  * Gemini Live, through our own Worker.
@@ -20,9 +20,12 @@ import type { SessionHandlers, VoiceSession } from './types';
 function liveSocketUrl(modelKey: string, language: string): string {
   const url = new URL('/api/live/gemini', window.location.href);
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+  // Short, fixed-vocabulary keys, so the query string is the natural place for
+  // them. The prompt and the settings are not: a system instruction runs to
+  // thousands of characters, and URL length limits are exactly the kind of
+  // ceiling that holds in testing and fails on someone's longer prompt. Those
+  // go in the opening frame instead — see the send on open below.
   url.searchParams.set('model', modelKey);
-  // A socket carries no body, so the setup the Worker sends on our behalf can
-  // only be parameterised through the query string.
   url.searchParams.set('language', language);
   return url.toString();
 }
@@ -89,6 +92,7 @@ export async function startGeminiSession(
   handlers: SessionHandlers,
   modelKey: string,
   language: string,
+  config: SessionConfig = {},
 ): Promise<VoiceSession> {
   handlers.onStatus('connecting');
 
@@ -155,9 +159,17 @@ export async function startGeminiSession(
   };
 
   const ready = new Promise<void>((resolve, reject) => {
-    // No setup is sent from here. The Worker sends it the moment Google's side
-    // opens, and drops any setup arriving from this direction — otherwise the
-    // page could redefine the agent on a key it never gets to see.
+    /**
+     * The opening frame carries the configuration, and nothing else does.
+     *
+     * The Worker holds the upstream socket unconfigured until this arrives,
+     * then composes the `setup` itself: it still owns the model id and the key,
+     * so what goes in here is the prompt and the knobs, not the spend. A raw
+     * `setup` frame sent from this side is dropped on arrival.
+     */
+    socket.onopen = () => {
+      socket.send(JSON.stringify({ config }));
+    };
 
     socket.onerror = () => {
       reject(new Error('Could not reach the Gemini Live socket'));

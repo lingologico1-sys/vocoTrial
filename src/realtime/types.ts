@@ -1,8 +1,22 @@
 import type { Provider } from './models';
+import type { SessionSettings } from './settings';
 import type { UsageTotals } from './cost';
 import { UnauthorizedError, reportExpired } from './auth';
 
 export type { Provider };
+
+/**
+ * What the user configured, on its way to a provider.
+ *
+ * Both fields are optional and both are the client's to write — see
+ * instructions.ts on why the prompt is no longer server-only. Neither one
+ * chooses a model or a language: those still travel as keys the Worker looks
+ * up, because they are what decide the spend.
+ */
+export interface SessionConfig {
+  instructions?: string;
+  settings?: SessionSettings;
+}
 
 export type SessionStatus = 'idle' | 'connecting' | 'live' | 'closed' | 'error';
 
@@ -60,13 +74,16 @@ export async function mintCredentials(
   provider: Provider,
   modelKey: string,
   language: string,
+  config: SessionConfig = {},
 ): Promise<SessionCredentials> {
   const response = await fetch(`/api/session/${provider}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    // Keys, never a model id or a prompt — the Worker owns both mappings. See
-    // models.ts and languages.ts.
-    body: JSON.stringify({ model: modelKey, language }),
+    // Keys for the model and the language, never the ids themselves — the
+    // Worker owns both mappings. See models.ts and languages.ts. The prompt and
+    // the settings do travel as written, and are validated on arrival by
+    // functions/api/session/_resolve.ts.
+    body: JSON.stringify({ model: modelKey, language, ...config }),
   });
 
   if (!response.ok) {

@@ -43,11 +43,48 @@ the key private at the cost of a latency leg.
 | [src/PasswordGate.tsx](src/PasswordGate.tsx) | The sign-in screen. Cosmetic — the middleware is what actually refuses |
 | [functions/api/session/openai.ts](functions/api/session/openai.ts) | Mints an OpenAI Realtime client secret (`ek_…`) |
 | [functions/api/live/gemini.ts](functions/api/live/gemini.ts) | Relays the Gemini Live socket to Google with the API key attached |
-| [functions/api/session/_agent.ts](functions/api/session/_agent.ts) | The agent persona, server-side so a visitor cannot rewrite it |
+| [src/realtime/instructions.ts](src/realtime/instructions.ts) | The prompt presets, and the default the server falls back to |
+| [src/realtime/settings.ts](src/realtime/settings.ts) | Which provider knobs exist, which models take them, and the sanitiser |
+| [functions/api/session/_providerConfig.ts](functions/api/session/_providerConfig.ts) | Translates those settings into each provider's payload shape |
+| [src/SettingsPanel.tsx](src/SettingsPanel.tsx) | The panel, rendered from the settings schema rather than written out |
 | [src/realtime/openai.ts](src/realtime/openai.ts) | WebRTC session — the browser handles mic and playback |
 | [src/realtime/gemini.ts](src/realtime/gemini.ts) | WebSocket session — this code handles mic and playback |
 | [src/realtime/audio.ts](src/realtime/audio.ts) | 16 kHz capture and 24 kHz scheduled playback, Gemini only |
 | [public/worklets/pcm-capture.js](public/worklets/pcm-capture.js) | AudioWorklet: float32 → int16, batched to ~128 ms |
+
+## What a call can be configured with
+
+This is a rig for comparing realtime models as language tutors, so the prompt
+and the provider knobs are set per call, from the panel, and kept in
+`localStorage` between calls.
+
+**The prompt is the client's to write.** It used to be server-only, so that a
+visitor could not turn a metered key into their own chatbot — the right call for
+a public page, and the wrong one here, because two models cannot be compared on
+a prompt nobody is allowed to vary. The password gate is what keeps strangers
+off the account.
+
+What the client still may **not** send is a model id or a language code. Those
+travel as keys that the Worker looks up in [src/realtime/models.ts](src/realtime/models.ts)
+and [src/realtime/languages.ts](src/realtime/languages.ts), because the model
+decides which meter the key is spent against and the language reaches Whisper as
+free text. A prompt decides neither.
+
+The settings are declared once, in
+[src/realtime/settings.ts](src/realtime/settings.ts), and that one table drives
+the panel, the Worker's validation and the translation into each provider's
+payload. Applicability is per **model**, not per provider — native audio takes
+fields the half-cascade model rejects outright, and a rejected field fails the
+whole call at connect. Adding a knob means adding one entry there.
+
+Two consequences worth knowing:
+
+- Unset is a real state. An untouched control sends no field at all, rather than
+  sending the value that happens to be the provider's default today.
+- Gemini gets its configuration in the socket's **opening frame**, not the query
+  string — a system instruction is far too long for a URL. The Worker holds the
+  upstream socket unconfigured until that frame arrives, or for three seconds,
+  whichever comes first.
 
 ## First-time deploy
 

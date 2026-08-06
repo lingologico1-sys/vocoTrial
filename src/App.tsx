@@ -3,7 +3,15 @@ import { Mic, MicOff, PhoneOff, Radio } from 'lucide-react';
 import { startOpenAiSession } from './realtime/openai';
 import { startGeminiSession } from './realtime/gemini';
 import { defaultModelKey, findModel, visibleModels } from './realtime/models';
-import { LANGUAGES, defaultLanguageCode } from './realtime/languages';
+import { LANGUAGES, defaultLanguageCode, findLanguage } from './realtime/languages';
+import {
+  INSTRUCTION_PRESETS,
+  MAX_INSTRUCTIONS,
+  defaultPresetKey,
+  findPreset,
+} from './realtime/instructions';
+import type { SessionSettings } from './realtime/settings';
+import SettingsPanel from './SettingsPanel';
 import {
   RATES_VERIFIED_ON,
   estimateCost,
@@ -40,6 +48,40 @@ const IDLE_TIMEOUT_MS = 90_000;
 /** How often to test the clock. Coarse; nothing here needs to be prompt. */
 const IDLE_POLL_MS = 5_000;
 
+/**
+ * Where the prompt and the settings survive a reload.
+ *
+ * A trial is a sequence of calls you compare, and retyping a prompt between two
+ * of them is both tedious and a way to change the thing you were holding
+ * constant. Nothing here is a secret — the credentials live in an HttpOnly
+ * cookie precisely so that they never touch this store.
+ */
+const PREFS_KEY = 'vocotrial.prefs.v1';
+
+interface Prefs {
+  presetKey: string;
+  instructions: string;
+  edited: boolean;
+  settings: SessionSettings;
+}
+
+function renderPreset(presetKey: string, languageCode: string): string {
+  const preset = findPreset(presetKey) ?? INSTRUCTION_PRESETS[0];
+  const language = findLanguage(languageCode) ?? LANGUAGES[0];
+  return preset.render(language);
+}
+
+/** Anything malformed is discarded rather than repaired: it is only a cache. */
+function loadPrefs(): Partial<Prefs> {
+  try {
+    const raw = window.localStorage.getItem(PREFS_KEY);
+    const parsed: unknown = raw ? JSON.parse(raw) : null;
+    return parsed && typeof parsed === 'object' ? (parsed as Partial<Prefs>) : {};
+  } catch {
+    return {};
+  }
+}
+
 const STATUS_LABEL: Record<SessionStatus, string> = {
   idle: 'Not connected',
   connecting: 'Connecting…',
@@ -57,6 +99,20 @@ export default function App() {
   });
   // Not keyed by provider: the language is the user's, not the model's.
   const [language, setLanguage] = useState(defaultLanguageCode());
+
+  /**
+   * The prompt and the knobs. Shared across providers on purpose — running two
+   * models on the same instructions is the entire point of the rig, and the
+   * Worker drops whatever the chosen model does not accept.
+   */
+  const [prefs] = useState(loadPrefs);
+  const [presetKey, setPresetKey] = useState(prefs.presetKey ?? defaultPresetKey());
+  const [instructions, setInstructions] = useState(
+    () => prefs.instructions ?? renderPreset(prefs.presetKey ?? defaultPresetKey(), defaultLanguageCode()),
+  );
+  const [edited, setEdited] = useState(prefs.edited ?? false);
+  const [settings, setSettings] = useState<SessionSettings>(prefs.settings ?? {});
+
   const [status, setStatus] = useState<SessionStatus>('idle');
   const [detail, setDetail] = useState<string | null>(null);
   const [speaking, setSpeaking] = useState(false);
@@ -84,6 +140,29 @@ export default function App() {
 
   // A live session holds the microphone, so it must not survive the component.
   useEffect(() => () => session.current?.stop(), []);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        PREFS_KEY,
+        JSON.stringify({ presetKey, instructions, edited, settings } satisfies Prefs),
+      );
+    } catch {
+      // Private browsing, or a full quota. Losing the cache is not worth an error.
+    }
+  }, [presetKey, instructions, edited, settings]);
+
+  /**
+   * An untouched prompt follows the language picker; an edited one does not.
+   *
+   * Rewriting someone's own words because they switched from French to Italian
+   * would lose work, so the tracking stops the moment they type. Editing it back
+   * to the preset's exact text starts it again — see onInstructions below.
+   */
+  useEffect(() => {
+    if (edited) return;
+    setInstructions(renderPreset(presetKey, language));
+  }, [presetKey, language, edited]);
 
   const appendTranscript = useCallback((delta: TranscriptDelta) => {
     // Any transcript at all means somebody just said something.
@@ -137,13 +216,16 @@ export default function App() {
 
     try {
       const modelKey = modelKeys[provider];
+      // The settings go over as written and are checked on arrival, where the
+      // model is known: functions/api/session/_resolve.ts.
+      const config = { instructions, settings };
       // Set before awaiting: the clock starts at the moment of connecting, so a
       // call nobody ever speaks into still times out.
       lastActivity.current = Date.now();
       session.current =
         provider === 'openai'
-          ? await startOpenAiSession(handlers, modelKey, language)
-          : await startGeminiSession(handlers, modelKey, language);
+          ? await startOpenAiSession(handlers, modelKey, language, config)
+          : await startGeminiSession(handlers, modelKey, language, config);
     } catch (error) {
       session.current = null;
       setStatus('error');
@@ -183,8 +265,30 @@ export default function App() {
     session.current?.setMuted(next);
   };
 
+  /** Picking a preset replaces the prompt outright — that is what picking means. */
+  const choosePreset = (key: string) => {
+    setPresetKey(key);
+    setEdited(false);
+    setInstructions(renderPreset(key, language));
+  };
+
+  const writeInstructions = (text: string) => {
+    setInstructions(text);
+    // Typing it back to the preset's exact text puts it under tracking again.
+    setEdited(text !== renderPreset(presetKey, language));
+  };
+
+  const resetInstructions = () => {
+    setEdited(false);
+    setInstructions(renderPreset(presetKey, language));
+  };
+
   const busy = status === 'connecting';
   const live = status === 'live';
+  // The Worker refuses an over-long prompt too; catching it here saves a round
+  // trip and says so next to the button rather than in the status line.
+  const tooLong = instructions.length > MAX_INSTRUCTIONS;
+  const model = findModel(modelKeys[provider]) ?? visibleModels(provider)[0];
 
   // A reserved turn whose transcript never arrived holds its place in the
   // ordering but has nothing to draw.
@@ -281,6 +385,19 @@ export default function App() {
             ))}
           </select>
         </label>
+
+        <SettingsPanel
+          model={model}
+          disabled={live || busy}
+          presetKey={presetKey}
+          onPreset={choosePreset}
+          instructions={instructions}
+          onInstructions={writeInstructions}
+          edited={edited}
+          onResetInstructions={resetInstructions}
+          settings={settings}
+          onSettings={setSettings}
+        />
 
         <div className="flex items-center gap-3 rounded-lg border border-slate-800 px-4 py-3">
           <Radio
@@ -400,11 +517,12 @@ export default function App() {
             <button
               type="button"
               onClick={connect}
-              disabled={busy}
+              disabled={busy || tooLong}
+              title={tooLong ? `Instructions are limited to ${MAX_INSTRUCTIONS} characters` : undefined}
               className="flex w-full items-center justify-center gap-2 rounded-lg bg-sky-600 px-4 py-3 text-sm font-medium hover:bg-sky-500 disabled:opacity-50"
             >
               <Mic size={16} />
-              {busy ? 'Connecting…' : 'Start call'}
+              {busy ? 'Connecting…' : tooLong ? 'Instructions too long' : 'Start call'}
             </button>
           )}
         </div>

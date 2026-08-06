@@ -1,9 +1,11 @@
-import { findModel, type Provider } from '../../../src/realtime/models';
+import { findModel, type ModelChoice, type Provider } from '../../../src/realtime/models';
 import {
   defaultLanguageCode,
   findLanguage,
   type LanguageChoice,
 } from '../../../src/realtime/languages';
+import { MAX_INSTRUCTIONS, defaultInstructions } from '../../../src/realtime/instructions';
+import { sanitizeSettings, type SessionSettings } from '../../../src/realtime/settings';
 
 /**
  * What a lookup gives back. The `ok` flag is a literal on purpose: a union
@@ -22,7 +24,7 @@ type Resolved<T> = { ok: true; value: T } | { ok: false; error: string };
  * caller could hand the OpenAI route a Gemini key and mint against whichever
  * id happened to be in the table.
  */
-export function resolveModel(body: unknown, provider: Provider): Resolved<string> {
+export function resolveModel(body: unknown, provider: Provider): Resolved<ModelChoice> {
   const key = (body as { model?: unknown } | null)?.model;
 
   if (typeof key !== 'string' || !key) {
@@ -35,7 +37,9 @@ export function resolveModel(body: unknown, provider: Provider): Resolved<string
     return { ok: false, error: `Model "${key}" is not a ${provider} model` };
   }
 
-  return { ok: true, value: choice.id };
+  // The whole choice, not just the id: which settings a request may carry
+  // depends on the model, not only on the provider. See settings.ts.
+  return { ok: true, value: choice };
 }
 
 /**
@@ -64,6 +68,56 @@ export function resolveLanguage(body: unknown): Resolved<LanguageChoice> {
   if (!choice) return { ok: false, error: `Unsupported language "${code}"` };
 
   return { ok: true, value: choice };
+}
+
+/**
+ * Takes the caller's system instructions, or supplies the default.
+ *
+ * The client is allowed to write this one. That is a deliberate reversal: the
+ * prompt used to be server-only so that a visitor could not repurpose a metered
+ * key, which was the right call for a public page and the wrong one for a
+ * private rig whose entire job is comparing models on prompts you vary. The
+ * password gate is what keeps strangers off the account now; see
+ * src/realtime/instructions.ts.
+ *
+ * What is still refused from the client is the model key and the language code.
+ * Those decide what gets spent and what reaches a provider as free text.
+ */
+export function resolveInstructions(body: unknown, language: LanguageChoice): Resolved<string> {
+  const raw = (body as { instructions?: unknown } | null)?.instructions;
+
+  if (raw === undefined || raw === null || raw === '') {
+    return { ok: true, value: defaultInstructions(language) };
+  }
+
+  if (typeof raw !== 'string') {
+    return { ok: false, error: 'Instructions must be text' };
+  }
+
+  const text = raw.trim();
+  if (!text) return { ok: true, value: defaultInstructions(language) };
+
+  if (text.length > MAX_INSTRUCTIONS) {
+    return {
+      ok: false,
+      error: `Instructions are limited to ${MAX_INSTRUCTIONS} characters`,
+    };
+  }
+
+  return { ok: true, value: text };
+}
+
+/**
+ * Reduces the caller's settings to what this model accepts.
+ *
+ * Never fails. Unknown keys are dropped, numbers are clamped and enums are
+ * checked against the same table the picker renders from, so the worst a bad
+ * settings object can do is fall back to the provider's own defaults. A 400
+ * here would be worse than useless: it would reject a call over a knob the
+ * caller could simply have left alone.
+ */
+export function resolveSettings(body: unknown, model: ModelChoice): SessionSettings {
+  return sanitizeSettings((body as { settings?: unknown } | null)?.settings, model);
 }
 
 /** The default is a code in the same list, so this cannot miss. */
