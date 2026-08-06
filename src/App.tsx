@@ -13,10 +13,14 @@ import {
 import type { SessionSettings } from './realtime/settings';
 import SettingsPanel from './SettingsPanel';
 import {
+  MIN_PROJECTION_SECONDS,
   RATES_VERIFIED_ON,
   estimateCost,
+  formatDuration,
   formatTokens,
   formatUsd,
+  projectHour,
+  speakingTime,
   totalTokens,
   type UsageTotals,
 } from './realtime/cost';
@@ -125,6 +129,14 @@ export default function App() {
    * silently reprice a finished call the instant the user browsed the dropdown.
    */
   const [billedModel, setBilledModel] = useState<string | null>(null);
+  /**
+   * How long the finished call was live, in seconds.
+   *
+   * Timed from `live` rather than from the button, because the wait for a
+   * credential and an SDP round trip bills nothing and would flatter an hourly
+   * projection that divides by it.
+   */
+  const [callSeconds, setCallSeconds] = useState<number | null>(null);
 
   const session = useRef<VoiceSession | null>(null);
   const log = useRef<HTMLDivElement>(null);
@@ -133,6 +145,8 @@ export default function App() {
    * written on nearly every audio frame and nothing renders from it.
    */
   const lastActivity = useRef(Date.now());
+  /** When the call went live, for the clock above. Null between calls. */
+  const wentLive = useRef<number | null>(null);
 
   useEffect(() => {
     log.current?.scrollTo({ top: log.current.scrollHeight, behavior: 'smooth' });
@@ -195,13 +209,22 @@ export default function App() {
     setDetail(null);
     setMuted(false);
     setUsage(null);
+    setCallSeconds(null);
+    wentLive.current = null;
     setBilledModel(findModel(modelKeys[provider])?.id ?? null);
 
     const handlers = {
       onStatus: (next: SessionStatus, message?: string) => {
         setStatus(next);
         setDetail(message ?? null);
+        // A provider may report `live` more than once; the first one is when
+        // the meter started running.
+        if (next === 'live' && wentLive.current === null) wentLive.current = Date.now();
         if (next === 'closed' || next === 'error') {
+          if (wentLive.current !== null) {
+            setCallSeconds((Date.now() - wentLive.current) / 1000);
+            wentLive.current = null;
+          }
           session.current = null;
           setSpeaking(false);
         }
@@ -301,6 +324,10 @@ export default function App() {
       ? {
           usage,
           cost: estimateCost(billedModel, usage),
+          // Null only if the call never reached `live`, which usage this side of
+          // zero makes unlikely — but the clock is not worth faking if it does.
+          time: callSeconds === null ? null : speakingTime(billedModel, usage, callSeconds),
+          hourly: callSeconds === null ? null : projectHour(billedModel, usage, callSeconds),
           truncated: status === 'error',
           // The relay leg is a property of the call that ran, so it is read off
           // the billed model for the same reason the rates are.
@@ -454,6 +481,33 @@ export default function App() {
               </span>
             </div>
 
+            {summary.time && (
+              <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
+                <span title="Wall clock, from the moment the call went live to the moment it ended">
+                  Call length{' '}
+                  <span className="font-mono text-slate-300">
+                    {formatDuration(summary.time.callSeconds)}
+                  </span>
+                </span>
+                {summary.time.userSeconds !== null && (
+                  <span title="Derived from your audio input tokens, which are billed per second of speech">
+                    You spoke{' '}
+                    <span className="font-mono text-slate-300">
+                      ≈{formatDuration(summary.time.userSeconds)}
+                    </span>
+                  </span>
+                )}
+                {summary.time.agentSeconds !== null && (
+                  <span title="Derived from the audio output tokens — the speech you actually heard">
+                    Agent spoke{' '}
+                    <span className="font-mono text-slate-300">
+                      ≈{formatDuration(summary.time.agentSeconds)}
+                    </span>
+                  </span>
+                )}
+              </div>
+            )}
+
             {summary.cost.priced ? (
               <table className="mt-3 w-full text-xs text-slate-400">
                 <tbody>
@@ -481,6 +535,31 @@ export default function App() {
               <p className="mt-2 text-xs text-slate-500">
                 {formatTokens(totalTokens(summary.usage))} tokens on {billedModel}, which has
                 no rates in the table.
+              </p>
+            )}
+
+            {summary.hourly && (
+              <div className="mt-3 border-t border-slate-800 pt-3">
+                <div className="flex items-baseline justify-between text-xs">
+                  <span className="text-slate-400">An hour of this conversation</span>
+                  <span className="font-mono text-slate-100">
+                    {formatUsd(summary.hourly.usd)}
+                  </span>
+                </div>
+                <p className="mt-1 text-[11px] leading-relaxed text-slate-600">
+                  This call&rsquo;s spend per second, stretched to 60 minutes. Expect more:
+                  every turn re-sends the conversation so far, so an untrimmed, uncached
+                  hour reaches {formatUsd(summary.hourly.ceilingUsd)}. Caching and the
+                  providers&rsquo; own context trimming pull it back towards the first
+                  figure.
+                </p>
+              </div>
+            )}
+
+            {summary.time && !summary.hourly && summary.cost.priced && (
+              <p className="mt-3 text-[11px] leading-relaxed text-slate-600">
+                Too short to project an hour from — under {MIN_PROJECTION_SECONDS}s, the
+                greeting and the system prompt are most of the bill.
               </p>
             )}
 

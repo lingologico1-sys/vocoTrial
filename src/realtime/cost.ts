@@ -97,6 +97,139 @@ const RATES: Record<string, ModelRates> = {
   },
 };
 
+/**
+ * How much audio one token stands for, tokens per second.
+ *
+ * Neither provider bills speech by the word: audio is cut into fixed slices and
+ * each slice is a token, so a token count divided by these numbers is a length
+ * of speech. That is the only clock we have on the *content* of a call — the
+ * wall clock knows how long the connection was open, not who was talking.
+ *
+ * Input and output differ on OpenAI (one token per 100 ms of the user, one per
+ * 50 ms of the assistant) and are the same on Gemini.
+ *
+ * Verified 2026-08-06 against:
+ *  - OpenAI Realtime pricing notes: 1 min of user speech = 600 tokens, 1 min of
+ *    assistant speech = 1,200 tokens
+ *  - ai.google.dev/gemini-api/docs/tokens: "Audio: 32 tokens per second"
+ */
+export const AUDIO_RATES_VERIFIED_ON = '2026-08-06';
+
+const AUDIO_TOKENS_PER_SECOND: Record<string, { input: number; output: number }> = {
+  'gpt-realtime': { input: 10, output: 20 },
+  'gpt-realtime-mini': { input: 10, output: 20 },
+  'gemini-3.1-flash-live-preview': { input: 32, output: 32 },
+  'gemini-2.5-flash-native-audio-latest': { input: 32, output: 32 },
+};
+
+export interface SpeakingTime {
+  /** Wall clock: the call was live this long. Measured, not derived. */
+  callSeconds: number;
+  /** Seconds the user was talking, or null when the tokens cannot say. */
+  userSeconds: number | null;
+  /** Seconds the agent was talking, or null when the tokens cannot say. */
+  agentSeconds: number | null;
+}
+
+/**
+ * Turns audio tokens back into seconds of speech.
+ *
+ * The agent's side is trustworthy: output audio is generated once and billed
+ * once, so those tokens are exactly the speech the user heard.
+ *
+ * The user's side is not, always. Both APIs re-send the conversation so far as
+ * input on every turn, which means the same second of the user's speech can be
+ * charged for many times over — on the Gemini path, where nothing is cached, it
+ * is charged on every subsequent turn. Dividing that by 32 measures how often
+ * the model re-read the call, not how long anyone spoke. OpenAI splits the
+ * re-read out as cached tokens, which is why only the uncached bucket is used
+ * here; where even that exceeds the length of the call, the figure is withheld
+ * rather than shown as a number that cannot be true.
+ */
+export function speakingTime(
+  modelId: string,
+  usage: UsageTotals,
+  callSeconds: number,
+): SpeakingTime {
+  const rate = AUDIO_TOKENS_PER_SECOND[modelId];
+  if (!rate) return { callSeconds, userSeconds: null, agentSeconds: null };
+
+  const spoken = usage.audioInput / rate.input;
+  // A second of tolerance: the call clock starts a beat before the first audio
+  // frame, and a derived figure a hair over the wall clock is rounding, not a
+  // re-read.
+  const plausible = spoken <= callSeconds + 1;
+
+  return {
+    callSeconds,
+    userSeconds: plausible ? spoken : null,
+    agentSeconds: usage.audioOutput / rate.output,
+  };
+}
+
+/**
+ * Below this, an hour is too far to extrapolate to.
+ *
+ * A 10-second call scaled to an hour multiplies whatever happened in it by 360,
+ * including the fixed cost of the system prompt and the one greeting the agent
+ * managed. The projection would be dominated by the parts that do not repeat.
+ */
+export const MIN_PROJECTION_SECONDS = 30;
+
+export interface HourlyProjection {
+  /** This call's spend per second, times an hour. */
+  usd: number;
+  /**
+   * The same hour if the context is never trimmed — see projectHour. The
+   * honest upper bound, not a second guess at the same number.
+   */
+  ceilingUsd: number;
+}
+
+function scaleUsage(usage: UsageTotals, inputFactor: number, outputFactor: number): UsageTotals {
+  return {
+    textInput: usage.textInput * inputFactor,
+    cachedTextInput: usage.cachedTextInput * inputFactor,
+    audioInput: usage.audioInput * inputFactor,
+    cachedAudioInput: usage.cachedAudioInput * inputFactor,
+    textOutput: usage.textOutput * outputFactor,
+    audioOutput: usage.audioOutput * outputFactor,
+  };
+}
+
+/**
+ * What an hour of this same conversation would cost.
+ *
+ * Two numbers, because the honest answer is a range and picking one would hide
+ * which end of it a long call lands on:
+ *
+ *  - `usd` scales everything with time. It is what "this call, but longer"
+ *    means if each turn costs what the average turn of this call cost.
+ *  - `ceilingUsd` scales the *input* buckets with the square of time, because
+ *    every turn re-sends the whole conversation so far: twice the call is twice
+ *    as many turns each carrying twice the history. Output is generated once
+ *    and stays linear.
+ *
+ * Reality sits between them. The square is only reached if nothing intervenes,
+ * and something usually does — caching discounts the re-read prefix, and both
+ * providers slide or compress the context window once a call runs long.
+ */
+export function projectHour(
+  modelId: string,
+  usage: UsageTotals,
+  callSeconds: number,
+): HourlyProjection | null {
+  if (callSeconds < MIN_PROJECTION_SECONDS) return null;
+  if (!RATES[modelId]) return null;
+
+  const ratio = 3600 / callSeconds;
+
+  return {
+    usd: estimateCost(modelId, scaleUsage(usage, ratio, ratio)).usd,
+    ceilingUsd: estimateCost(modelId, scaleUsage(usage, ratio * ratio, ratio)).usd,
+  };
+}
+
 export function emptyUsage(): UsageTotals {
   return {
     textInput: 0,
@@ -195,4 +328,15 @@ export function formatUsd(usd: number): string {
 
 export function formatTokens(tokens: number): string {
   return tokens.toLocaleString('en-US');
+}
+
+/** Seconds as "42s", "4m 12s", "1h 06m" — whichever two units read fastest. */
+export function formatDuration(seconds: number): string {
+  const whole = Math.round(seconds);
+  if (whole < 60) return `${whole}s`;
+
+  const minutes = Math.floor(whole / 60);
+  if (minutes < 60) return `${minutes}m ${String(whole % 60).padStart(2, '0')}s`;
+
+  return `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, '0')}m`;
 }
