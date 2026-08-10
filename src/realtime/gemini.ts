@@ -220,6 +220,7 @@ export async function startGeminiSession(
       if (content.interrupted) {
         player.clear();
         handlers.onSpeaking?.(false);
+        handlers.onInterrupted?.();
       }
 
       if (content.inputTranscription?.text) {
@@ -231,6 +232,14 @@ export async function startGeminiSession(
           role: 'agent',
           text: content.outputTranscription.text,
           done: false,
+          /**
+           * Read *before* the audio in this same frame is enqueued below, so
+           * the stamp is when that audio starts rather than when it ends. The
+           * two describe the same moment of speech — Google sends the words
+           * alongside the sound of them — and the queue is what makes them
+           * arrive early together.
+           */
+          at: player.scheduledAt(),
         });
       }
 
@@ -243,7 +252,10 @@ export async function startGeminiSession(
 
       if (content.turnComplete) {
         handlers.onTranscript({ role: 'user', text: '', done: true });
-        handlers.onTranscript({ role: 'agent', text: '', done: true });
+        // Stamped like the words were, so a consumer holding the turn back to
+        // match the audio closes it when the audio ends rather than when the
+        // socket says so — which is seconds earlier.
+        handlers.onTranscript({ role: 'agent', text: '', done: true, at: player.scheduledAt() });
       }
     };
   });
@@ -273,6 +285,8 @@ export async function startGeminiSession(
 
   return {
     provider: 'gemini',
+    // Non-null by here: resume() built the context before anything was awaited.
+    tap: player.tap(),
     setMuted: (muted) => mic.setMuted(muted),
     stop: () => {
       cleanup();

@@ -1,9 +1,11 @@
 import type { Provider } from './models';
 import type { SessionSettings } from './settings';
 import type { UsageTotals } from './cost';
+import type { AudioTap } from './audio';
 import { UnauthorizedError, reportExpired } from './auth';
 
 export type { Provider };
+export type { AudioTap };
 
 /**
  * What the user configured, on its way to a provider.
@@ -34,6 +36,18 @@ export interface TranscriptDelta {
   text: string;
   /** True when the turn is finished and the next delta starts a new one. */
   done: boolean;
+  /**
+   * When this text will be *heard*, on the session's AudioTap clock.
+   *
+   * Only the agent side, and only where the transport schedules its own
+   * playback — which today means Gemini. Its audio is queued seconds ahead of
+   * real time, and the transcript arrives on the same socket without waiting
+   * for it, so text rendered on arrival races the voice. A consumer that wants
+   * them together holds each delta until `tap.now()` reaches this.
+   *
+   * Absent means "no better information than now": render it immediately.
+   */
+  at?: number;
 }
 
 export interface SessionHandlers {
@@ -41,6 +55,15 @@ export interface SessionHandlers {
   onTranscript: (delta: TranscriptDelta) => void;
   /** The agent started or stopped speaking — drives the level indicator. */
   onSpeaking?: (speaking: boolean) => void;
+  /**
+   * The user talked over the agent, and every unplayed sound was dropped.
+   *
+   * Distinct from onSpeaking(false), which also fires when a turn simply ends.
+   * Anything holding agent output back to match the audio — see `at` above —
+   * has to discard what it was holding here, or it will go on to display words
+   * that were cut off and never spoken.
+   */
+  onInterrupted?: () => void;
   /**
    * Running totals for the call so far, pushed every time the provider reports
    * usage rather than once at the end. A call that dies mid-flight never sends
@@ -57,6 +80,12 @@ export interface VoiceSession {
   readonly provider: Provider;
   setMuted: (muted: boolean) => void;
   stop: () => void;
+  /**
+   * The agent's audio output, for anything that has to move in time with it.
+   * Absent on transports that play their own audio out of reach — WebRTC hands
+   * the stream to an element, so the OpenAI path has nothing to offer here.
+   */
+  readonly tap?: AudioTap | null;
 }
 
 export interface SessionCredentials {
