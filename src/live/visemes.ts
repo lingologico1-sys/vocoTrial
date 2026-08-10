@@ -1,4 +1,4 @@
-import type { AudioTap } from '../realtime/audio';
+import { SPEECH_BAND, type AudioTap } from '../realtime/audio';
 
 /**
  * Turning the sound of a voice into a mouth shape.
@@ -104,6 +104,94 @@ export interface MouthFrame {
   level: number;
 }
 
+/**
+ * The two measurements a mouth is made of, however they were obtained.
+ *
+ * Everything downstream — the running peak, the smoothing, the thresholds, the
+ * hold — works off this pair and nothing else. That is what makes the two
+ * drivers below comparable: they differ in *when* the numbers describe, and in
+ * nothing else.
+ */
+export interface Features {
+  /** Root-mean-square amplitude, 0 to 1. */
+  rms: number;
+  /** Spectral centroid in Hz, or null when there was too little to place one. */
+  centroid: number | null;
+}
+
+export interface FeatureSource {
+  read(): Features;
+}
+
+export type MouthDriver = 'reactive' | 'scheduled';
+
+/**
+ * Reactive: measure the audio as it goes past.
+ *
+ * An AnalyserNode across the output, read once per animation frame. Simple, and
+ * it needs to know nothing about how the audio got there — it would work
+ * unchanged on a WebRTC stream. Its limit is structural: the window it reports
+ * on has already been rendered, so the reading is of sound that has happened,
+ * and it can never be asked about sound that has not.
+ */
+export function reactiveFeatures(tap: AudioTap): FeatureSource {
+  const waveform = new Float32Array(tap.waveformSize);
+  const spectrum = new Float32Array(tap.binCount);
+  const low = Math.max(1, Math.floor(SPEECH_BAND.lowHz / tap.binHz));
+  const high = Math.min(tap.binCount - 1, Math.ceil(SPEECH_BAND.highHz / tap.binHz));
+
+  return {
+    read(): Features {
+      tap.readWaveform(waveform);
+      let energy = 0;
+      for (let i = 0; i < waveform.length; i++) energy += waveform[i] * waveform[i];
+      const rms = Math.sqrt(energy / waveform.length);
+
+      tap.readSpectrumDb(spectrum);
+      let weighted = 0;
+      let total = 0;
+      for (let i = low; i <= high; i++) {
+        // Back to linear magnitude. The analyser reports decibels, and a
+        // centroid weighted by decibels is not the same centroid — the log
+        // scale lifts quiet high bins until they drag it upwards. The scheduled
+        // driver measures linear magnitude, so this has to as well or the two
+        // would disagree about roundness for a reason that is not timing.
+        const magnitude = 10 ** (spectrum[i] / 20);
+        weighted += magnitude * i * tap.binHz;
+        total += magnitude;
+      }
+
+      return { rms, centroid: total > 1e-6 ? weighted / total : null };
+    },
+  };
+}
+
+/**
+ * Scheduled: measure the audio before it plays, and read it back on the clock.
+ *
+ * The envelope is computed in PcmPlayer as chunks arrive, stamped with when
+ * each slice will be heard. This looks the current moment up in it, which buys
+ * two things the analyser cannot offer. The reading is centred on the instant
+ * asked about rather than trailing it, and the instant asked about may be in
+ * the future — so the mouth can begin a shape before the sound arrives, which
+ * is what real articulation does and what animators do by hand.
+ *
+ * `outputLatency` is subtracted because `now()` is when the graph renders, not
+ * when anyone hears it. Left in, the mouth would lead by however far the
+ * speakers are behind — a few milliseconds wired, a great deal over Bluetooth.
+ *
+ * @param lookahead Seconds to run ahead by, read fresh so it can be tuned live.
+ */
+export function scheduledFeatures(tap: AudioTap, lookahead: () => number): FeatureSource {
+  return {
+    read(): Features {
+      const sample = tap.sampleAt(tap.now() - tap.outputLatency() + lookahead());
+      // Nothing scheduled at that moment is not a failure; it is silence.
+      return sample ?? { rms: 0, centroid: null };
+    },
+  };
+}
+
 /** Below this share of the running peak, treat the frame as silence. */
 const SILENCE = 0.12;
 /** Openness thresholds, as a share of the running peak. */
@@ -113,10 +201,6 @@ const WIDE = 0.62;
 /** Centroid, in Hz, below which a vowel reads as rounded and above as spread. */
 const ROUND_BELOW = 900;
 const SPREAD_ABOVE = 1150;
-
-/** The band the centroid is measured over. Outside it is rumble and hiss. */
-const CENTROID_LO_HZ = 200;
-const CENTROID_HI_HZ = 5000;
 
 /**
  * Time constants, in seconds. A mouth opens far faster than it closes, and
@@ -155,11 +239,6 @@ function ease(dt: number, tau: number): number {
  * looks like speech from one that flickers.
  */
 export class MouthAnalyser {
-  private readonly waveform: Uint8Array<ArrayBuffer>;
-  private readonly spectrum: Uint8Array<ArrayBuffer>;
-  private readonly loBin: number;
-  private readonly hiBin: number;
-
   private level = 0;
   private peak = PEAK_FLOOR;
   private shape: LipShape = { ...VISEMES.rest };
@@ -168,23 +247,23 @@ export class MouthAnalyser {
   private rounded = true;
   private heldFor = 0;
 
-  constructor(private readonly tap: AudioTap) {
-    this.waveform = new Uint8Array(tap.waveformSize);
-    this.spectrum = new Uint8Array(tap.binCount);
-    this.loBin = Math.max(1, Math.floor(CENTROID_LO_HZ / tap.binHz));
-    this.hiBin = Math.min(tap.binCount - 1, Math.ceil(CENTROID_HI_HZ / tap.binHz));
+  constructor(private source: FeatureSource) {}
+
+  /**
+   * Swaps where the numbers come from, keeping everything learned so far.
+   *
+   * Replacing the analyser outright would reset the running peak and the
+   * smoothing, so every switch would be followed by a second of the mouth
+   * finding its feet — which is exactly the moment someone comparing the two
+   * drivers is watching.
+   */
+  setSource(source: FeatureSource): void {
+    this.source = source;
   }
 
   /** @param dt Seconds since the previous frame. */
   read(dt: number): MouthFrame {
-    this.tap.readWaveform(this.waveform);
-
-    let sum = 0;
-    for (let i = 0; i < this.waveform.length; i++) {
-      const sample = (this.waveform[i] - 128) / 128;
-      sum += sample * sample;
-    }
-    const rms = Math.sqrt(sum / this.waveform.length);
+    const { rms, centroid } = this.source.read();
 
     // Rises instantly to a new peak and forgets it slowly, so the reference
     // tracks the voice rather than the loudest moment of the whole call.
@@ -194,7 +273,7 @@ export class MouthAnalyser {
     this.level += (target - this.level) * ease(dt, target > this.level ? ATTACK : RELEASE);
 
     this.heldFor += dt;
-    const next = this.classify();
+    const next = this.classify(centroid);
     // A big jump — silence straight to a shout — is a real event and jumps the
     // queue; everything else waits out the hold so the shape cannot flicker.
     if (next !== this.viseme && (this.heldFor >= MIN_HOLD || this.isJump(next))) {
@@ -221,10 +300,10 @@ export class MouthAnalyser {
     return { viseme: 'rest', shape: this.shape, level: 0 };
   }
 
-  private classify(): Viseme {
+  private classify(centroid: number | null): Viseme {
     if (this.level < SILENCE) return 'rest';
 
-    this.rounded = this.readRoundness();
+    this.rounded = this.readRoundness(centroid);
 
     if (this.level >= WIDE) return this.rounded ? 'oh' : 'aa';
     if (this.level >= MID) return this.rounded ? 'uh' : 'ee';
@@ -238,22 +317,10 @@ export class MouthAnalyser {
    * mouth does to a voice — it lengthens the front cavity and drops the
    * resonance. Bright sounds (ee, s, sh) sit high and read as spread.
    */
-  private readRoundness(): boolean {
-    this.tap.readSpectrum(this.spectrum);
-
-    let weighted = 0;
-    let total = 0;
-    for (let i = this.loBin; i <= this.hiBin; i++) {
-      const magnitude = this.spectrum[i];
-      weighted += magnitude * i * this.tap.binHz;
-      total += magnitude;
-    }
-
-    // Nothing in the band worth measuring — keep whatever we last decided
-    // rather than inventing a centroid out of noise.
-    if (total < 1) return this.rounded;
-
-    const centroid = weighted / total;
+  private readRoundness(centroid: number | null): boolean {
+    // Nothing worth measuring — keep whatever we last decided rather than
+    // inventing a centroid out of noise.
+    if (centroid === null) return this.rounded;
     if (centroid < ROUND_BELOW) return true;
     if (centroid > SPREAD_ABOVE) return false;
     return this.rounded;

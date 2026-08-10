@@ -7,6 +7,7 @@ import { INSTRUCTION_PRESETS, defaultPresetKey, findPreset } from '../realtime/i
 import type { AudioTap, SessionStatus, TranscriptDelta, VoiceSession } from '../realtime/types';
 import Stage from './Stage';
 import { RevealQueue } from './reveal';
+import type { MouthDriver } from './visemes';
 import { tailSentences } from './text';
 
 /**
@@ -34,7 +35,32 @@ const PREFS_KEY = 'vocotrial.live.v1';
 interface Prefs {
   language: string;
   presetKey: string;
+  driver: MouthDriver;
+  lookaheadMs: number;
 }
+
+/**
+ * The two ways of driving the mouth, side by side.
+ *
+ * Switchable while the call is running, because the difference between them is
+ * tens of milliseconds of timing — far too small to hold in your head across a
+ * reconnect, and obvious the moment you flip between them on the same sentence.
+ */
+const DRIVERS: Array<{ id: MouthDriver; label: string; hint: string }> = [
+  {
+    id: 'reactive',
+    label: 'Reactive',
+    hint: 'An AnalyserNode reads the audio as it plays. Simple, and blind to anything that has not happened yet, so the mouth trails the voice by roughly the width of its analysis window.',
+  },
+  {
+    id: 'scheduled',
+    label: 'Scheduled',
+    hint: 'The audio is measured before it plays and read back on the clock. Costs nothing in latency and removes some, because a reading can be centred on the instant it describes — or taken from ahead of it.',
+  },
+];
+
+/** Where animators traditionally place a mouth shape: a frame or two early. */
+const MAX_LOOKAHEAD_MS = 150;
 
 function loadPrefs(): Partial<Prefs> {
   try {
@@ -64,6 +90,10 @@ export default function LiveTrial() {
   const [prefs] = useState(loadPrefs);
   const [language, setLanguage] = useState(prefs.language ?? defaultLanguageCode());
   const [presetKey, setPresetKey] = useState(prefs.presetKey ?? defaultPresetKey());
+  const [driver, setDriver] = useState<MouthDriver>(prefs.driver ?? 'reactive');
+  // Zero by default, so the switch shows the timing difference on its own
+  // before anticipation is added on top of it.
+  const [lookaheadMs, setLookaheadMs] = useState(prefs.lookaheadMs ?? 0);
 
   const [status, setStatus] = useState<SessionStatus>('idle');
   const [detail, setDetail] = useState<string | null>(null);
@@ -84,11 +114,14 @@ export default function LiveTrial() {
 
   useEffect(() => {
     try {
-      window.localStorage.setItem(PREFS_KEY, JSON.stringify({ language, presetKey } satisfies Prefs));
+      window.localStorage.setItem(
+        PREFS_KEY,
+        JSON.stringify({ language, presetKey, driver, lookaheadMs } satisfies Prefs),
+      );
     } catch {
       // Private browsing. Losing the pick is not worth an error.
     }
-  }, [language, presetKey]);
+  }, [language, presetKey, driver, lookaheadMs]);
 
   useEffect(() => () => session.current?.stop(), []);
 
@@ -246,7 +279,55 @@ export default function LiveTrial() {
           </a>
         </header>
 
-        <Stage agentText={agentText} userText={userText} tap={tap} speaking={speaking} />
+        <Stage
+          agentText={agentText}
+          userText={userText}
+          tap={tap}
+          driver={driver}
+          lookaheadMs={lookaheadMs}
+          speaking={speaking}
+        />
+
+        <fieldset className="rounded-lg border border-slate-800 px-3 pb-2.5 pt-1">
+          <legend className="px-1 text-[11px] uppercase tracking-wide text-slate-500">
+            Mouth driver
+          </legend>
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+            {DRIVERS.map((option) => (
+              <label
+                key={option.id}
+                title={option.hint}
+                className="flex cursor-help items-center gap-2 text-sm text-slate-300"
+              >
+                <input
+                  type="radio"
+                  name="driver"
+                  checked={driver === option.id}
+                  // Never disabled: switching mid-sentence is the comparison.
+                  onChange={() => setDriver(option.id)}
+                  className="accent-sky-500"
+                />
+                {option.label}
+              </label>
+            ))}
+
+            {driver === 'scheduled' && (
+              <label className="flex min-w-[13rem] flex-1 items-center gap-2 text-xs text-slate-500">
+                Lookahead
+                <input
+                  type="range"
+                  min={0}
+                  max={MAX_LOOKAHEAD_MS}
+                  step={10}
+                  value={lookaheadMs}
+                  onChange={(event) => setLookaheadMs(Number(event.target.value))}
+                  className="flex-1 accent-sky-500"
+                />
+                <span className="w-14 text-right font-mono text-slate-300">{lookaheadMs}ms</span>
+              </label>
+            )}
+          </div>
+        </fieldset>
 
         <div className="flex items-center gap-3 rounded-lg border border-slate-800 px-4 py-2.5">
           <Radio

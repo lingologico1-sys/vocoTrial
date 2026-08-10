@@ -1,6 +1,7 @@
 import { useLayoutEffect, useRef, useState } from 'react';
 import type { AudioTap } from '../realtime/audio';
 import SpeakingFace from './SpeakingFace';
+import type { MouthDriver } from './visemes';
 import Bubble, { BUBBLE_FILL } from './Bubble';
 
 /**
@@ -53,11 +54,22 @@ interface StageProps {
   userText: string;
   /** Null between calls: nothing to listen to, so the mouth rests. */
   tap: AudioTap | null;
+  /** Which way of measuring the audio drives the mouth. */
+  driver: MouthDriver;
+  /** How far ahead the scheduled driver runs, in milliseconds. */
+  lookaheadMs: number;
   /** Dims the agent balloon once the words are no longer being said. */
   speaking: boolean;
 }
 
-export default function Stage({ agentText, userText, tap, speaking }: StageProps) {
+export default function Stage({
+  agentText,
+  userText,
+  tap,
+  driver,
+  lookaheadMs,
+  speaking,
+}: StageProps) {
   const stage = useRef<HTMLDivElement>(null);
   const agentBubble = useRef<HTMLDivElement>(null);
   const userBubble = useRef<HTMLDivElement>(null);
@@ -141,7 +153,12 @@ export default function Stage({ agentText, userText, tap, speaking }: StageProps
       <div className="relative flex flex-1 flex-col justify-end gap-3">
         <div className="flex items-center gap-4 sm:gap-6">
           <div className="relative z-0 h-32 w-32 shrink-0 sm:h-40 sm:w-40">
-            <SpeakingFace tap={tap} mouthRef={mouth} />
+            <SpeakingFace
+              tap={tap}
+              driver={driver}
+              lookaheadMs={lookaheadMs}
+              mouthRef={mouth}
+            />
           </div>
           <div className="min-w-0 max-w-[30rem]">
             <Bubble
