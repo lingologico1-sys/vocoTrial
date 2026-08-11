@@ -29,8 +29,16 @@ const IDLE_POLL_MS = 5_000;
 /** How many sentences stay in the balloon. The rest are still in the log. */
 const BUBBLE_SENTENCES = 2;
 
-/** Its own key — this page's picks are not the comparison rig's picks. */
-const PREFS_KEY = 'vocotrial.live.v1';
+/**
+ * Its own key — this page's picks are not the comparison rig's picks.
+ *
+ * Versioned so that changing a default can actually reach a browser that has
+ * been here before. Saved picks beat defaults, which is right while you are
+ * tuning and wrong the moment the tuning is settled and written into the code:
+ * without the bump, the only people still seeing the old value are the ones who
+ * used the page enough to have an opinion. Bump it when a default moves.
+ */
+const PREFS_KEY = 'vocotrial.live.v2';
 
 interface Prefs {
   language: string;
