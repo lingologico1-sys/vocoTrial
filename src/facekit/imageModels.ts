@@ -35,6 +35,14 @@ export interface ImageModelChoice {
    * price, not a contract — see the note below.
    */
   usdPerImage: number;
+  /**
+   * Whether to ask the provider to hold on to the input's own detail.
+   *
+   * Per-model rather than per-provider, and not a guess: an unrecognised
+   * parameter fails the whole request rather than being ignored, so this can
+   * only be set on a model observed to accept it.
+   */
+  highFidelity?: boolean;
   /** Set when the id or the rate has NOT been confirmed against the provider. */
   unverified?: boolean;
 }
@@ -49,7 +57,8 @@ export interface ImageModelChoice {
  * at generation time, and prices are read off a page rather than a response.
  *
  * Clear the flag on an entry once you have seen it generate. Do not clear it
- * because it looks right.
+ * because it looks right. The rate stays a read-off-a-page figure either way —
+ * clearing the flag records that the id works, not that the price is audited.
  *
  * Rates below are per-image list prices for a single 1024x1024 generation, read
  * off each provider's pricing page. They exclude the input image's tokens,
@@ -67,7 +76,9 @@ export const IMAGE_MODELS: ImageModelChoice[] = [
     id: 'gpt-image-1',
     masked: true,
     usdPerImage: 0.07,
-    unverified: true,
+    // Confirmed the only way it can be: a real call came back with an image,
+    // in about sixteen seconds, with input_fidelity accepted.
+    highFidelity: true,
   },
   {
     key: 'openai-image-mini',
@@ -94,7 +105,7 @@ export const IMAGE_MODELS: ImageModelChoice[] = [
     id: 'gemini-2.5-flash-image',
     masked: false,
     usdPerImage: 0.039,
-    unverified: true,
+    // Confirmed by a call that returned an image, in about eleven seconds.
   },
 ];
 

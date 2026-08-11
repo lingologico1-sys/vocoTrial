@@ -63,8 +63,9 @@ type Attempt = { ok: true; image: string } | { ok: false; status: number; detail
  * `input_fidelity` is the parameter that matters for this job: it asks the
  * model to hold on to the input's own detail rather than re-imagining it, which
  * is the difference between the same illustrated character and her cousin. It
- * is sent only to the gpt-image-1 family, because a parameter an endpoint does
- * not recognise fails the whole request rather than being ignored.
+ * goes only to models flagged for it in imageModels.ts, because a parameter an
+ * endpoint does not recognise fails the whole request rather than being
+ * ignored — and a wrong guess there is indistinguishable from a wrong model id.
  */
 async function generateOpenAi(
   model: ImageModelChoice,
@@ -79,7 +80,7 @@ async function generateOpenAi(
   form.append('n', '1');
   form.append('image', new Blob([image], { type: 'image/png' }), 'base.png');
   if (mask) form.append('mask', new Blob([mask], { type: 'image/png' }), 'mask.png');
-  if (model.id.startsWith('gpt-image-1')) form.append('input_fidelity', 'high');
+  if (model.highFidelity) form.append('input_fidelity', 'high');
 
   const upstream = await fetch(OPENAI_EDITS_URL, {
     method: 'POST',
