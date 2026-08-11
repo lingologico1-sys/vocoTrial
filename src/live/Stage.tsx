@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef, useState } from 'react';
 import type { AudioTap } from '../realtime/audio';
+import type { FaceKit } from '../facekit/kit';
 import SpeakingFace from './SpeakingFace';
 import type { MouthDriver } from './visemes';
 import Bubble, { BUBBLE_FILL } from './Bubble';
@@ -58,6 +59,8 @@ interface StageProps {
   driver: MouthDriver;
   /** How far ahead the scheduled driver runs, in milliseconds. */
   lookaheadMs: number;
+  /** Artwork for the face to wear, from /facekit. Null keeps the placeholder. */
+  kit?: FaceKit | null;
   /** Dims the agent balloon once the words are no longer being said. */
   speaking: boolean;
 }
@@ -68,6 +71,7 @@ export default function Stage({
   tap,
   driver,
   lookaheadMs,
+  kit,
   speaking,
 }: StageProps) {
   const stage = useRef<HTMLDivElement>(null);
@@ -157,6 +161,7 @@ export default function Stage({
               tap={tap}
               driver={driver}
               lookaheadMs={lookaheadMs}
+              kit={kit}
               mouthRef={mouth}
             />
           </div>

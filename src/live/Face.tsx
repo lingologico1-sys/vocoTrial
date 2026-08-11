@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { MOUTH_BOX, lipPath, type LipShape } from './visemes';
+import { CANVAS_EDGE } from '../facekit/imageModels';
+import type { FaceKit } from '../facekit/kit';
+import { MOUTH_BOX, lipPath, type LipShape, type Viseme } from './visemes';
 
 /**
  * The placeholder face.
@@ -26,13 +28,35 @@ const BLINK_EVERY_MS = 4200;
 
 interface FaceProps {
   shape: LipShape;
+  /**
+   * The discrete shape the classifier settled on.
+   *
+   * Unused by the drawn face, which interpolates `shape` continuously, and the
+   * only thing a kit can use: drawn artwork comes in six poses, not on a
+   * spectrum between them.
+   */
+  viseme: Viseme;
   /** Smoothed loudness, 0 to 1. Drives everything that is not the mouth. */
   level: number;
+  /** Artwork to wear instead of the drawing. Null falls back to the placeholder. */
+  kit?: FaceKit | null;
   /** Anchor for the speech bubble's tail. Marks the mouth, not the head. */
   mouthRef?: React.Ref<SVGCircleElement>;
 }
 
-export default function Face({ shape, level, mouthRef }: FaceProps) {
+/** Kit boxes are in CANVAS_EDGE pixels; this head is 200 units across. */
+const toHead = (value: number) => (value / CANVAS_EDGE) * 200;
+
+/**
+ * Every mouth pose a kit can hold, listed so all of them can stay mounted.
+ *
+ * Spelled out rather than read off the kit's own keys, so the set of <image>
+ * elements does not change when a patch is added — React would remount the
+ * lot, and a remount mid-sentence is a visible blank.
+ */
+const VISEME_ORDER: Viseme[] = ['rest', 'mbp', 'ee', 'uh', 'aa', 'oh'];
+
+export default function Face({ shape, viseme, level, kit, mouthRef }: FaceProps) {
   const [blinking, setBlinking] = useState(false);
   const timers = useRef<number[]>([]);
 
@@ -70,6 +94,71 @@ export default function Face({ shape, level, mouthRef }: FaceProps) {
   const lift = level * 4;
   const browLift = level * 3.5;
   const eyeOpen = blinking ? 0.08 : 1 - level * 0.12;
+
+  /**
+   * The drawn face, wearing artwork.
+   *
+   * Everything the placeholder does with `level` — the lift into an emphasised
+   * syllable, the slight roll — survives unchanged here, because it is a
+   * transform on a group rather than anything drawn. That is the part of a live
+   * face that costs nothing to keep when the art is swapped in, and it is worth
+   * noticing that it is also most of the effect.
+   *
+   * What does change is the mouth: six poses instead of a spectrum, chosen by
+   * `viseme` rather than interpolated from `shape`. Every pose stays mounted and
+   * is revealed by opacity, because decoding a patch the first time it is
+   * painted costs a frame, and dropping a frame at the exact moment a mouth
+   * changes shape is the one place it would be visible.
+   */
+  if (kit) {
+    const mouth = kit.boxes.mouth;
+    const eyes = kit.boxes.eyes;
+    const closed = kit.patches.eyesClosed;
+
+    return (
+      <svg viewBox="0 0 200 200" className="h-full w-full overflow-visible" aria-hidden="true">
+        <g transform={`translate(0 ${-lift}) rotate(${level * 0.8} 100 180)`}>
+          <image href={kit.base} x={0} y={0} width={200} height={200} />
+
+          {VISEME_ORDER.map((id) => {
+            const patch = kit.patches[id];
+            if (!patch) return null;
+            return (
+              <image
+                key={id}
+                href={patch}
+                x={toHead(mouth.x)}
+                y={toHead(mouth.y)}
+                width={toHead(mouth.width)}
+                height={toHead(mouth.height)}
+                opacity={viseme === id ? 1 : 0}
+              />
+            );
+          })}
+
+          {closed && (
+            <image
+              href={closed}
+              x={toHead(eyes.x)}
+              y={toHead(eyes.y)}
+              width={toHead(eyes.width)}
+              height={toHead(eyes.height)}
+              opacity={blinking ? 1 : 0}
+            />
+          )}
+
+          <circle
+            ref={mouthRef}
+            cx={toHead(mouth.x + mouth.width / 2)}
+            cy={toHead(mouth.y + mouth.height / 2)}
+            r="1"
+            fill="none"
+            opacity="0"
+          />
+        </g>
+      </svg>
+    );
+  }
 
   return (
     <svg viewBox="0 0 200 200" className="h-full w-full overflow-visible" aria-hidden="true">

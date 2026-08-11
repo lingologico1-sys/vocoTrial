@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { AudioTap } from '../realtime/audio';
+import type { FaceKit } from '../facekit/kit';
 import Face from './Face';
 import {
   MouthAnalyser,
@@ -8,6 +9,7 @@ import {
   scheduledFeatures,
   type LipShape,
   type MouthDriver,
+  type Viseme,
 } from './visemes';
 
 /**
@@ -26,12 +28,24 @@ interface SpeakingFaceProps {
   driver: MouthDriver;
   /** How far ahead the scheduled driver runs, in milliseconds. Ignored by the other. */
   lookaheadMs: number;
+  /** Artwork for the face to wear. Null leaves the drawn placeholder in place. */
+  kit?: FaceKit | null;
   mouthRef?: React.Ref<SVGCircleElement>;
 }
 
-const RESTING: { shape: LipShape; level: number } = { shape: VISEMES.rest, level: 0 };
+const RESTING: { shape: LipShape; level: number; viseme: Viseme } = {
+  shape: VISEMES.rest,
+  level: 0,
+  viseme: 'rest',
+};
 
-export default function SpeakingFace({ tap, driver, lookaheadMs, mouthRef }: SpeakingFaceProps) {
+export default function SpeakingFace({
+  tap,
+  driver,
+  lookaheadMs,
+  kit,
+  mouthRef,
+}: SpeakingFaceProps) {
   const [mouth, setMouth] = useState(RESTING);
   const analyser = useRef<MouthAnalyser | null>(null);
   /**
@@ -81,7 +95,10 @@ export default function SpeakingFace({ tap, driver, lookaheadMs, mouthRef }: Spe
       const next = mouthAnalyser.read(dt);
       // A new object each frame on purpose — the analyser mutates its shape in
       // place, so passing it through unchanged would never re-render.
-      setMouth({ shape: { ...next.shape }, level: next.level });
+      // The viseme travels alongside the shape rather than instead of it: the
+      // drawn face interpolates the shape, drawn artwork switches on the
+      // viseme, and which of the two is on screen is not this loop's business.
+      setMouth({ shape: { ...next.shape }, level: next.level, viseme: next.viseme });
       frame = requestAnimationFrame(step);
     };
 
@@ -92,5 +109,13 @@ export default function SpeakingFace({ tap, driver, lookaheadMs, mouthRef }: Spe
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tap]);
 
-  return <Face shape={mouth.shape} level={mouth.level} mouthRef={mouthRef} />;
+  return (
+    <Face
+      shape={mouth.shape}
+      viseme={mouth.viseme}
+      level={mouth.level}
+      kit={kit}
+      mouthRef={mouthRef}
+    />
+  );
 }

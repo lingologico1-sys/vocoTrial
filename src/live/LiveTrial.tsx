@@ -5,6 +5,8 @@ import { findModel } from '../realtime/models';
 import { LANGUAGES, defaultLanguageCode, findLanguage } from '../realtime/languages';
 import { INSTRUCTION_PRESETS, defaultPresetKey, findPreset } from '../realtime/instructions';
 import type { AudioTap, SessionStatus, TranscriptDelta, VoiceSession } from '../realtime/types';
+import type { FaceKit } from '../facekit/kit';
+import { activeKit } from '../facekit/store';
 import Stage from './Stage';
 import { RevealQueue } from './reveal';
 import type { MouthDriver } from './visemes';
@@ -127,6 +129,29 @@ export default function LiveTrial() {
    * its animation loop when one appears, and a ref would not tell it.
    */
   const [tap, setTap] = useState<AudioTap | null>(null);
+
+  /**
+   * The artwork the face wears, authored at /facekit and picked there.
+   *
+   * Loaded once at mount and never watched for changes: a kit is swapped on the
+   * other page, which the user reaches by a link that reloads this one. Polling
+   * IndexedDB for a change that cannot happen while this page is open would be
+   * work in exchange for nothing. Absent — no kit made, or the selected one
+   * deleted — leaves the drawn placeholder in place rather than an empty head.
+   */
+  const [kit, setKit] = useState<FaceKit | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    activeKit()
+      .then((found) => {
+        if (live) setKit(found);
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, []);
 
   const session = useRef<VoiceSession | null>(null);
   /** Agent words waiting for the audio that carries them. See reveal.ts. */
@@ -295,9 +320,14 @@ export default function LiveTrial() {
             <h1 className="text-xl font-semibold tracking-tight">liveTrial</h1>
             <p className="text-xs text-slate-500">{model?.label ?? MODEL_KEY}</p>
           </div>
-          <a href="/" className="text-xs text-slate-500 underline-offset-4 hover:underline">
-            comparison rig →
-          </a>
+          <nav className="flex gap-4 text-xs text-slate-500">
+            <a href="/facekit" className="underline-offset-4 hover:underline">
+              {kit ? `faceKit · ${kit.name}` : 'faceKit'} →
+            </a>
+            <a href="/" className="underline-offset-4 hover:underline">
+              comparison rig →
+            </a>
+          </nav>
         </header>
 
         <Stage
@@ -306,6 +336,7 @@ export default function LiveTrial() {
           tap={tap}
           driver={driver}
           lookaheadMs={lookaheadMs}
+          kit={kit}
           speaking={speaking}
         />
 
