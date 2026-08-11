@@ -355,8 +355,16 @@ export default function App() {
         {__BUILD_INFO__.label}
       </span>
       <div className="mx-auto flex min-h-screen max-w-2xl flex-col gap-6 px-6 py-10">
-        <header>
+        <header className="flex items-center justify-between gap-3">
           <h1 className="text-2xl font-semibold tracking-tight">vocoTrial</h1>
+          {/* A plain link, not a router push: main.tsx reads the path once at
+              startup, so crossing between the pages is a reload by design. */}
+          <a
+            href="/livetrial"
+            className="rounded-lg border border-slate-800 px-3 py-1.5 text-sm font-medium text-slate-400 transition hover:border-slate-700 hover:text-slate-200"
+          >
+            liveTrial →
+          </a>
         </header>
 
         <div className="flex gap-2">
