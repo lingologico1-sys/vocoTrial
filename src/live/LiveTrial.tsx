@@ -62,6 +62,19 @@ const DRIVERS: Array<{ id: MouthDriver; label: string; hint: string }> = [
 /** Where animators traditionally place a mouth shape: a frame or two early. */
 const MAX_LOOKAHEAD_MS = 150;
 
+/**
+ * Enough to lead the sound, once the drawing has been paid for.
+ *
+ * About 50ms of it buys back the mouth's own lag — the shape eases toward its
+ * target with a 35ms time constant, the level attacks over 15ms, and a frame
+ * lands whenever it lands. Spend only that and the mouth is merely on time.
+ * The remaining 30ms is the anticipation: roughly the frame of lead an animator
+ * would draw in by hand, and far inside the margin where a mouth ahead of its
+ * voice goes unnoticed. Being early is cheap and being late is not — video
+ * leading audio survives past 100ms, lagging is caught around 45ms.
+ */
+const DEFAULT_LOOKAHEAD_MS = 80;
+
 function loadPrefs(): Partial<Prefs> {
   try {
     const raw = window.localStorage.getItem(PREFS_KEY);
@@ -90,10 +103,10 @@ export default function LiveTrial() {
   const [prefs] = useState(loadPrefs);
   const [language, setLanguage] = useState(prefs.language ?? defaultLanguageCode());
   const [presetKey, setPresetKey] = useState(prefs.presetKey ?? defaultPresetKey());
-  const [driver, setDriver] = useState<MouthDriver>(prefs.driver ?? 'reactive');
-  // Zero by default, so the switch shows the timing difference on its own
-  // before anticipation is added on top of it.
-  const [lookaheadMs, setLookaheadMs] = useState(prefs.lookaheadMs ?? 0);
+  // Scheduled by default: it is the better mouth, and reactive is kept beside
+  // it as the thing to compare against rather than the thing to start from.
+  const [driver, setDriver] = useState<MouthDriver>(prefs.driver ?? 'scheduled');
+  const [lookaheadMs, setLookaheadMs] = useState(prefs.lookaheadMs ?? DEFAULT_LOOKAHEAD_MS);
 
   const [status, setStatus] = useState<SessionStatus>('idle');
   const [detail, setDetail] = useState<string | null>(null);
