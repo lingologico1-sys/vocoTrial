@@ -90,6 +90,15 @@ export default function FaceKit() {
   const [modelA, setModelA] = useState(DEFAULT_A);
   const [modelB, setModelB] = useState(DEFAULT_B);
   const [assembled, setAssembled] = useState<string | null>(null);
+  /**
+   * Whether the kit holds work that has not reached the store.
+   *
+   * Tracked rather than compared, because comparing means diffing megabytes of
+   * data URLs on every render to answer a question a boolean already knows.
+   * It exists so that closing a kit can warn — a stray click used to discard an
+   * afternoon and a dollar of generations with no confirmation at all.
+   */
+  const [dirty, setDirty] = useState(false);
 
   const refresh = useCallback(() => {
     listKits()
@@ -135,6 +144,7 @@ export default function FaceKit() {
       const normalised = await normalise(await fileToDataUrl(file));
       setKit(newKit(file.name.replace(/\.[^.]+$/, '') || 'face', normalised));
       setCandidates({});
+      setDirty(false);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'That file could not be read');
     }
@@ -142,6 +152,12 @@ export default function FaceKit() {
 
   const mark = (key: string, attempt: number) =>
     setBusy((current) => ({ ...current, [key]: attempt }));
+
+  /** Every edit funnels through here so nothing can change the kit unnoticed. */
+  const edit = (change: (current: Kit) => Kit) => {
+    setDirty(true);
+    setKit((current) => (current ? change(current) : current));
+  };
 
   const run = async (id: SlotId, modelKey: string) => {
     if (!kit) return;
@@ -166,7 +182,7 @@ export default function FaceKit() {
       // Spent whether or not the result is kept — a rejected generation still
       // billed, and a total that only counted the keepers would be a lie in the
       // direction that flatters the page.
-      setKit((current) => (current ? { ...current, spentUsd: current.spentUsd + result.usd } : current));
+      edit((current) => ({ ...current, spentUsd: current.spentUsd + result.usd }));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'That generation failed');
     } finally {
@@ -193,11 +209,12 @@ export default function FaceKit() {
       );
       // Patches cut from the old base no longer describe this face, so they go
       // with it. Keeping them would leave a mouth drawn for a jaw that moved.
-      setKit((current) =>
-        current
-          ? { ...current, base: result.base, patches: {}, spentUsd: current.spentUsd + result.usd }
-          : current,
-      );
+      edit((current) => ({
+        ...current,
+        base: result.base,
+        patches: {},
+        spentUsd: current.spentUsd + result.usd,
+      }));
       setCandidates({});
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'That generation failed');
@@ -234,8 +251,7 @@ export default function FaceKit() {
    */
   const unlock = (which: Region) => {
     const ids = SLOTS.filter((entry) => entry.region === which).map((entry) => entry.id);
-    setKit((current) => {
-      if (!current) return current;
+    edit((current) => {
       const patches = { ...current.patches };
       for (const id of ids) delete patches[id];
       return { ...current, patches };
@@ -248,15 +264,51 @@ export default function FaceKit() {
   };
 
   const accept = (id: SlotId, candidate: Candidate) => {
-    setKit((current) =>
-      current ? { ...current, patches: { ...current.patches, [id]: candidate.patch } } : current,
-    );
+    edit((current) => ({ ...current, patches: { ...current.patches, [id]: candidate.patch } }));
+  };
+
+  /** Everything cut from this portrait so far, accepted or merely offered. */
+  const generated = useMemo(
+    () => Object.values(committed).reduce((total, count) => total + count, 0),
+    [committed],
+  );
+
+  /**
+   * Back to the portrait as uploaded, keeping the boxes.
+   *
+   * The boxes stay because a restart is usually prompted by one of them being
+   * wrong, and nudging a box that is nearly right beats replacing it from a
+   * generic default. They unlock on their own, the lock being derived from
+   * artwork that no longer exists.
+   *
+   * What is spent stays spent. The money left the account whatever happens to
+   * the pictures, and a total that crept back to zero on a restart would be the
+   * one number on this page that lies.
+   */
+  const restart = () => {
+    if (!kit) return;
+    if (!window.confirm(`Discard ${generated} generated image(s) and start again from the portrait you uploaded?`)) {
+      return;
+    }
+    edit((current) => ({ ...current, base: current.original ?? current.base, patches: {} }));
+    setCandidates({});
+    setError(null);
+  };
+
+  const close = () => {
+    if (dirty && !window.confirm('This kit has changes that are not saved. Close it anyway?')) {
+      return;
+    }
+    setKit(null);
+    setCandidates({});
+    setDirty(false);
   };
 
   const store = async () => {
     if (!kit) return;
     try {
       await saveKit(kit);
+      setDirty(false);
       refresh();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'That kit could not be saved');
@@ -397,9 +449,7 @@ export default function FaceKit() {
                   active={region}
                   locked={committed[region] > 0}
                   onChange={(which, box) =>
-                    setKit((current) =>
-                      current ? { ...current, boxes: { ...current.boxes, [which]: box } } : current,
-                    )
+                    edit((current) => ({ ...current, boxes: { ...current.boxes, [which]: box } }))
                   }
                 />
 
@@ -628,15 +678,23 @@ export default function FaceKit() {
               >
                 Download folder
               </button>
+              {generated > 0 && (
+                <button
+                  type="button"
+                  onClick={restart}
+                  title="Keeps the portrait you uploaded and the boxes you placed"
+                  className="rounded-lg border border-amber-700/70 px-3 py-1.5 text-sm text-amber-300 hover:border-amber-500"
+                >
+                  Start again from the original · discards {generated}
+                </button>
+              )}
               <button
                 type="button"
-                onClick={() => {
-                  setKit(null);
-                  setCandidates({});
-                }}
+                onClick={close}
+                title="Returns to the upload screen. Saved kits are not affected."
                 className="ml-auto text-xs text-slate-500 underline-offset-4 hover:underline"
               >
-                start over
+                close kit
               </button>
             </section>
           </>
