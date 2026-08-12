@@ -4,26 +4,27 @@
   "base": "base.png",
   "boxes": {
     "mouth": {
-      "width": 276,
-      "height": 190,
-      "x": 387,
-      "y": 503
+      "width": 319,
+      "height": 247,
+      "x": 339,
+      "y": 521
     },
     "eyeLeft": {
-      "width": 131,
-      "height": 99,
-      "x": 331,
-      "y": 341
+      "width": 121,
+      "height": 58,
+      "x": 344,
+      "y": 366
     },
     "eyeRight": {
-      "width": 133,
-      "height": 99,
+      "width": 117,
+      "height": 63,
       "x": 547,
-      "y": 341
+      "y": 361
     }
   },
   "patches": {
     "rest": "mouth-rest.png",
+    "uh": "mouth-uh.png",
     "aa": "mouth-aa.png",
     "oh": "mouth-oh.png",
     "eyeLeftClosed": "eyeLeft-eyeLeftClosed.png",
