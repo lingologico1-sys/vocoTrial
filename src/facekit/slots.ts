@@ -70,8 +70,20 @@ export const PREAMBLE = [
  * contains a closed eye. One prompt that is correct under either regime beats
  * two that each assume one.
  */
-const EYES_CLOSED_PROMPT =
-  'Close both eyes into gentle downward curves, with the lashes resting on the cheeks. Keep the eyebrows, and keep any glasses exactly as they are — the same frame colour, thickness and shape. Do not restyle the eyewear.';
+const EYES_CLOSED_PROMPT = [
+  'Close both eyes.',
+  // Naming the mark to draw, rather than the state to depict. Asking for
+  // "gentle downward curves" produced creased, wrinkled lids that read as a
+  // wince: told only what the eye is doing, the model reached for the shading
+  // that would sell a photograph, on a drawing that has no shading anywhere.
+  'Draw each closed eye as one smooth clean downward arc, in the same dark line',
+  'weight as the original lashes, with the long eyelashes still curving out from it.',
+  'The skin above and around each closed eye stays flat, smooth and exactly the',
+  'colour of the surrounding face — no eyelid crease, no fold, no wrinkle, no',
+  'extra shading or texture of any kind.',
+  'Keep the eyebrows unchanged, and keep any glasses exactly as they are: the same',
+  'frame colour, thickness and shape. Do not restyle the eyewear.',
+].join(' ');
 
 export const SLOTS: Slot[] = [
   {
