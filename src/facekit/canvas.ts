@@ -165,22 +165,50 @@ export async function matchTone(patch: string, base: string, box: Box): Promise<
 }
 
 /**
- * Fades a patch's outer edge to nothing.
+ * Fades a patch's outer edge to nothing, across exactly `radius` pixels.
  *
- * A blurred white rectangle, inset by the feather width, used as an alpha
- * stencil. Tone matching gets the seam close; this stops whatever it could not
- * reach from arriving as a straight line, which the eye finds far faster than
- * it finds a gradient of the same magnitude.
+ * Tone matching gets the seam close; this stops whatever it could not reach
+ * from arriving as a straight line, which the eye finds far faster than it
+ * finds a gradient of the same magnitude.
+ *
+ * Built from four linear gradients rather than a blurred rectangle, and the
+ * difference is not stylistic. `filter: blur(Npx)` sets a standard deviation of
+ * N, so its visible spread runs to about three times that: a nominal 10px
+ * feather was leaving the outer *thirty-odd* pixels of every patch partly
+ * transparent. On a wide-open mouth the lower lip sits in exactly that band and
+ * faded out into the chin — the artwork was present and correct, and being
+ * erased on the way in.
+ *
+ * A gradient says what it means. Alpha is zero at the boundary and solid by
+ * `radius`, with nothing beyond it touched.
  */
 function feather(source: CanvasImageSource, box: Box, radius: number): HTMLCanvasElement {
   const ctx = context(box.width, box.height);
   ctx.drawImage(source, 0, 0, box.width, box.height);
 
-  const stencil = context(box.width, box.height);
-  stencil.filter = `blur(${radius}px)`;
+  const { width, height } = box;
+  const stencil = context(width, height);
   stencil.fillStyle = '#fff';
-  stencil.fillRect(radius, radius, box.width - radius * 2, box.height - radius * 2);
-  stencil.filter = 'none';
+  stencil.fillRect(0, 0, width, height);
+
+  // Each edge erased by a ramp running inward. Corners are crossed by two of
+  // them and so fade a little faster, which is what a corner should do anyway.
+  stencil.globalCompositeOperation = 'destination-out';
+  const edges: [number, number, number, number, number, number, number, number][] = [
+    [0, 0, radius, 0, 0, 0, radius, height], // left
+    [width, 0, width - radius, 0, width - radius, 0, radius, height], // right
+    [0, 0, 0, radius, 0, 0, width, radius], // top
+    [0, height, 0, height - radius, 0, height - radius, width, radius], // bottom
+  ];
+
+  for (const [gx0, gy0, gx1, gy1, x, y, w, h] of edges) {
+    const ramp = stencil.createLinearGradient(gx0, gy0, gx1, gy1);
+    ramp.addColorStop(0, 'rgba(0,0,0,1)');
+    ramp.addColorStop(1, 'rgba(0,0,0,0)');
+    stencil.fillStyle = ramp;
+    stencil.fillRect(x, y, w, h);
+  }
+  stencil.globalCompositeOperation = 'source-over';
 
   ctx.globalCompositeOperation = 'destination-in';
   ctx.drawImage(stencil.canvas, 0, 0);
@@ -200,7 +228,10 @@ function feather(source: CanvasImageSource, box: Box, radius: number): HTMLCanva
  */
 export async function featherPatch(patch: string, box: Box, radius = 10): Promise<string> {
   const image = await loadImage(patch);
-  const limit = Math.floor(Math.min(box.width, box.height) / 3);
+  // A tenth of the shorter side, at most. The ramp now means what it says, so
+  // this ceiling is about proportion rather than damage control: on a short box
+  // a fixed ten pixels is a larger share of the artwork than it looks.
+  const limit = Math.floor(Math.min(box.width, box.height) / 10);
   const applied = Math.max(0, Math.min(radius, limit));
   if (applied === 0) return patch;
   return feather(image, box, applied).toDataURL('image/png');
