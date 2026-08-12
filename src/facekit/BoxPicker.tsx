@@ -17,9 +17,10 @@ import type { Region } from './slots';
  * whether the window is wide or narrow.
  */
 
-const REGION_STYLE: Record<Region, { ring: string; label: string }> = {
-  mouth: { ring: 'border-amber-400', label: 'text-amber-300' },
-  eyes: { ring: 'border-sky-400', label: 'text-sky-300' },
+const REGION_STYLE: Record<Region, { ring: string; label: string; name: string }> = {
+  mouth: { ring: 'border-amber-400', label: 'text-amber-300', name: 'mouth' },
+  eyeLeft: { ring: 'border-sky-400', label: 'text-sky-300', name: 'left eye' },
+  eyeRight: { ring: 'border-emerald-400', label: 'text-emerald-300', name: 'right eye' },
 };
 
 interface BoxPickerProps {
@@ -111,6 +112,8 @@ export default function BoxPicker({ base, boxes, active, onChange }: BoxPickerPr
           <div
             key={region}
             onPointerDown={(event) => startDrag(event, region, null)}
+            data-region={region}
+            data-active={isActive || undefined}
             className={`absolute border-2 ${style.ring} ${
               isActive ? 'cursor-move opacity-100' : 'pointer-events-none opacity-40'
             }`}
@@ -121,10 +124,8 @@ export default function BoxPicker({ base, boxes, active, onChange }: BoxPickerPr
               height: percent(box.height),
             }}
           >
-            <span
-              className={`absolute -top-6 left-0 text-xs font-medium capitalize ${style.label}`}
-            >
-              {region}
+            <span className={`absolute -top-6 left-0 text-xs font-medium ${style.label}`}>
+              {style.name}
             </span>
 
             {isActive &&

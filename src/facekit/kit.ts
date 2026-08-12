@@ -41,7 +41,36 @@ export interface FaceKit {
   spentUsd: number;
 }
 
-export const KIT_FORMAT = 1;
+export const KIT_FORMAT = 2;
+
+/**
+ * Brings a format 1 kit forward.
+ *
+ * Format 1 had one box spanning both eyes. Splitting it down the middle gives
+ * two boxes that are roughly right and certainly draggable, which is a better
+ * starting position than none. The old closed-eyes patch is dropped rather than
+ * carried: it was cut to a box that no longer exists, and on a face wearing
+ * glasses it was the patch that came back with the frames restyled — the very
+ * problem the split exists to solve.
+ */
+export function migrate(kit: FaceKit): FaceKit {
+  if (kit.format >= KIT_FORMAT) return kit;
+
+  const legacy = (kit.boxes as Partial<Record<string, Box>>).eyes;
+  const boxes = { ...defaultBoxes(), mouth: kit.boxes.mouth ?? defaultBoxes().mouth };
+
+  if (legacy) {
+    const half = Math.round(legacy.width / 2);
+    const inset = Math.round(half * 0.12);
+    boxes.eyeLeft = clampBox({ ...legacy, width: half - inset });
+    boxes.eyeRight = clampBox({ ...legacy, x: legacy.x + half + inset, width: half - inset });
+  }
+
+  const patches = { ...kit.patches };
+  delete (patches as Record<string, unknown>).eyesClosed;
+
+  return { ...kit, format: KIT_FORMAT, boxes, patches };
+}
 
 /**
  * Opening guesses, placed where a face usually keeps its features.
@@ -52,6 +81,11 @@ export const KIT_FORMAT = 1;
  */
 export function defaultBoxes(): Record<Region, Box> {
   const edge = CANVAS_EDGE;
+  const eye = {
+    y: Math.round(edge * 0.33),
+    width: Math.round(edge * 0.16),
+    height: Math.round(edge * 0.1),
+  };
   return {
     mouth: {
       x: Math.round(edge * 0.33),
@@ -59,12 +93,12 @@ export function defaultBoxes(): Record<Region, Box> {
       width: Math.round(edge * 0.34),
       height: Math.round(edge * 0.22),
     },
-    eyes: {
-      x: Math.round(edge * 0.26),
-      y: Math.round(edge * 0.3),
-      width: Math.round(edge * 0.48),
-      height: Math.round(edge * 0.16),
-    },
+    // Narrow enough to sit inside a lens rather than across a frame. Being a
+    // little too small is the safe error here: a box that clips the outer
+    // corner of an eye still blinks, whereas one that catches the rim invites
+    // the model to redesign the glasses.
+    eyeLeft: { ...eye, x: Math.round(edge * 0.3) },
+    eyeRight: { ...eye, x: Math.round(edge * 0.54) },
   };
 }
 

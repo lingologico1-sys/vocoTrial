@@ -1,4 +1,4 @@
-import type { FaceKit } from './kit';
+import { migrate, type FaceKit } from './kit';
 
 /**
  * Where kits live between visits.
@@ -54,13 +54,18 @@ export function deleteKit(id: string): Promise<unknown> {
   return run('readwrite', (store) => store.delete(id));
 }
 
-export function loadKit(id: string): Promise<FaceKit | undefined> {
-  return run<FaceKit | undefined>('readonly', (store) => store.get(id));
+// Everything leaves the store already brought forward, so nothing downstream
+// has to know that older kits exist. Migration is not written back on read: a
+// kit is saved when it is next edited, and rewriting the store from a getter
+// would turn opening the page into a write.
+export async function loadKit(id: string): Promise<FaceKit | undefined> {
+  const kit = await run<FaceKit | undefined>('readonly', (store) => store.get(id));
+  return kit ? migrate(kit) : undefined;
 }
 
 export async function listKits(): Promise<FaceKit[]> {
   const kits = await run<FaceKit[]>('readonly', (store) => store.getAll());
-  return kits.sort((a, b) => b.createdAt - a.createdAt);
+  return kits.map(migrate).sort((a, b) => b.createdAt - a.createdAt);
 }
 
 export function selectedKitId(): string | null {

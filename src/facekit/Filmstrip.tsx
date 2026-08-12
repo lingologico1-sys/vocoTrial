@@ -22,6 +22,9 @@ const DEFAULT_FPS = 12;
 
 const MOUTH_SLOTS = SLOTS.filter((entry) => entry.region === 'mouth').map((entry) => entry.id);
 
+/** Which slot id the assembled blink frame is filed under. */
+const BLINK: SlotId = 'eyeLeftClosed';
+
 interface FilmstripProps {
   kit: FaceKit;
 }
@@ -65,15 +68,20 @@ export default function Filmstrip({ kit }: FilmstripProps) {
 
       // The blink is a separate frame rather than a variant of each mouth: it
       // lasts a fraction of a mouth shape, so pairing the two would multiply
-      // the frames to no benefit.
-      const closed = kit.patches.eyesClosed;
-      if (closed) {
+      // the frames to no benefit. Both eyes go on together — one eye closing
+      // alone is a wink, which is a different expression entirely.
+      const lids = [
+        { patch: kit.patches.eyeLeftClosed, box: kit.boxes.eyeLeft },
+        { patch: kit.patches.eyeRightClosed, box: kit.boxes.eyeRight },
+      ].filter((lid): lid is { patch: string; box: typeof lid.box } => Boolean(lid.patch));
+
+      if (lids.length) {
         const blinkFrame = await composite(kit.base, [
           ...(kit.patches.rest ? [{ patch: kit.patches.rest, box: kit.boxes.mouth }] : []),
-          { patch: closed, box: kit.boxes.eyes },
+          ...lids,
         ]);
         if (generation.current !== run) return;
-        built.push({ id: 'eyesClosed', src: blinkFrame });
+        built.push({ id: BLINK, src: blinkFrame });
       }
 
       if (!cancelled && generation.current === run) {
@@ -89,8 +97,8 @@ export default function Filmstrip({ kit }: FilmstripProps) {
     };
   }, [kit.base, kit.patches, kit.boxes, available]);
 
-  const mouthFrames = useMemo(() => frames.filter((frame) => frame.id !== 'eyesClosed'), [frames]);
-  const blinkFrame = useMemo(() => frames.find((frame) => frame.id === 'eyesClosed'), [frames]);
+  const mouthFrames = useMemo(() => frames.filter((frame) => frame.id !== BLINK), [frames]);
+  const blinkFrame = useMemo(() => frames.find((frame) => frame.id === BLINK), [frames]);
 
   useEffect(() => {
     if (!playing || mouthFrames.length < 2) return;

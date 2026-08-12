@@ -112,8 +112,13 @@ export default function Face({ shape, viseme, level, kit, mouthRef }: FaceProps)
    */
   if (kit) {
     const mouth = kit.boxes.mouth;
-    const eyes = kit.boxes.eyes;
-    const closed = kit.patches.eyesClosed;
+    // Both lids are drawn from the same flag. A kit holding only one of them
+    // still blinks, with one eye — visibly wrong, and better than silently
+    // doing nothing while the artwork looks complete in the picker.
+    const lids = [
+      { id: 'eyeLeftClosed', patch: kit.patches.eyeLeftClosed, box: kit.boxes.eyeLeft },
+      { id: 'eyeRightClosed', patch: kit.patches.eyeRightClosed, box: kit.boxes.eyeRight },
+    ];
 
     return (
       <svg viewBox="0 0 200 200" className="h-full w-full overflow-visible" aria-hidden="true">
@@ -136,15 +141,18 @@ export default function Face({ shape, viseme, level, kit, mouthRef }: FaceProps)
             );
           })}
 
-          {closed && (
-            <image
-              href={closed}
-              x={toHead(eyes.x)}
-              y={toHead(eyes.y)}
-              width={toHead(eyes.width)}
-              height={toHead(eyes.height)}
-              opacity={blinking ? 1 : 0}
-            />
+          {lids.map((lid) =>
+            lid.patch ? (
+              <image
+                key={lid.id}
+                href={lid.patch}
+                x={toHead(lid.box.x)}
+                y={toHead(lid.box.y)}
+                width={toHead(lid.box.width)}
+                height={toHead(lid.box.height)}
+                opacity={blinking ? 1 : 0}
+              />
+            ) : null,
           )}
 
           <circle

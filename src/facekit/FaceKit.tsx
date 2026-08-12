@@ -32,6 +32,16 @@ import { download, zip } from './zip';
 
 type Candidate = { modelKey: string; patch: string; full: string; usd: number };
 
+/**
+ * The eye tabs say which side of the *picture*, not which of her eyes, because
+ * that is what you are dragging a rectangle over.
+ */
+const REGION_TABS: { id: Region; label: string }[] = [
+  { id: 'mouth', label: 'Mouth' },
+  { id: 'eyeLeft', label: 'Left eye' },
+  { id: 'eyeRight', label: 'Right eye' },
+];
+
 const OPENAI_DEFAULT = defaultImageModelKey('openai');
 const GEMINI_DEFAULT = defaultImageModelKey('gemini');
 
@@ -286,16 +296,16 @@ export default function FaceKit() {
                 <div className="flex items-center justify-between gap-3">
                   <h2 className="text-sm font-medium text-slate-300">Regions</h2>
                   <div className="flex gap-1 rounded-lg border border-slate-800 p-0.5 text-xs">
-                    {(['mouth', 'eyes'] as Region[]).map((option) => (
+                    {REGION_TABS.map((option) => (
                       <button
-                        key={option}
+                        key={option.id}
                         type="button"
-                        onClick={() => setRegion(option)}
-                        className={`rounded-md px-2.5 py-1 capitalize ${
-                          region === option ? 'bg-slate-800 text-slate-100' : 'text-slate-500'
+                        onClick={() => setRegion(option.id)}
+                        className={`rounded-md px-2.5 py-1 ${
+                          region === option.id ? 'bg-slate-800 text-slate-100' : 'text-slate-500'
                         }`}
                       >
-                        {option}
+                        {option.label}
                       </button>
                     ))}
                   </div>
