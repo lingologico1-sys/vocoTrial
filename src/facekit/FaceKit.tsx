@@ -206,6 +206,47 @@ export default function FaceKit() {
     }
   };
 
+  /**
+   * How much artwork each region is already committed to.
+   *
+   * Derived rather than stored, so it is right for kits authored before locking
+   * existed and cannot fall out of step with the thing it describes. Candidates
+   * count as well as accepted patches: an unaccepted candidate was still cropped
+   * to the box that was in force when it was made, and accepting it after a move
+   * would misplace it exactly as a stored patch would.
+   */
+  const committed = useMemo(() => {
+    const counts: Record<Region, number> = { mouth: 0, eyeLeft: 0, eyeRight: 0 };
+    for (const entry of SLOTS) {
+      if (kit?.patches[entry.id]) counts[entry.region] += 1;
+      counts[entry.region] += candidates[entry.id]?.length ?? 0;
+    }
+    return counts;
+  }, [kit, candidates]);
+
+  /**
+   * Frees a region's box by throwing away everything cut to it.
+   *
+   * Discarding is the point rather than a side effect. Keeping the artwork and
+   * letting the box move is precisely the silent corruption the lock exists to
+   * prevent, so an unlock that spared it would only move the bug behind another
+   * button.
+   */
+  const unlock = (which: Region) => {
+    const ids = SLOTS.filter((entry) => entry.region === which).map((entry) => entry.id);
+    setKit((current) => {
+      if (!current) return current;
+      const patches = { ...current.patches };
+      for (const id of ids) delete patches[id];
+      return { ...current, patches };
+    });
+    setCandidates((current) => {
+      const next = { ...current };
+      for (const id of ids) delete next[id];
+      return next;
+    });
+  };
+
   const accept = (id: SlotId, candidate: Candidate) => {
     setKit((current) =>
       current ? { ...current, patches: { ...current.patches, [id]: candidate.patch } } : current,
@@ -354,12 +395,34 @@ export default function FaceKit() {
                   base={assembled ?? kit.base}
                   boxes={kit.boxes}
                   active={region}
+                  locked={committed[region] > 0}
                   onChange={(which, box) =>
                     setKit((current) =>
                       current ? { ...current, boxes: { ...current.boxes, [which]: box } } : current,
                     )
                   }
                 />
+
+                {committed[region] > 0 ? (
+                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-800 bg-slate-900/40 px-3 py-2">
+                    <p className="text-xs text-slate-400">
+                      This box is fixed — {committed[region]}{' '}
+                      {committed[region] === 1 ? 'image was' : 'images were'} cut to it.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => unlock(region)}
+                      className="rounded-md border border-amber-700/70 px-2 py-1 text-[11px] text-amber-300 hover:border-amber-500"
+                    >
+                      Unlock · discards {committed[region]}
+                    </button>
+                  </div>
+                ) : (
+                  <p className="rounded-lg border border-slate-800 bg-slate-900/40 px-3 py-2 text-xs text-slate-400">
+                    Place this box now. It fixes on the first generation, because everything
+                    generated afterwards is cut to it.
+                  </p>
+                )}
 
                 <p className="text-xs text-slate-500">
                   The box is the mask, the crop, and where the patch lands.

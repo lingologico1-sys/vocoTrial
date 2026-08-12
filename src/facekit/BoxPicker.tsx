@@ -27,10 +27,20 @@ interface BoxPickerProps {
   base: string;
   boxes: Record<Region, Box>;
   active: Region;
+  /**
+   * Whether the active region's box has been fixed by a generation.
+   *
+   * A patch is a bare rectangle of pixels that gets drawn stretched to whatever
+   * the box currently is — it does not remember where it was cut from. So moving
+   * a box after generating silently distorts every patch already made for it,
+   * with no warning and nothing visibly wrong until the face moves. Refusing the
+   * drag is the cheap way to make that impossible.
+   */
+  locked?: boolean;
   onChange: (region: Region, box: Box) => void;
 }
 
-export default function BoxPicker({ base, boxes, active, onChange }: BoxPickerProps) {
+export default function BoxPicker({ base, boxes, active, locked, onChange }: BoxPickerProps) {
   const frame = useRef<HTMLDivElement>(null);
 
   /**
@@ -107,15 +117,20 @@ export default function BoxPicker({ base, boxes, active, onChange }: BoxPickerPr
         const box = boxes[region];
         const style = REGION_STYLE[region];
         const isActive = region === active;
+        const draggable = isActive && !locked;
 
         return (
           <div
             key={region}
-            onPointerDown={(event) => startDrag(event, region, null)}
+            onPointerDown={draggable ? (event) => startDrag(event, region, null) : undefined}
             data-region={region}
-            data-active={isActive || undefined}
+            data-active={draggable || undefined}
             className={`absolute border-2 ${style.ring} ${
-              isActive ? 'cursor-move opacity-100' : 'pointer-events-none opacity-40'
+              draggable
+                ? 'cursor-move opacity-100'
+                : isActive
+                  ? 'pointer-events-none border-dashed opacity-80'
+                  : 'pointer-events-none opacity-40'
             }`}
             style={{
               left: percent(box.x),
@@ -126,9 +141,10 @@ export default function BoxPicker({ base, boxes, active, onChange }: BoxPickerPr
           >
             <span className={`absolute -top-6 left-0 text-xs font-medium ${style.label}`}>
               {style.name}
+              {isActive && locked && <span className="text-slate-500"> · locked</span>}
             </span>
 
-            {isActive &&
+            {draggable &&
               (['nw', 'ne', 'sw', 'se'] as const).map((handle) => (
                 <span
                   key={handle}
