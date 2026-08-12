@@ -50,15 +50,17 @@ export interface ImageModelChoice {
 /**
  * WHAT "UNVERIFIED" MEANS HERE
  *
- * Unchecked, not suspect — the same meaning realtime/models.ts gives it. Every
- * entry below is marked, because nothing in this file has yet been confirmed by
- * a call that actually returned an image, and neither the ids nor the prices
- * can be confirmed any earlier: an image endpoint rejects an unknown model only
- * at generation time, and prices are read off a page rather than a response.
+ * Unchecked, not suspect — the same meaning realtime/models.ts gives it. No
+ * entry carries the flag today: all four have returned an image from a real
+ * call. Anything added later starts flagged, because an image endpoint rejects
+ * an unknown model only at generation time and there is no earlier check.
  *
  * Clear the flag on an entry once you have seen it generate. Do not clear it
  * because it looks right. The rate stays a read-off-a-page figure either way —
  * clearing the flag records that the id works, not that the price is audited.
+ *
+ * Worth knowing when adding one: a rejected request bills nothing, so probing a
+ * new id is free until the moment it succeeds.
  *
  * Rates below are per-image list prices for a single 1024x1024 generation, read
  * off each provider's pricing page. They exclude the input image's tokens,
@@ -87,7 +89,11 @@ export const IMAGE_MODELS: ImageModelChoice[] = [
     id: 'gpt-image-1-mini',
     masked: true,
     usdPerImage: 0.02,
-    unverified: true,
+    // Confirmed by a call that returned an image, in about thirty-five seconds
+    // — slower than the full model, oddly, so the saving here is money and not
+    // time. Deliberately without highFidelity: this model rejects the parameter
+    // with a 400, which is how the flag came to be per-model rather than
+    // per-family. See the note on highFidelity above.
   },
   {
     key: 'gemini-image-pro',
@@ -96,7 +102,8 @@ export const IMAGE_MODELS: ImageModelChoice[] = [
     id: 'gemini-3-pro-image-preview',
     masked: false,
     usdPerImage: 0.134,
-    unverified: true,
+    // Confirmed by a call that returned an image, in about forty-seven seconds:
+    // the slowest of the four, and the most expensive.
   },
   {
     key: 'gemini-image-flash',
