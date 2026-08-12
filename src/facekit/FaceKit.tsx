@@ -332,6 +332,15 @@ export default function FaceKit() {
    */
   const exportKit = () => {
     if (!kit) return;
+    // A zip holding one image and an empty manifest is never what anyone meant
+    // to ask for, and it looks like a finished kit from the outside — the file
+    // arrives, it opens, and nothing says the artwork is missing.
+    if (generated === 0) {
+      const proceed = window.confirm(
+        'This kit has no generated artwork yet — the download would contain only the base portrait. Download anyway?',
+      );
+      if (!proceed) return;
+    }
     const files = [
       { name: 'base.png', source: kit.base },
       ...SLOTS.filter((entry) => kit.patches[entry.id]).map((entry) => ({
@@ -618,32 +627,63 @@ export default function FaceKit() {
                             alt=""
                             className="h-20 rounded-md border-2 border-emerald-500 bg-slate-900"
                           />
-                          <figcaption className="text-[10px] text-emerald-400">in the kit</figcaption>
+                          {/*
+                            Recovered by matching pixels rather than recorded on
+                            the kit, so it is only known while this session's
+                            candidates are still around. Worth having anyway: the
+                            question "which one did I keep" is asked while
+                            choosing, and that is exactly when the answer exists.
+                          */}
+                          <figcaption className="text-[10px] text-emerald-400">
+                            in the kit
+                            {(() => {
+                              const source = options.find((option) => option.patch === current);
+                              const from = source && findImageModel(source.modelKey);
+                              return from ? ` · ${from.short}` : '';
+                            })()}
+                          </figcaption>
                         </figure>
                       )}
 
-                      {options.map((candidate, index) => (
-                        <figure key={`${candidate.modelKey}-${index}`} className="space-y-1">
-                          <button
-                            type="button"
-                            onClick={() => accept(entry.id, candidate)}
-                            title="Use this one"
-                          >
-                            <img
-                              src={candidate.patch}
-                              alt=""
-                              className={`h-20 rounded-md border bg-slate-900 ${
-                                candidate.patch === current
-                                  ? 'border-emerald-500'
-                                  : 'border-slate-700 hover:border-slate-400'
-                              }`}
-                            />
-                          </button>
-                          <figcaption className="text-[10px] text-slate-500">
-                            {findImageModel(candidate.modelKey)?.provider ?? candidate.modelKey}
-                          </figcaption>
-                        </figure>
-                      ))}
+                      {options.map((candidate, index) => {
+                        const from = findImageModel(candidate.modelKey);
+                        /*
+                          Named per model and numbered per repeat. The caption
+                          used to print the provider, which was fine only while
+                          the two slots were one provider each — put Pro against
+                          Flash and every thumbnail said "gemini", which is the
+                          one thing you are trying to tell apart. Pressing the
+                          same button twice needs separating too, or a second
+                          opinion is indistinguishable from the first.
+                        */
+                        const seen = options
+                          .slice(0, index)
+                          .filter((earlier) => earlier.modelKey === candidate.modelKey).length;
+                        const name = from?.short ?? candidate.modelKey;
+
+                        return (
+                          <figure key={`${candidate.modelKey}-${index}`} className="space-y-1">
+                            <button
+                              type="button"
+                              onClick={() => accept(entry.id, candidate)}
+                              title={`Use this one — ${from?.label ?? candidate.modelKey}, attempt ${seen + 1}`}
+                            >
+                              <img
+                                src={candidate.patch}
+                                alt=""
+                                className={`h-20 rounded-md border bg-slate-900 ${
+                                  candidate.patch === current
+                                    ? 'border-emerald-500'
+                                    : 'border-slate-700 hover:border-slate-400'
+                                }`}
+                              />
+                            </button>
+                            <figcaption className="text-[10px] text-slate-500">
+                              {seen > 0 ? `${name} ${seen + 1}` : name}
+                            </figcaption>
+                          </figure>
+                        );
+                      })}
 
                       {!current && !options.length && (
                         <p className="self-center text-xs text-slate-600">
