@@ -42,8 +42,29 @@ const REGION_TABS: { id: Region; label: string }[] = [
   { id: 'eyeRight', label: 'Right eye' },
 ];
 
-const OPENAI_DEFAULT = defaultImageModelKey('openai');
-const GEMINI_DEFAULT = defaultImageModelKey('gemini');
+/**
+ * The two models the page compares, and what they start as.
+ *
+ * Once one provider had won every slot outright, "one picker per provider"
+ * stopped describing a useful comparison — the open question became which
+ * *Gemini* to spend on, and the old shape could not express that. Both slots now
+ * choose from the whole list, so Pro against Flash, Gemini against OpenAI, or a
+ * model against itself are all sayable.
+ */
+const DEFAULT_A = defaultImageModelKey('gemini');
+const DEFAULT_B = 'gemini-image-flash';
+
+/**
+ * The ellipsis a busy button wears, carrying the attempt number once there has
+ * been more than one.
+ *
+ * Visible on purpose. A refused request is not billed and the waits between
+ * attempts run to the better part of a minute, so a silent retry would read as
+ * a hung page during something that is both free and working.
+ */
+function busyMark(attempt: number): string {
+  return attempt > 1 ? `… ${attempt}` : '…';
+}
 
 function money(usd: number): string {
   if (usd === 0) return '$0.00';
@@ -56,10 +77,18 @@ export default function FaceKit() {
   const [inUse, setInUse] = useState<string | null>(selectedKitId());
   const [region, setRegion] = useState<Region>('mouth');
   const [candidates, setCandidates] = useState<Partial<Record<SlotId, Candidate[]>>>({});
-  const [busy, setBusy] = useState<Record<string, boolean>>({});
+  /**
+   * Which generations are in flight, and on which attempt.
+   *
+   * A number rather than a flag so a retry is visible. A refused request is not
+   * billed and the waits between attempts run to the better part of a minute,
+   * so without this the page would look hung during something that is both free
+   * and working as intended.
+   */
+  const [busy, setBusy] = useState<Record<string, number>>({});
   const [error, setError] = useState<string | null>(null);
-  const [openAiModel, setOpenAiModel] = useState(OPENAI_DEFAULT);
-  const [geminiModel, setGeminiModel] = useState(GEMINI_DEFAULT);
+  const [modelA, setModelA] = useState(DEFAULT_A);
+  const [modelB, setModelB] = useState(DEFAULT_B);
   const [assembled, setAssembled] = useState<string | null>(null);
 
   const refresh = useCallback(() => {
@@ -70,7 +99,12 @@ export default function FaceKit() {
 
   useEffect(refresh, [refresh]);
 
-  const chosen = useMemo(() => [openAiModel, geminiModel], [openAiModel, geminiModel]);
+  // Deduplicated: picking the same model in both slots should offer one button,
+  // not two identical ones side by side.
+  const chosen = useMemo(
+    () => Array.from(new Set([modelA, modelB])),
+    [modelA, modelB],
+  );
 
   /**
    * The rest pose, composited, so the boxes can be judged against what they
@@ -106,14 +140,14 @@ export default function FaceKit() {
     }
   };
 
-  const mark = (key: string, value: boolean) =>
-    setBusy((current) => ({ ...current, [key]: value }));
+  const mark = (key: string, attempt: number) =>
+    setBusy((current) => ({ ...current, [key]: attempt }));
 
   const run = async (id: SlotId, modelKey: string) => {
     if (!kit) return;
     const definition = slot(id);
     const key = `${id}:${modelKey}`;
-    mark(key, true);
+    mark(key, 1);
     setError(null);
 
     try {
@@ -122,6 +156,7 @@ export default function FaceKit() {
         base: kit.base,
         box: kit.boxes[definition.region],
         instruction: definition.prompt,
+        onAttempt: (attempt) => mark(key, attempt),
       });
 
       setCandidates((current) => ({
@@ -135,22 +170,26 @@ export default function FaceKit() {
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'That generation failed');
     } finally {
-      mark(key, false);
+      mark(key, 0);
     }
   };
 
   const neutralise = async (modelKey: string) => {
     if (!kit) return;
     const key = `base:${modelKey}`;
-    mark(key, true);
+    mark(key, 1);
     setError(null);
 
     try {
+      // From the upload, never from the current base. Pressing this again means
+      // "try that again", not "edit the last attempt".
       const result = await generateBase(
         modelKey,
-        kit.base,
+        kit.original ?? kit.base,
         NEUTRALISE_BASE_PROMPT,
         kit.boxes.mouth,
+        undefined,
+        (attempt) => mark(key, attempt),
       );
       // Patches cut from the old base no longer describe this face, so they go
       // with it. Keeping them would leave a mouth drawn for a jaw that moved.
@@ -163,7 +202,7 @@ export default function FaceKit() {
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'That generation failed');
     } finally {
-      mark(key, false);
+      mark(key, 0);
     }
   };
 
@@ -366,18 +405,18 @@ export default function FaceKit() {
               <div className="grid gap-3 sm:grid-cols-2">
                 {(
                   [
-                    ['openai', openAiModel, setOpenAiModel],
-                    ['gemini', geminiModel, setGeminiModel],
+                    ['A', modelA, setModelA],
+                    ['B', modelB, setModelB],
                   ] as const
-                ).map(([provider, value, set]) => (
-                  <label key={provider} className="space-y-1 text-xs text-slate-500">
-                    <span className="capitalize">{provider}</span>
+                ).map(([slotName, value, set]) => (
+                  <label key={slotName} className="space-y-1 text-xs text-slate-500">
+                    <span>{slotName}</span>
                     <select
                       value={value}
                       onChange={(event) => set(event.target.value)}
                       className="w-full rounded-lg border border-slate-800 bg-slate-900 px-2 py-1.5 text-sm text-slate-200"
                     >
-                      {IMAGE_MODELS.filter((model) => model.provider === provider).map((model) => (
+                      {IMAGE_MODELS.map((model) => (
                         <option key={model.key} value={model.key}>
                           {model.label} — {money(model.usdPerImage)}/image
                           {model.masked ? '' : ' (no mask)'}
@@ -400,18 +439,22 @@ export default function FaceKit() {
                   <button
                     key={modelKey}
                     type="button"
-                    disabled={busy[`base:${modelKey}`]}
+                    disabled={Boolean(busy[`base:${modelKey}`])}
                     onClick={() => void neutralise(modelKey)}
                     className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:border-slate-500 disabled:opacity-40"
                   >
-                    {busy[`base:${modelKey}`] ? 'Neutralising…' : 'Neutralise base'} ·{' '}
-                    {findImageModel(modelKey)?.label}
+                    {busy[`base:${modelKey}`]
+                      ? `Neutralising${busyMark(busy[`base:${modelKey}`])}`
+                      : 'Neutralise base'}{' '}
+                    · {findImageModel(modelKey)?.label}
                   </button>
                 ))}
               </div>
               <p className="text-xs text-slate-500">
                 Closes the mouth on the base itself. Worth doing first if the portrait arrived
-                smiling — and it clears any patches, which were cut for the old face.
+                smiling — and it clears any patches, which were cut for the old face. Always runs
+                against the portrait you uploaded, so pressing it again is another attempt rather
+                than an edit of the last one.
               </p>
             </section>
 
@@ -438,11 +481,16 @@ export default function FaceKit() {
                             <button
                               key={modelKey}
                               type="button"
-                              disabled={busy[key]}
+                              disabled={Boolean(busy[key])}
                               onClick={() => void run(entry.id, modelKey)}
+                              title={
+                                current
+                                  ? `Generate another with ${model?.label ?? modelKey}`
+                                  : model?.label
+                              }
                               className="rounded-md border border-slate-700 px-2 py-1 text-[11px] text-slate-300 hover:border-slate-500 disabled:opacity-40"
                             >
-                              {busy[key] ? '…' : (model?.provider ?? modelKey)}
+                              {busy[key] ? busyMark(busy[key]) : (model?.short ?? modelKey)}
                             </button>
                           );
                         })}

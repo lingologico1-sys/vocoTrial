@@ -28,6 +28,35 @@ interface GenerateArgs {
   /** The slot's instruction. The shared preamble is added here, not by callers. */
   instruction: string;
   signal?: AbortSignal;
+  onAttempt?: OnAttempt;
+}
+
+/**
+ * A failed generation, with enough on it to decide whether trying again is
+ * sensible or merely expensive-looking.
+ */
+export class GenerateError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly code?: string,
+    readonly reason?: string,
+  ) {
+    super(message);
+    this.name = 'GenerateError';
+  }
+
+  /**
+   * Worth another go.
+   *
+   * Only the statuses that mean "not now" rather than "not like that". A 400 is
+   * the request being wrong and will be wrong again in a minute; a 502 is the
+   * provider declining or falling over, which is the case actually observed to
+   * clear on its own.
+   */
+  get retryable(): boolean {
+    return this.status === 502 || this.status === 429 || this.status === 503;
+  }
 }
 
 async function post(body: unknown, signal?: AbortSignal): Promise<{ image: string; usd: number }> {
@@ -42,13 +71,74 @@ async function post(body: unknown, signal?: AbortSignal): Promise<{ image: strin
     image?: string;
     usd?: number;
     error?: string;
+    code?: string;
+    reason?: string;
   } | null;
 
   if (!response.ok || !payload?.image) {
-    throw new Error(payload?.error ?? `The image request failed (${response.status})`);
+    throw new GenerateError(
+      payload?.error ?? `The image request failed (${response.status})`,
+      response.status,
+      payload?.code,
+      payload?.reason,
+    );
   }
 
   return { image: `data:image/png;base64,${payload.image}`, usd: payload.usd ?? 0 };
+}
+
+/**
+ * How long to wait before each retry, in milliseconds.
+ *
+ * Gemini refuses in bursts rather than at random: whole runs lose half their
+ * slots, and the same slots go through untouched later. So the delays climb
+ * steeply — a second attempt hard on the heels of the first lands inside the
+ * same bad window and learns nothing.
+ *
+ * Retrying is close to free, which is what makes this worth doing at all: a
+ * refused request returns no image and is not billed.
+ */
+const RETRY_DELAYS_MS = [6_000, 20_000, 45_000];
+
+function wait(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new DOMException('Aborted', 'AbortError'));
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    function onAbort() {
+      window.clearTimeout(timer);
+      reject(new DOMException('Aborted', 'AbortError'));
+    }
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
+/** Told which attempt is starting, and how long the wait before it was. */
+export type OnAttempt = (attempt: number, total: number) => void;
+
+async function postWithRetry(
+  body: unknown,
+  signal?: AbortSignal,
+  onAttempt?: OnAttempt,
+): Promise<{ image: string; usd: number }> {
+  const total = RETRY_DELAYS_MS.length + 1;
+
+  for (let attempt = 0; ; attempt++) {
+    onAttempt?.(attempt + 1, total);
+    try {
+      return await post(body, signal);
+    } catch (error) {
+      const delay = RETRY_DELAYS_MS[attempt];
+      const worthRetrying = error instanceof GenerateError && error.retryable;
+      if (delay === undefined || !worthRetrying) throw error;
+      await wait(delay, signal);
+    }
+  }
 }
 
 export async function generatePatch({
@@ -57,11 +147,12 @@ export async function generatePatch({
   box,
   instruction,
   signal,
+  onAttempt,
 }: GenerateArgs): Promise<Generated> {
   const model = findImageModel(modelKey);
   if (!model) throw new Error(`Unknown image model "${modelKey}"`);
 
-  const { image, usd } = await post(
+  const { image, usd } = await postWithRetry(
     {
       model: modelKey,
       prompt: `${PREAMBLE} ${instruction}`,
@@ -72,6 +163,7 @@ export async function generatePatch({
       mask: model.masked ? maskFor(box) : undefined,
     },
     signal,
+    onAttempt,
   );
 
   // Crop, then match the seam, then fade it. The order matters: matching before
@@ -95,11 +187,12 @@ export async function generateBase(
   instruction: string,
   box: Box,
   signal?: AbortSignal,
+  onAttempt?: OnAttempt,
 ): Promise<{ base: string; usd: number }> {
   const model = findImageModel(modelKey);
   if (!model) throw new Error(`Unknown image model "${modelKey}"`);
 
-  const { image, usd } = await post(
+  const { image, usd } = await postWithRetry(
     {
       model: modelKey,
       prompt: `${PREAMBLE} ${instruction}`,
@@ -107,6 +200,7 @@ export async function generateBase(
       mask: model.masked ? maskFor(box) : undefined,
     },
     signal,
+    onAttempt,
   );
 
   return { base: await normalise(image), usd };

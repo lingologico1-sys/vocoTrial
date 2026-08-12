@@ -33,6 +33,19 @@ export interface FaceKit {
    * closed mouth on top of.
    */
   base: string;
+  /**
+   * The portrait as uploaded, before any generation touched it.
+   *
+   * Kept so that neutralising is repeatable rather than cumulative. Running it
+   * against `base` meant a second press edited the first press's output, and a
+   * third edited the second — each one a further generation away from the
+   * drawing that arrived, in a direction nobody chose. Pressing it again should
+   * mean "try that again", not "and again on top".
+   *
+   * Optional because kits authored before it existed have no copy to offer;
+   * those fall back to `base` and behave as they always did.
+   */
+  original?: string;
   /** Where each region sits on the base. Also the generation mask. */
   boxes: Record<Region, Box>;
   /** One PNG data URL per authored slot, already cropped to its region's box. */
@@ -113,6 +126,7 @@ export function newKit(name: string, base: string): FaceKit {
     name,
     createdAt: Date.now(),
     base,
+    original: base,
     boxes: defaultBoxes(),
     patches: {},
     spentUsd: 0,

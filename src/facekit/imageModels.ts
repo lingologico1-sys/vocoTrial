@@ -17,6 +17,15 @@ export interface ImageModelChoice {
   key: string;
   provider: ImageProvider;
   label: string;
+  /**
+   * A word for a button, where the full label will not fit.
+   *
+   * Named per model rather than per provider because the two comparison slots
+   * can now hold two models from the same provider — Pro against Flash is the
+   * comparison worth making once one provider has won outright, and "gemini"
+   * twice tells you nothing about which button you are pressing.
+   */
+  short: string;
   /** The provider's own model id. */
   id: string;
   /**
@@ -90,6 +99,7 @@ export const IMAGE_MODELS: ImageModelChoice[] = [
     key: 'openai-image',
     provider: 'openai',
     label: 'GPT Image 1',
+    short: 'gpt',
     id: 'gpt-image-1',
     masked: true,
     usdPerImage: 0.07,
@@ -101,6 +111,7 @@ export const IMAGE_MODELS: ImageModelChoice[] = [
     key: 'openai-image-mini',
     provider: 'openai',
     label: 'GPT Image 1 Mini',
+    short: 'gpt mini',
     id: 'gpt-image-1-mini',
     masked: true,
     usdPerImage: 0.02,
@@ -114,6 +125,7 @@ export const IMAGE_MODELS: ImageModelChoice[] = [
     key: 'gemini-image-pro',
     provider: 'gemini',
     label: 'Gemini 3 Pro Image (Nano Banana Pro)',
+    short: 'pro',
     id: 'gemini-3-pro-image-preview',
     masked: false,
     usdPerImage: 0.134,
@@ -124,6 +136,7 @@ export const IMAGE_MODELS: ImageModelChoice[] = [
     key: 'gemini-image-flash',
     provider: 'gemini',
     label: 'Gemini 2.5 Flash Image (Nano Banana)',
+    short: 'flash',
     id: 'gemini-2.5-flash-image',
     masked: false,
     usdPerImage: 0.039,
