@@ -55,7 +55,31 @@ function toBytes(base64: string): Uint8Array {
   return bytes;
 }
 
-type Attempt = { ok: true; image: string } | { ok: false; status: number; detail: string };
+type Attempt =
+  | { ok: true; image: string }
+  | { ok: false; status: number; detail: string; reason?: string };
+
+/**
+ * The provider's own words for why it declined, and nothing else.
+ *
+ * The rule everywhere else here is that an upstream error body goes to the log
+ * and never to the browser, because an error can quote the request back and the
+ * request was signed with the account's key. That rule stays. What comes back
+ * through this is a short allowlist of *classifications* the provider produced —
+ * a finishReason enum, a block reason, an error code, or the prose the model
+ * replied with instead of an image. None of those is our request echoed.
+ *
+ * Worth the care because the alternative was on display: an opaque 502 for both
+ * "the model declined this picture" and "the request was malformed" sends you
+ * hunting for a bug in the wrong half of the system.
+ */
+const REASON_LIMIT = 300;
+
+function trimmed(value: unknown): string | undefined {
+  if (typeof value !== 'string' || !value.trim()) return undefined;
+  const text = value.trim();
+  return text.length > REASON_LIMIT ? `${text.slice(0, REASON_LIMIT)}…` : text;
+}
 
 /**
  * OpenAI's image edit, with the mask deciding where it may paint.
@@ -99,6 +123,16 @@ async function generateOpenAi(
   return { ok: true, image: b64 };
 }
 
+/** OpenAI's classification of a failure, without the message that may quote us. */
+function openAiReason(detail: string): string | undefined {
+  try {
+    const parsed = JSON.parse(detail) as { error?: { code?: string; type?: string } };
+    return trimmed(parsed.error?.code) ?? trimmed(parsed.error?.type);
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Gemini's image edit: the picture and the instruction as two parts of one turn.
  *
@@ -131,18 +165,39 @@ async function generateGemini(
   );
 
   if (!upstream.ok) {
-    return { ok: false, status: upstream.status, detail: await upstream.text() };
+    const detail = await upstream.text();
+    let reason: string | undefined;
+    try {
+      const parsed = JSON.parse(detail) as { error?: { status?: string } };
+      reason = trimmed(parsed.error?.status);
+    } catch {
+      reason = undefined;
+    }
+    return { ok: false, status: upstream.status, detail, reason };
   }
 
   const body = (await upstream.json()) as {
-    candidates?: { content?: { parts?: { inlineData?: { data?: string } }[] } }[];
+    promptFeedback?: { blockReason?: string };
+    candidates?: {
+      finishReason?: string;
+      content?: { parts?: { text?: string; inlineData?: { data?: string } }[] };
+    }[];
   };
 
-  const part = body.candidates?.[0]?.content?.parts?.find((entry) => entry.inlineData?.data);
+  const candidate = body.candidates?.[0];
+  const part = candidate?.content?.parts?.find((entry) => entry.inlineData?.data);
+
   if (!part?.inlineData?.data) {
-    // Reached when the model answers in text instead of pixels, which is what a
-    // refused edit looks like on this API — a 200 with prose in it.
-    return { ok: false, status: 502, detail: 'no image in response' };
+    // A refusal on this API is a 200 with prose in it, or with a finishReason
+    // and no parts at all. Both are indistinguishable from a bug unless the
+    // classification is carried out, which is what these three fields are for.
+    const spoken = candidate?.content?.parts?.find((entry) => entry.text)?.text;
+    const reason =
+      trimmed(body.promptFeedback?.blockReason) ??
+      trimmed(candidate?.finishReason) ??
+      trimmed(spoken) ??
+      'no image and no stated reason';
+    return { ok: false, status: 502, detail: JSON.stringify(body).slice(0, 2000), reason };
   }
 
   return { ok: true, image: part.inlineData.data };
@@ -213,14 +268,21 @@ export async function onRequestPost(
   }
 
   if (!attempt.ok) {
-    // Status out, body to the log only. An upstream error can quote the request
-    // back at us, and the request was authenticated with the account's own key.
+    // Body to the log only — it can quote the request back, and the request was
+    // authenticated with the account's own key. The provider's own short
+    // classification travels with the error instead; see the note on Attempt.
     console.error('image generate failed', model.id, attempt.status, attempt.detail);
+    const reason =
+      attempt.reason ??
+      (model.provider === 'openai' ? openAiReason(attempt.detail) : undefined);
     return json(
       {
-        error: `${model.label} could not produce that image`,
+        error: reason
+          ? `${model.label} declined: ${reason}`
+          : `${model.label} could not produce that image`,
         code: 'upstream',
         status: attempt.status,
+        reason: reason ?? null,
       },
       502,
     );
