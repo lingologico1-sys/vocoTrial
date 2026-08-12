@@ -323,8 +323,23 @@ export default function FaceKit() {
                 />
 
                 <p className="text-xs text-slate-500">
-                  The box is the mask, the crop, and where the patch lands. Cover the whole of the
-                  existing mouth — anything it leaves showing stays showing.
+                  The box is the mask, the crop, and where the patch lands.
+                  {region === 'mouth' ? (
+                    <>
+                      {' '}
+                      Cover the whole of the existing mouth — anything it leaves showing stays
+                      showing — and leave room <em>below</em> it for a dropped jaw. Every pose is
+                      cropped at this box, so one sized to the closed mouth cuts the bottom off
+                      the open one.
+                    </>
+                  ) : (
+                    <>
+                      {' '}
+                      Keep it <em>inside</em> the lens. A box that catches a spectacle rim invites
+                      the model to redesign the glasses; one that stops short of the frame throws
+                      any such damage away with the rest of the crop.
+                    </>
+                  )}
                 </p>
               </div>
 

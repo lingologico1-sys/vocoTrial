@@ -87,11 +87,15 @@ export function defaultBoxes(): Record<Region, Box> {
     height: Math.round(edge * 0.1),
   };
   return {
+    // Taller than the closed mouth needs, because the box is where every pose
+    // gets cropped and the open one is the tall one. A box drawn snugly round
+    // the lips of a resting face silently guillotines the dropped jaw of an
+    // "aa" — the patch looks fine in the picker and wrong in motion.
     mouth: {
       x: Math.round(edge * 0.33),
-      y: Math.round(edge * 0.56),
+      y: Math.round(edge * 0.54),
       width: Math.round(edge * 0.34),
-      height: Math.round(edge * 0.22),
+      height: Math.round(edge * 0.27),
     },
     // Narrow enough to sit inside a lens rather than across a frame. Being a
     // little too small is the safe error here: a box that clips the outer

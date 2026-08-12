@@ -62,6 +62,21 @@ export interface ImageModelChoice {
  * Worth knowing when adding one: a rejected request bills nothing, so probing a
  * new id is free until the moment it succeeds.
  *
+ * WHICH ONE TO REACH FOR
+ *
+ * On an illustrated portrait, Gemini beat OpenAI on every slot of a full kit
+ * generated from the same prompts — closer lip colour, cleaner cel shading, and
+ * eyelids that kept their lashes, which no amount of prompting got out of
+ * gpt-image-1. OpenAI's poses came back flatter and more photographic.
+ *
+ * The counterweight is reliability rather than quality: Gemini refuses in
+ * bursts, returning a 200 with prose in it instead of an image, and a run can
+ * lose half its slots to a bad window. The refusals are transient — the same
+ * slots that failed repeatedly one hour all succeeded the next — so a retry is
+ * the fix, not a reworded prompt. Rejected requests are not billed, which makes
+ * retrying cheap. The error now carries the provider's own stated reason; read
+ * it before assuming anything.
+ *
  * Rates below are per-image list prices for a single 1024x1024 generation, read
  * off each provider's pricing page. They exclude the input image's tokens,
  * which both providers bill separately and neither reports in a form worth
