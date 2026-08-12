@@ -1,3 +1,4 @@
+import { loadBundledKit } from './bundled';
 import { migrate, type FaceKit } from './kit';
 
 /**
@@ -89,13 +90,17 @@ export function selectKit(id: string | null): void {
 /**
  * The kit the live page should wear, or nothing.
  *
- * Returns nothing rather than falling back to some other kit when the selected
- * id has gone missing: a face silently swapping to whichever kit happened to
- * sort first would be a confusing thing to debug from the far side.
+ * Nothing chosen falls back to whatever is checked into public/faces/, so a
+ * fresh browser gets the deployment's own face rather than the placeholder.
+ *
+ * A chosen kit that has gone missing does *not* fall back. That asymmetry is
+ * deliberate: an empty selection is the ordinary state of a new visitor, while
+ * a dangling one means something was deleted, and quietly substituting a
+ * different face there would be a confusing thing to debug from the far side.
  */
 export async function activeKit(): Promise<FaceKit | null> {
   const id = selectedKitId();
-  if (!id) return null;
+  if (!id) return loadBundledKit();
   try {
     return (await loadKit(id)) ?? null;
   } catch {

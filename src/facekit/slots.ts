@@ -85,42 +85,79 @@ const EYES_CLOSED_PROMPT = [
   'frame colour, thickness and shape. Do not restyle the eyewear.',
 ].join(' ');
 
+/**
+ * Appended to every mouth pose, and doing the same job the eyelid prompt's
+ * second half does.
+ *
+ * The failure it exists to stop is the mouth changing *size* between poses. An
+ * early AA came back so much wider than the rest pose that cycling the two read
+ * as the whole mouth inflating rather than as a jaw opening — a real mouth
+ * drops its jaw without moving the corners much, and saying so is cheaper than
+ * regenerating until one happens to comply.
+ *
+ * The flat-colour clause is the lids' lesson repeated: told only what the mouth
+ * is doing, these models reach for photographic shading and put gradients on a
+ * cel-shaded drawing.
+ */
+const MOUTH_NOTE = [
+  'Keep the lips the same colour, thickness and line weight as the original, and',
+  'keep the outer corners of the mouth in the same place — only the opening',
+  'between the lips changes, never the width of the mouth itself.',
+  'Use flat cel-shaded colour: no gradients, no soft shading, no highlights, no',
+  'added creases or wrinkles.',
+  'Do not change the nose, chin, cheeks or jawline.',
+].join(' ');
+
+const mouth = (shape: string): string => `${shape} ${MOUTH_NOTE}`;
+
 export const SLOTS: Slot[] = [
   {
     id: 'rest',
     label: 'Rest',
     region: 'mouth',
-    prompt: 'Close the mouth into a relaxed neutral expression. Lips together, no teeth visible, faint natural smile at most.',
+    prompt: mouth(
+      'Close the mouth into a relaxed neutral expression: the lips together in a single soft line, no teeth and no gap.',
+    ),
   },
   {
     id: 'mbp',
     label: 'M / B / P',
     region: 'mouth',
-    prompt: 'Press the lips firmly together into a closed line, as when starting to say "m". No teeth, no gap.',
+    prompt: mouth(
+      'Press the lips together into one firm, slightly compressed straight line, as when beginning to say "m". No teeth and no opening at all.',
+    ),
   },
   {
     id: 'ee',
     label: 'Spread (EE)',
     region: 'mouth',
-    prompt: 'Spread the lips wide and slightly apart, corners pulled outward, upper teeth showing. The jaw stays nearly closed.',
+    prompt: mouth(
+      'Open the lips into a wide, shallow slot showing a clean row of upper teeth as one simple white shape. The jaw stays almost closed, so the opening is wide but not tall.',
+    ),
   },
   {
     id: 'uh',
     label: 'Neutral open (UH)',
     region: 'mouth',
-    prompt: 'Part the lips into a small relaxed opening, jaw slightly dropped, corners neutral. A little darkness visible inside.',
+    prompt: mouth(
+      'Part the lips into a small soft oval opening, about a third as tall as it is wide, with one plain dark shape inside. The jaw drops only slightly.',
+    ),
   },
   {
     id: 'aa',
     label: 'Open (AA)',
     region: 'mouth',
-    prompt: 'Drop the jaw into a wide open mouth, lips relaxed and oval, upper teeth and dark mouth interior visible.',
+    prompt: mouth(
+      'Drop the jaw to open the mouth into a rounded oval about as tall as the closed mouth is wide, and no wider than the closed mouth. Show one simple row of upper teeth along the top and a plain dark interior below.',
+    ),
   },
   {
     id: 'oh',
     label: 'Rounded (OH)',
     region: 'mouth',
-    prompt: 'Purse the lips into a small rounded circle pushed slightly forward, as when whistling. Jaw mostly closed.',
+    prompt: mouth(
+      'Purse the lips into a small rounded O, slightly taller than it is wide, with a plain dark opening in the middle. The lips stay full and clearly outlined and the jaw stays mostly closed.',
+    ),
   },
   {
     id: 'eyeLeftClosed',
