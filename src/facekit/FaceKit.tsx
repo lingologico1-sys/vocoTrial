@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import BoxPicker from './BoxPicker';
+import BrowPreview from './BrowPreview';
 import Filmstrip from './Filmstrip';
 import { composite, dataUrlToBlob, fileToDataUrl, normalise } from './canvas';
 import { generateBase, generatePatch } from './generate';
@@ -553,6 +554,14 @@ export default function FaceKit() {
                         </button>
                       </div>
                     )}
+
+                    {/*
+                      Under the picker rather than in the "In motion" column,
+                      because judging a brow box is a loop of drag, watch, drag
+                      again — and a preview that lives a column away from the
+                      handles is one you stop consulting after the second drag.
+                    */}
+                    <BrowPreview kit={kit} />
 
                     <p className="text-xs text-slate-500">
                       Not a mask and not a crop — no generator ever sees this box, so it
