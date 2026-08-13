@@ -59,10 +59,11 @@ export interface ImageModelChoice {
 /**
  * WHAT "UNVERIFIED" MEANS HERE
  *
- * Unchecked, not suspect — the same meaning realtime/models.ts gives it. No
- * entry carries the flag today: all four have returned an image from a real
- * call. Anything added later starts flagged, because an image endpoint rejects
- * an unknown model only at generation time and there is no earlier check.
+ * Unchecked, not suspect — the same meaning realtime/models.ts gives it. Pro
+ * carries the flag because its id was just moved to GA; the other three have
+ * each returned an image from a real call. Anything added later starts flagged,
+ * because an image endpoint rejects an unknown model only at generation time
+ * and there is no earlier check.
  *
  * Clear the flag on an entry once you have seen it generate. Do not clear it
  * because it looks right. The rate stays a read-off-a-page figure either way —
@@ -133,11 +134,18 @@ export const IMAGE_MODELS: ImageModelChoice[] = [
     provider: 'gemini',
     label: 'Gemini 3 Pro Image (Nano Banana Pro)',
     short: 'pro',
-    id: 'gemini-3-pro-image-preview',
+    id: 'gemini-3-pro-image',
     masked: false,
     usdPerImage: 0.134,
-    // Confirmed by a call that returned an image, in about forty-seven seconds:
-    // the slowest of the four, and the most expensive.
+    unverified: true,
+    // Moved off `-preview` onto the GA id, untested here but generating daily in
+    // PanelForge next door. The preview endpoint is the leading suspect for why
+    // Pro exhausts so much sooner than Flash: same model, thinner capacity. The
+    // flag is the honest state until a call comes back — clear it then.
+    //
+    // What the preview id did, for comparison once this one has run: returned an
+    // image in about forty-seven seconds, the slowest of the four and the most
+    // expensive.
   },
   {
     key: 'gemini-image-flash',
