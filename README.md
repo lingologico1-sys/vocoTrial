@@ -13,9 +13,17 @@ OpenAI ── ephemeral secret, then audio goes direct ────────�
      └──────── WebRTC audio, no relay ────────────────────► OpenAI ◄───┘
 
 Gemini ── no usable browser credential exists, so the socket is relayed
-  browser ──WS /api/live/gemini──► Worker ──WS ?key=…──► Google
+  browser ──WS /api/live/gemini──► Worker ──WS ?key=…──► Vertex AI
      └──────── audio both ways, through Cloudflare ───────────┘
 ```
+
+Everything Google here — the Live socket and face-kit image generation both —
+runs on **Vertex AI in express mode** (`aiplatform.googleapis.com`), on the same
+`GEMINI_API_KEY` / `GEMINI_API_KEY2` that PanelForge uses in `bannerMaker`, so
+it bills through that GCP project rather than AI Studio. Express mode is the
+part that makes it possible from a Worker at all: it takes a plain API key and
+infers the project, with no OAuth exchange to sign. See
+[functions/api/_vertex.ts](functions/api/_vertex.ts).
 
 The one rule the whole design turns on: **the provider API keys never reach the
 browser.** Anything in a JS bundle is public, and a leaked Realtime key is a
@@ -42,7 +50,8 @@ the key private at the cost of a latency leg.
 | [functions/api/auth/](functions/api/auth/) | Trades the site password for a signed session cookie |
 | [src/PasswordGate.tsx](src/PasswordGate.tsx) | The sign-in screen. Cosmetic — the middleware is what actually refuses |
 | [functions/api/session/openai.ts](functions/api/session/openai.ts) | Mints an OpenAI Realtime client secret (`ek_…`) |
-| [functions/api/live/gemini.ts](functions/api/live/gemini.ts) | Relays the Gemini Live socket to Google with the API key attached |
+| [functions/api/live/gemini.ts](functions/api/live/gemini.ts) | Relays the Gemini Live socket to Vertex with the API key attached |
+| [functions/api/_vertex.ts](functions/api/_vertex.ts) | Where the Vertex host, key pair and express-mode model naming live — the one file that knows the surface |
 | [src/realtime/instructions.ts](src/realtime/instructions.ts) | The prompt presets, and the default the server falls back to |
 | [src/realtime/settings.ts](src/realtime/settings.ts) | Which provider knobs exist, which models take them, and the sanitiser |
 | [functions/api/session/_providerConfig.ts](functions/api/session/_providerConfig.ts) | Translates those settings into each provider's payload shape |
@@ -96,11 +105,12 @@ gates the build.
    pick `lingologico1-sys/vocoTrial`.
 2. Build command `npm run build`, output directory `dist`. Cloudflare reads the
    rest from [wrangler.toml](wrangler.toml).
-3. **Settings → Variables and Secrets**, add three **Secrets** (encrypted, not
+3. **Settings → Variables and Secrets**, add these **Secrets** (encrypted, not
    plain text) to Production *and* Preview:
    - `SITE_PASSWORD`
    - `OPENAI_API_KEY`
-   - `GOOGLE_API_KEY`
+   - `GEMINI_API_KEY` (Vertex AI key — the one PanelForge uses)
+   - `GEMINI_API_KEY2` (optional fallback Vertex key)
 
    They have to go in the dashboard: because `wrangler.toml` exists, Pages takes
    plain-text vars from that file and the dashboard will only accept Secrets.
@@ -118,7 +128,7 @@ server allowlist have to agree and a var can only hold one value.
 
 ```bash
 npm install
-cp .dev.vars.example .dev.vars   # then paste in the password and the two keys
+cp .dev.vars.example .dev.vars   # then paste in the password and the keys
 npm run dev:api                  # SPA + functions, which is what you want
 ```
 
@@ -144,10 +154,11 @@ npm run lint
 | Same-origin gate (`403` on a forged Origin) | working |
 | Password gate (`401` on every `/api/*` without a cookie, fetch and WebSocket alike) | working — verified against `wrangler pages dev`, including a tampered cookie and an unset `SITE_PASSWORD` |
 | `/api/session/openai` | mints ephemeral secrets correctly |
-| `/api/live/gemini` | **working** — relays the Live socket; reaches `setupComplete` on both models |
-| `/api/live/models` | lists the ids Google will actually accept for `bidiGenerateContent` |
-| OpenAI voice conversation | **working** — confirmed from a browser on `gpt-realtime` and `gpt-realtime-mini` |
-| Gemini handshake | **working** — 12/12 connections reached `setupComplete` |
+| `/api/live/gemini` | relays the Live socket — **retest on Vertex**; the 12/12 `setupComplete` run below was against AI Studio |
+| `/api/live/models` | asks Vertex which publisher model ids the key can see, and probes each id in the picker |
+| `/api/image/generate` | OpenAI unchanged; Gemini **retest on Vertex** |
+| OpenAI voice conversation | **working** — confirmed from a browser on `gpt-realtime` and `gpt-realtime-mini`, and untouched by the Vertex move |
+| Gemini handshake | 12/12 reached `setupComplete` **on AI Studio**; nothing yet on Vertex |
 | Gemini audio in a browser | untested; needs a mic |
 
 ### Which model ids are actually confirmed
@@ -160,13 +171,21 @@ of a 3.1 id, and OpenAI's `client_secrets` minted a deliberate
 rejects a hand-rolled SDP offer before it reads the model, so that proves
 nothing either.
 
-Both OpenAI ids are confirmed by real browser calls. Both Gemini ids come from
-Google's own catalogue via `/api/live/models` and reach `setupComplete`, so they
-are confirmed too. Nothing in the picker is marked `unverified` today.
+Both OpenAI ids are confirmed by real browser calls, and the Vertex move does
+not touch them.
 
-Do not guess a Gemini id. Two rounds of plausible-looking guesses were both
-wrong, including `gemini-live-3.1-flash-preview`, whose word order looks right
-and is not. Ask `/api/live/models` instead.
+**Every Gemini id is marked `unverified` again.** They were confirmed — the
+Live pair reached `setupComplete`, the Flash image model returned a picture —
+but against AI Studio, and that confirmation does not survive the move. Vertex
+publishes its models out of its own catalogue and names the Live ones
+differently, so an id that worked there may not exist here at all. Clearing a
+flag needs a call on the new surface, not the memory of one on the old.
+
+Do not guess a Gemini id. Two rounds of plausible-looking guesses were wrong on
+AI Studio, including `gemini-live-3.1-flash-preview`, whose word order looks
+right and is not — though that spelling is closer to how Vertex names its Live
+models, so it may yet be the right shape here. Ask `/api/live/models` instead;
+it now reports Vertex's catalogue and the HTTP status of every id in the picker.
 
 ### Why Gemini is proxied and OpenAI is not
 
@@ -190,6 +209,12 @@ length of a call.
 
 OpenAI keeps the direct path: its ephemeral secrets work, so WebRTC goes
 browser-to-OpenAI with no relay.
+
+The move to Vertex does not change any of that on its own — the relay is still
+carrying the audio, and an express-mode API key is no more browser-safe than an
+AI Studio one. What it changes is where the question can be asked next: the
+direct browser-to-Google line this relay stands in for needs a credential the
+page may hold, and if one exists it will be a Vertex one.
 
 ## Known edges
 

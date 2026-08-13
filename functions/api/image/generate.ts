@@ -1,5 +1,6 @@
 import { IMAGE_MODELS, findImageModel, type ImageModelChoice } from '../../../src/facekit/imageModels';
 import { type GateEnv, json } from '../_middleware';
+import { VERTEX_KEY_NAMES, vertexGenerateContentUrl, vertexKey } from '../_vertex';
 
 /**
  * Generates one face-kit patch, on whichever provider was asked for.
@@ -14,7 +15,8 @@ import { type GateEnv, json } from '../_middleware';
  *
  *  - OpenAI takes multipart with a real mask image, and paints inside it.
  *  - Gemini takes JSON with the image inline and no mask at all, and is steered
- *    by the prompt alone.
+ *    by the prompt alone. It runs on Vertex AI now rather than AI Studio, which
+ *    changes the URL, the key and the meter but not the payload — see _vertex.ts.
  *
  * Neither difference reaches the browser as anything more than a flag, because
  * neither result is trusted whole: the client crops every result to the slot's
@@ -23,7 +25,6 @@ import { type GateEnv, json } from '../_middleware';
  */
 
 const OPENAI_EDITS_URL = 'https://api.openai.com/v1/images/edits';
-const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
 
 /**
  * A ceiling on what the browser may push through here, in base64 characters.
@@ -148,7 +149,7 @@ async function generateGemini(
   image: string,
 ): Promise<Attempt> {
   const upstream = await fetch(
-    `${GEMINI_BASE}/${encodeURIComponent(model.id)}:generateContent`,
+    vertexGenerateContentUrl(model.id),
     {
       method: 'POST',
       headers: { 'x-goog-api-key': key, 'Content-Type': 'application/json' },
@@ -168,8 +169,14 @@ async function generateGemini(
     const detail = await upstream.text();
     let reason: string | undefined;
     try {
-      const parsed = JSON.parse(detail) as { error?: { status?: string } };
-      reason = trimmed(parsed.error?.status);
+      // Vertex sometimes wraps the error in a one-element array where AI Studio
+      // returned a bare object. Unwrapping it is what keeps RESOURCE_EXHAUSTED
+      // legible below rather than collapsing into "could not produce that image".
+      const parsed = JSON.parse(detail) as
+        | { error?: { status?: string } }
+        | { error?: { status?: string } }[];
+      const first = Array.isArray(parsed) ? parsed[0] : parsed;
+      reason = trimmed(first?.error?.status);
     } catch {
       reason = undefined;
     }
@@ -241,9 +248,9 @@ export async function onRequestPost(
     return json({ error: 'That mask is too large to send', code: 'image_too_large' }, 413);
   }
 
-  const key = model.provider === 'openai' ? env.OPENAI_API_KEY : env.GOOGLE_API_KEY;
+  const key = model.provider === 'openai' ? env.OPENAI_API_KEY : vertexKey(env);
   if (!key) {
-    const name = model.provider === 'openai' ? 'OPENAI_API_KEY' : 'GOOGLE_API_KEY';
+    const name = model.provider === 'openai' ? 'OPENAI_API_KEY' : VERTEX_KEY_NAMES;
     return json({ error: `${name} is not configured`, code: 'no_key' }, 500);
   }
 

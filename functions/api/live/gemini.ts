@@ -1,4 +1,5 @@
 import { geminiSetup } from '../session/_providerConfig';
+import { VERTEX_KEY_NAMES, VERTEX_LIVE_URL, vertexKey, vertexModel } from '../_vertex';
 import { resolveInstructions, resolveSettings } from '../session/_resolve';
 import { findModel } from '../../../src/realtime/models';
 import { defaultLanguageCode, findLanguage } from '../../../src/realtime/languages';
@@ -18,18 +19,16 @@ import { type GateEnv, json } from '../_middleware';
  * time for the length of every call. The OpenAI path still goes direct over
  * WebRTC and is unaffected.
  *
- * What survives from the old design is the part that mattered: GOOGLE_API_KEY
- * stays server-side, and the agent's configuration is not the browser's to
- * choose — see the setup handling below.
+ * What survives from the old design is the part that mattered: the key stays
+ * server-side, and the agent's configuration is not the browser's to choose —
+ * see the setup handling below.
+ *
+ * The upstream is now Vertex AI in express mode rather than Google AI Studio,
+ * on PanelForge's keys and PanelForge's meter. The relay itself is indifferent
+ * to which: the socket is opened the same way, the frames are forwarded
+ * verbatim, and the whole difference is the URL and how the model is named in
+ * the setup frame. See _vertex.ts.
  */
-
-/**
- * https, not wss. A Worker opens an outbound WebSocket by fetching with an
- * Upgrade header, and the Fetch API refuses any scheme but http(s) — a wss://
- * URL here throws "Fetch API cannot load" before the request is made.
- */
-const UPSTREAM =
-  'https://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent';
 
 /**
  * How long to wait for the browser's config frame before setting up without it.
@@ -70,16 +69,17 @@ export async function onRequest(
     return json({ error: 'Expected a WebSocket upgrade', code: 'not_websocket' }, 426);
   }
 
-  if (!env.GOOGLE_API_KEY) {
-    return json({ error: 'GOOGLE_API_KEY is not configured', code: 'no_key' }, 500);
+  const key = vertexKey(env);
+  if (!key) {
+    return json({ error: `${VERTEX_KEY_NAMES} is not configured`, code: 'no_key' }, 500);
   }
 
   // Same allowlist the session routes use: a key, never a raw model id.
   const params = new URL(request.url).searchParams;
-  const key = params.get('model') ?? '';
-  const choice = findModel(key);
+  const modelKey = params.get('model') ?? '';
+  const choice = findModel(modelKey);
   if (!choice || choice.provider !== 'gemini') {
-    return json({ error: `Unknown Gemini model "${key}"`, code: 'bad_model' }, 400);
+    return json({ error: `Unknown Gemini model "${modelKey}"`, code: 'bad_model' }, 400);
   }
 
   const language = findLanguage(params.get('language') ?? defaultLanguageCode());
@@ -90,14 +90,14 @@ export async function onRequest(
   /**
    * The key rides in the query string because that is the only credential form
    * Google's Live endpoint accepts, so anything logged about this request has
-   * to be scrubbed first. It is not hypothetical: the wss:// bug above threw a
-   * TypeError whose message quoted the whole URL, and the key went straight
-   * into the Worker log with it.
+   * to be scrubbed first. It is not hypothetical: the wss:// scheme bug that
+   * VERTEX_LIVE_URL still carries a note about threw a TypeError whose message
+   * quoted the whole URL, and the key went straight into the Worker log with it.
    */
-  const scrub = (text: string) => text.split(env.GOOGLE_API_KEY!).join('<redacted>');
+  const scrub = (text: string) => text.split(key).join('<redacted>');
 
-  const upstreamUrl = new URL(UPSTREAM);
-  upstreamUrl.searchParams.set('key', env.GOOGLE_API_KEY);
+  const upstreamUrl = new URL(VERTEX_LIVE_URL);
+  upstreamUrl.searchParams.set('key', key);
 
   let upstream: Response;
   try {
@@ -188,7 +188,7 @@ export async function onRequest(
 
     google.send(
       JSON.stringify({
-        setup: geminiSetup(choice.id, written.value, resolveSettings(config, choice)),
+        setup: geminiSetup(vertexModel(choice.id), written.value, resolveSettings(config, choice)),
       }),
     );
     return true;

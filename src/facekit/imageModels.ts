@@ -59,11 +59,13 @@ export interface ImageModelChoice {
 /**
  * WHAT "UNVERIFIED" MEANS HERE
  *
- * Unchecked, not suspect — the same meaning realtime/models.ts gives it. Pro
- * carries the flag because its id was just moved to GA; the other three have
- * each returned an image from a real call. Anything added later starts flagged,
- * because an image endpoint rejects an unknown model only at generation time
- * and there is no earlier check.
+ * Unchecked, not suspect — the same meaning realtime/models.ts gives it. Both
+ * Gemini entries carry the flag: Pro because its id was moved to GA, Flash
+ * because the move to Vertex AI invalidated the call that confirmed it. A model
+ * id belongs to a surface, and "it returned an image on AI Studio" says nothing
+ * about whether Vertex publishes that id at all. The two OpenAI entries are
+ * untouched. Anything added later starts flagged, because an image endpoint
+ * rejects an unknown model only at generation time and there is no earlier check.
  *
  * Clear the flag on an entry once you have seen it generate. Do not clear it
  * because it looks right. The rate stays a read-off-a-page figure either way —
@@ -80,7 +82,11 @@ export interface ImageModelChoice {
  * gpt-image-1. OpenAI's poses came back flatter and more photographic.
  *
  * The counterweight is reliability rather than quality, and the reason is quota
- * rather than taste. Gemini fails in bursts — a run can lose half its slots and
+ * rather than taste — and the quota is now GCP's rather than AI Studio's, so
+ * the shape of the bursts described below may change. Vertex meters image
+ * generation per-minute against a project-wide shared pool, which punishes
+ * bursts specifically; PanelForge paces its batches for exactly that reason.
+ * Gemini fails in bursts — a run can lose half its slots and
  * the same slots go through untouched an hour later — and once the error
  * carried a stated reason, the bursts turned out to be RESOURCE_EXHAUSTED
  * rather than the model declining the picture. Worth knowing, because it points
@@ -139,9 +145,11 @@ export const IMAGE_MODELS: ImageModelChoice[] = [
     usdPerImage: 0.134,
     unverified: true,
     // Moved off `-preview` onto the GA id, untested here but generating daily in
-    // PanelForge next door. The preview endpoint is the leading suspect for why
-    // Pro exhausts so much sooner than Flash: same model, thinner capacity. The
-    // flag is the honest state until a call comes back — clear it then.
+    // PanelForge next door — and now on PanelForge's surface and keys too, which
+    // is the strongest reason to expect this one to go through. The preview
+    // endpoint was the leading suspect for why Pro exhausted so much sooner than
+    // Flash: same model, thinner capacity. The flag is the honest state until a
+    // call comes back — clear it then.
     //
     // What the preview id did, for comparison once this one has run: returned an
     // image in about forty-seven seconds, the slowest of the four and the most
@@ -155,7 +163,12 @@ export const IMAGE_MODELS: ImageModelChoice[] = [
     id: 'gemini-2.5-flash-image',
     masked: false,
     usdPerImage: 0.039,
-    // Confirmed by a call that returned an image, in about eleven seconds.
+    unverified: true,
+    // Confirmed by a call that returned an image in about eleven seconds — on
+    // AI Studio, before the move. Vertex publishes a Flash image model too, but
+    // out of its own catalogue: if this 404s, the id is the thing to check
+    // first, and PanelForge's Flash entry names a different one
+    // (gemini-3.1-flash-image) against the very same project.
   },
 ];
 

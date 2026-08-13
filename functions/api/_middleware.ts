@@ -28,7 +28,9 @@ import { readToken, tokenIsValid } from './auth/_cookie';
 
 export interface GateEnv {
   OPENAI_API_KEY?: string;
-  GOOGLE_API_KEY?: string;
+  /** Vertex AI key (GCP billing), primary then fallback — see _vertex.ts. */
+  GEMINI_API_KEY?: string;
+  GEMINI_API_KEY2?: string;
   OPENAI_REALTIME_VOICE?: string;
   /** The site password. A Secret in the dashboard — never in wrangler.toml. */
   SITE_PASSWORD?: string;

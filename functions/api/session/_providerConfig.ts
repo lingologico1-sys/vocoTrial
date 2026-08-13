@@ -102,14 +102,17 @@ export function openAiSession(
 /**
  * Builds the `setup` frame for Gemini Live.
  *
- * The model id is resolved from the allowlist by the caller and the key is
- * attached by the relay, so nothing spendable is decided here.
+ * The model arrives as a full resource name, not a bare id: on Vertex that is
+ * `publishers/google/models/<id>`, and the relay builds it from the allowlisted
+ * choice (see _vertex.ts). Resolving the name upstream keeps the one field that
+ * decides which meter is spent out of reach of both this file and the browser,
+ * which is the same reason the key is attached by the relay rather than here.
  *
  * No speechConfig.languageCode is sent, on either model — settings.ts explains
  * at length why that field is absent rather than forgotten.
  */
 export function geminiSetup(
-  modelId: string,
+  modelPath: string,
   instructions: string,
   settings: SessionSettings,
 ): Record<string, unknown> {
@@ -125,7 +128,7 @@ export function geminiSetup(
   });
 
   return {
-    model: `models/${modelId}`,
+    model: modelPath,
     generationConfig: compact({
       responseModalities: ['AUDIO'],
       temperature: settings.temperature,

@@ -36,12 +36,16 @@ export const MODELS: ModelChoice[] = [
     provider: 'gemini',
     label: 'Gemini 3.1 Flash Live',
     id: 'gemini-3.1-flash-live-preview',
+    // Confirmed against AI Studio, which is no longer the surface these run on.
+    // See the note below on what the move to Vertex did to both Gemini ids.
+    unverified: true,
   },
   {
     key: 'gemini-native-audio',
     provider: 'gemini',
     label: 'Gemini 2.5 Flash Native Audio',
     id: 'gemini-2.5-flash-native-audio-latest',
+    unverified: true,
   },
   {
     key: 'openai-realtime',
@@ -65,6 +69,16 @@ export const MODELS: ModelChoice[] = [
  * Unchecked, not suspect. A model id can only be confirmed by a call that
  * actually connects, because nothing earlier in the chain looks at it:
  *
+ * Both Gemini ids carry the flag again as of the move to Vertex AI. They were
+ * confirmed — twelve connections reached `setupComplete` — but against AI
+ * Studio, and that confirmation does not travel: Vertex publishes its Live
+ * models under different ids, so `gemini-2.5-flash-native-audio-latest` may
+ * simply not exist there. Do not clear the flags because the calls used to
+ * work; run POST /api/live/models against the new surface, correct the ids to
+ * whatever it reports, then clear them on a connection that reaches
+ * `setupComplete`.
+ *
+ *
  *  - Neither provider validates the model when issuing a credential. Google's
  *    `auth_tokens` accepted four mutually exclusive spellings of a 3.1 id, and
  *    OpenAI's `client_secrets` minted a deliberate `gpt-realtime-no-such-model`
@@ -74,15 +88,16 @@ export const MODELS: ModelChoice[] = [
  *    real one — so it discriminates nothing without a real WebRTC stack.
  *
  * Both OpenAI ids are therefore confirmed by the only means available: a browser
- * placed a call and it connected. Nothing here is unverified today; the flag
- * stays for the next id that gets added ahead of a real call.
+ * placed a call and it connected. They are untouched by the Vertex move, which
+ * is a Google-side change only.
  *
  * The Gemini ids came from Google's own catalogue rather than from guessing —
- * POST /api/live/models lists everything whose supportedGenerationMethods
- * include bidiGenerateContent. Use it before inventing an id: two rounds of
- * plausible-looking guesses (gemini-live-3.1-flash-preview,
- * gemini-live-2.5-flash-preview) were both wrong, and the word order is not
- * what you would expect.
+ * POST /api/live/models asks the live surface directly. Use it before inventing
+ * an id: two rounds of plausible-looking guesses (gemini-live-3.1-flash-preview,
+ * gemini-live-2.5-flash-preview) were both wrong on AI Studio, and the word
+ * order is not what you would expect. Worth knowing now that Vertex is the
+ * surface: those two rejected spellings are close to how Vertex *does* name its
+ * Live models, so the id that is wrong here may well be right there.
  */
 
 export function findModel(key: string): ModelChoice | undefined {
