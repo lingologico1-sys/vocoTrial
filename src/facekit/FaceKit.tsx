@@ -9,8 +9,8 @@ import {
   defaultImageModelKey,
   findImageModel,
 } from './imageModels';
-import { KIT_FORMAT, newKit, patchFilename, type FaceKit as Kit } from './kit';
-import { NEUTRALISE_BASE_PROMPT, SLOTS, slot, type Region, type SlotId } from './slots';
+import { KIT_FORMAT, defaultBrowBox, newKit, patchFilename, type FaceKit as Kit } from './kit';
+import { NEUTRALISE_BASE_PROMPT, SLOTS, isBrow, slot, type BoxId, type SlotId } from './slots';
 import { deleteKit, listKits, saveKit, selectKit, selectedKitId } from './store';
 import { download, zip } from './zip';
 
@@ -36,10 +36,12 @@ type Candidate = { modelKey: string; patch: string; full: string; usd: number };
  * The eye tabs say which side of the *picture*, not which of her eyes, because
  * that is what you are dragging a rectangle over.
  */
-const REGION_TABS: { id: Region; label: string }[] = [
+const REGION_TABS: { id: BoxId; label: string }[] = [
   { id: 'mouth', label: 'Mouth' },
   { id: 'eyeLeft', label: 'Left eye' },
   { id: 'eyeRight', label: 'Right eye' },
+  { id: 'browLeft', label: 'Left brow' },
+  { id: 'browRight', label: 'Right brow' },
 ];
 
 /**
@@ -87,7 +89,7 @@ export default function FaceKit() {
   const [kit, setKit] = useState<Kit | null>(null);
   const [saved, setSaved] = useState<Kit[]>([]);
   const [inUse, setInUse] = useState<string | null>(selectedKitId());
-  const [region, setRegion] = useState<Region>('mouth');
+  const [region, setRegion] = useState<BoxId>('mouth');
   const [candidates, setCandidates] = useState<Partial<Record<SlotId, Candidate[]>>>({});
   /**
    * Which generations are in flight, and on which attempt.
@@ -245,7 +247,17 @@ export default function FaceKit() {
    * would misplace it exactly as a stored patch would.
    */
   const committed = useMemo(() => {
-    const counts: Record<Region, number> = { mouth: 0, eyeLeft: 0, eyeRight: 0 };
+    // Brows are counted for the same reason they are listed: so the rest of
+    // the page can index by box without a special case. The number stays zero
+    // — nothing is ever generated into that box — which is exactly right, as
+    // a box holding no artwork has nothing to be corrupted by a later drag.
+    const counts: Record<BoxId, number> = {
+      mouth: 0,
+      eyeLeft: 0,
+      eyeRight: 0,
+      browLeft: 0,
+      browRight: 0,
+    };
     for (const entry of SLOTS) {
       if (kit?.patches[entry.id]) counts[entry.region] += 1;
       counts[entry.region] += candidates[entry.id]?.length ?? 0;
@@ -261,7 +273,7 @@ export default function FaceKit() {
    * prevent, so an unlock that spared it would only move the bug behind another
    * button.
    */
-  const unlock = (which: Region) => {
+  const unlock = (which: BoxId) => {
     const ids = SLOTS.filter((entry) => entry.region === which).map((entry) => entry.id);
     edit((current) => {
       const patches = { ...current.patches };
@@ -501,46 +513,103 @@ export default function FaceKit() {
                   }
                 />
 
-                {committed[region] > 0 ? (
-                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-800 bg-slate-900/40 px-3 py-2">
-                    <p className="text-xs text-slate-400">
-                      This box is fixed — {committed[region]}{' '}
-                      {committed[region] === 1 ? 'image was' : 'images were'} cut to it.
-                    </p>
-                    <button
-                      type="button"
-                      onClick={() => unlock(region)}
-                      className="rounded-md border border-amber-700/70 px-2 py-1 text-[11px] text-amber-300 hover:border-amber-500"
-                    >
-                      Unlock · discards {committed[region]}
-                    </button>
-                  </div>
-                ) : (
-                  <p className="rounded-lg border border-slate-800 bg-slate-900/40 px-3 py-2 text-xs text-slate-400">
-                    Place this box now. It fixes on the first generation, because everything
-                    generated afterwards is cut to it.
-                  </p>
-                )}
+                {isBrow(region) ? (
+                  <>
+                    {kit.boxes[region] ? (
+                      <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-800 bg-slate-900/40 px-3 py-2">
+                        <p className="text-xs text-slate-400">
+                          Free to move at any time — nothing is ever cut to this one.
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            edit((current) => {
+                              const boxes = { ...current.boxes };
+                              delete boxes[region];
+                              return { ...current, boxes };
+                            })
+                          }
+                          className="rounded-md border border-slate-700 px-2 py-1 text-[11px] text-slate-400 hover:border-slate-500"
+                        >
+                          Remove · this brow stops moving
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-800 bg-slate-900/40 px-3 py-2">
+                        <p className="text-xs text-slate-400">
+                          This brow does not move.
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            edit((current) => ({
+                              ...current,
+                              boxes: { ...current.boxes, [region]: defaultBrowBox(region) },
+                            }))
+                          }
+                          className="rounded-md border border-violet-700/70 px-2 py-1 text-[11px] text-violet-300 hover:border-violet-500"
+                        >
+                          Place a box for it
+                        </button>
+                      </div>
+                    )}
 
-                <p className="text-xs text-slate-500">
-                  The box is the mask, the crop, and where the patch lands.
-                  {region === 'mouth' ? (
-                    <>
-                      {' '}
-                      Cover the whole of the existing mouth — anything it leaves showing stays
-                      showing — and leave room <em>below</em> it for a dropped jaw. Every pose is
-                      cropped at this box, so one sized to the closed mouth cuts the bottom off
-                      the open one.
-                    </>
-                  ) : (
-                    <>
-                      {' '}
-                      Keep it <em>inside</em> the lens. A box that catches a spectacle rim invites
-                      the model to redesign the glasses; one that stops short of the frame throws
-                      any such damage away with the rest of the crop.
-                    </>
-                  )}
-                </p>
+                    <p className="text-xs text-slate-500">
+                      Not a mask and not a crop — no generator ever sees this box, so it
+                      never locks and the glasses are never at risk. Cover the brow, give it
+                      plenty of plain forehead <em>above</em> (the height is the travel budget:
+                      the lift is capped at a third of it), and end it on the last clear row of
+                      skin <em>below</em> the brow and above the spectacle rim — that bottom row
+                      is what gets stretched up to fill the gap the brow leaves. There is one
+                      box per brow because a rim runs diagonally, so the row that is clear on
+                      one side is already frame on the other. Where a rim or a fringe leaves no
+                      clear row at all, leave the box unplaced.
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    {committed[region] > 0 ? (
+                      <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-800 bg-slate-900/40 px-3 py-2">
+                        <p className="text-xs text-slate-400">
+                          This box is fixed — {committed[region]}{' '}
+                          {committed[region] === 1 ? 'image was' : 'images were'} cut to it.
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => unlock(region)}
+                          className="rounded-md border border-amber-700/70 px-2 py-1 text-[11px] text-amber-300 hover:border-amber-500"
+                        >
+                          Unlock · discards {committed[region]}
+                        </button>
+                      </div>
+                    ) : (
+                      <p className="rounded-lg border border-slate-800 bg-slate-900/40 px-3 py-2 text-xs text-slate-400">
+                        Place this box now. It fixes on the first generation, because everything
+                        generated afterwards is cut to it.
+                      </p>
+                    )}
+
+                    <p className="text-xs text-slate-500">
+                      The box is the mask, the crop, and where the patch lands.
+                      {region === 'mouth' ? (
+                        <>
+                          {' '}
+                          Cover the whole of the existing mouth — anything it leaves showing stays
+                          showing — and leave room <em>below</em> it for a dropped jaw. Every pose
+                          is cropped at this box, so one sized to the closed mouth cuts the bottom
+                          off the open one.
+                        </>
+                      ) : (
+                        <>
+                          {' '}
+                          Keep it <em>inside</em> the lens. A box that catches a spectacle rim
+                          invites the model to redesign the glasses; one that stops short of the
+                          frame throws any such damage away with the rest of the crop.
+                        </>
+                      )}
+                    </p>
+                  </>
+                )}
               </div>
 
               <div className="space-y-3">

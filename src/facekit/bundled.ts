@@ -1,5 +1,5 @@
-import { KIT_FORMAT, migrate, type Box, type FaceKit } from './kit';
-import type { Region, SlotId } from './slots';
+import { KIT_FORMAT, migrate, type Boxes, type FaceKit } from './kit';
+import type { SlotId } from './slots';
 
 /**
  * The kit checked into public/faces/, for a browser that has never authored one.
@@ -22,7 +22,7 @@ interface BundledManifest {
   format?: number;
   name?: string;
   base?: string;
-  boxes?: Record<Region, Box>;
+  boxes?: Boxes;
   patches?: Partial<Record<SlotId, string>>;
 }
 

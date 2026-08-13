@@ -1,5 +1,5 @@
 import { CANVAS_EDGE } from './imageModels';
-import type { Region, SlotId } from './slots';
+import type { BrowId, Region, SlotId } from './slots';
 
 /**
  * What a finished face kit is, in one place.
@@ -16,6 +16,24 @@ export interface Box {
   y: number;
   width: number;
   height: number;
+}
+
+/**
+ * The rectangles, with the one optional member spelled out.
+ *
+ * The three regions are required: a slot is cropped to each of them, and a kit
+ * missing one has nowhere to put the artwork it already holds.
+ *
+ * The brow boxes are optional because absent is a meaningful answer — it means
+ * that brow does not move, which is what every kit did before they existed, and
+ * the right answer for a portrait whose brows sit hard against a spectacle rim
+ * or under a fringe, where there is no clear skin to slide them into. They are
+ * independently optional: a face can lift one brow and not the other, because
+ * the clearance that decides it is a property of one side of one picture.
+ */
+export interface Boxes extends Record<Region, Box> {
+  browLeft?: Box;
+  browRight?: Box;
 }
 
 export interface FaceKit {
@@ -47,7 +65,7 @@ export interface FaceKit {
    */
   original?: string;
   /** Where each region sits on the base. Also the generation mask. */
-  boxes: Record<Region, Box>;
+  boxes: Boxes;
   /** One PNG data URL per authored slot, already cropped to its region's box. */
   patches: Partial<Record<SlotId, string>>;
   /** What the kit has cost to generate so far, in USD. A floor — see below. */
@@ -69,7 +87,10 @@ export const KIT_FORMAT = 2;
 export function migrate(kit: FaceKit): FaceKit {
   if (kit.format >= KIT_FORMAT) return kit;
 
-  const legacy = (kit.boxes as Partial<Record<string, Box>>).eyes;
+  // Through `unknown` because `Boxes` names its members and `eyes` is not one
+  // of them — that is the point of the migration, and the cast is how a shape
+  // the type system has already forgotten gets read one last time.
+  const legacy = (kit.boxes as unknown as Partial<Record<string, Box>>).eyes;
   const boxes = { ...defaultBoxes(), mouth: kit.boxes.mouth ?? defaultBoxes().mouth };
 
   if (legacy) {
@@ -92,7 +113,7 @@ export function migrate(kit: FaceKit): FaceKit {
  * and they are wrong for every portrait — the point is that being wrong by a
  * little is a much easier starting position than an empty canvas.
  */
-export function defaultBoxes(): Record<Region, Box> {
+export function defaultBoxes(): Boxes {
   const edge = CANVAS_EDGE;
   const eye = {
     y: Math.round(edge * 0.33),
@@ -116,6 +137,29 @@ export function defaultBoxes(): Record<Region, Box> {
     // the model to redesign the glasses.
     eyeLeft: { ...eye, x: Math.round(edge * 0.3) },
     eyeRight: { ...eye, x: Math.round(edge * 0.54) },
+  };
+}
+
+/**
+ * A starting rectangle for one brow, offered rather than assumed.
+ *
+ * Deliberately not part of `defaultBoxes`, so that neither a new kit nor an
+ * older one migrating forward silently acquires brow motion at a guessed
+ * position. A guessed mouth box is obvious the moment you look at the picker; a
+ * guessed brow box does nothing at all until the face speaks, and then slides a
+ * rectangle of forehead around for reasons nobody chose. Placing it is a press.
+ *
+ * Deep rather than snug, because the height is the travel budget — the lift is
+ * capped at a third of it — and because the top of the box wants to be up in
+ * plain forehead where a seam has nothing to catch on.
+ */
+export function defaultBrowBox(which: BrowId): Box {
+  const edge = CANVAS_EDGE;
+  return {
+    x: Math.round(edge * (which === 'browLeft' ? 0.35 : 0.53)),
+    y: Math.round(edge * 0.29),
+    width: Math.round(edge * 0.12),
+    height: Math.round(edge * 0.055),
   };
 }
 

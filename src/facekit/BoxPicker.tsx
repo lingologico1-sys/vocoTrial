@@ -1,7 +1,7 @@
 import { useRef } from 'react';
 import { CANVAS_EDGE } from './imageModels';
-import { clampBox, type Box } from './kit';
-import type { Region } from './slots';
+import { clampBox, type Box, type Boxes } from './kit';
+import type { BoxId } from './slots';
 
 /**
  * Drag a rectangle over the mouth, and another over the eyes.
@@ -17,16 +17,18 @@ import type { Region } from './slots';
  * whether the window is wide or narrow.
  */
 
-const REGION_STYLE: Record<Region, { ring: string; label: string; name: string }> = {
+const BOX_STYLE: Record<BoxId, { ring: string; label: string; name: string }> = {
   mouth: { ring: 'border-amber-400', label: 'text-amber-300', name: 'mouth' },
   eyeLeft: { ring: 'border-sky-400', label: 'text-sky-300', name: 'left eye' },
   eyeRight: { ring: 'border-emerald-400', label: 'text-emerald-300', name: 'right eye' },
+  browLeft: { ring: 'border-violet-400', label: 'text-violet-300', name: 'left brow' },
+  browRight: { ring: 'border-fuchsia-400', label: 'text-fuchsia-300', name: 'right brow' },
 };
 
 interface BoxPickerProps {
   base: string;
-  boxes: Record<Region, Box>;
-  active: Region;
+  boxes: Boxes;
+  active: BoxId;
   /**
    * Whether the active region's box has been fixed by a generation.
    *
@@ -37,7 +39,7 @@ interface BoxPickerProps {
    * drag is the cheap way to make that impossible.
    */
   locked?: boolean;
-  onChange: (region: Region, box: Box) => void;
+  onChange: (region: BoxId, box: Box) => void;
 }
 
 export default function BoxPicker({ base, boxes, active, locked, onChange }: BoxPickerProps) {
@@ -53,13 +55,14 @@ export default function BoxPicker({ base, boxes, active, locked, onChange }: Box
    */
   const startDrag = (
     event: React.PointerEvent,
-    region: Region,
+    region: BoxId,
     handle: null | 'nw' | 'ne' | 'sw' | 'se',
   ) => {
     event.preventDefault();
     event.stopPropagation();
 
     const box = boxes[region];
+    if (!box) return;
     const width = frame.current?.getBoundingClientRect().width ?? 1;
     const scale = CANVAS_EDGE / width;
     const startX = event.clientX;
@@ -113,9 +116,12 @@ export default function BoxPicker({ base, boxes, active, locked, onChange }: Box
     >
       <img src={base} alt="" className="pointer-events-none h-full w-full" draggable={false} />
 
-      {(Object.keys(boxes) as Region[]).map((region) => {
+      {(Object.keys(boxes) as BoxId[]).map((region) => {
         const box = boxes[region];
-        const style = REGION_STYLE[region];
+        const style = BOX_STYLE[region];
+        // A kit need not have every box — brows are optional, and one that has
+        // not been placed has nothing to draw rather than a rectangle at zero.
+        if (!box) return null;
         const isActive = region === active;
         const draggable = isActive && !locked;
 

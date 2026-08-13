@@ -30,6 +30,34 @@ export type SlotId = Viseme | 'eyeLeftClosed' | 'eyeRightClosed';
  */
 export type Region = 'mouth' | 'eyeLeft' | 'eyeRight';
 
+/**
+ * Every rectangle a kit holds, which is two more than it has regions.
+ *
+ * The brow boxes are boxes but not regions, and the distinction is the whole
+ * design. Nothing is ever generated into them: each is a window onto the base
+ * that gets redrawn a few pixels higher when the voice gets louder, so no model
+ * is asked for a raised brow and no model gets the chance to restyle a
+ * spectacle frame on the way past.
+ *
+ * There are two of them for the same reason there are two eye boxes, and it is
+ * the same reason again: glasses. A rim runs *diagonally* under the brows, so
+ * the lowest row a brow box can safely end on differs between one side of the
+ * face and the other — on the portrait in public/faces it differs by six pixels,
+ * which is more than the clearance itself. One rectangle spanning both brows
+ * has to take the worse of the two ends and smears frame colour under the brow
+ * on the better one.
+ */
+export type BoxId = Region | 'browLeft' | 'browRight';
+
+/** The brow boxes, in the order the picker offers them. */
+export const BROW_BOXES = ['browLeft', 'browRight'] as const;
+
+export type BrowId = (typeof BROW_BOXES)[number];
+
+export function isBrow(id: BoxId): id is BrowId {
+  return id === 'browLeft' || id === 'browRight';
+}
+
 export interface Slot {
   id: SlotId;
   label: string;
