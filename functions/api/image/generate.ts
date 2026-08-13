@@ -1,4 +1,4 @@
-import { findImageModel, type ImageModelChoice } from '../../../src/facekit/imageModels';
+import { IMAGE_MODELS, findImageModel, type ImageModelChoice } from '../../../src/facekit/imageModels';
 import { type GateEnv, json } from '../_middleware';
 
 /**
@@ -275,11 +275,21 @@ export async function onRequestPost(
     const reason =
       attempt.reason ??
       (model.provider === 'openai' ? openAiReason(attempt.detail) : undefined);
+    // "Declined: RESOURCE_EXHAUSTED" reads as a judgement about the picture. It
+    // is not one — it is the account having nothing left for the moment, which
+    // wants entirely different advice from a refusal.
+    const exhausted = reason === 'RESOURCE_EXHAUSTED';
+    const other = IMAGE_MODELS.find(
+      (entry) => entry.provider === model.provider && entry.key !== model.key,
+    );
+
     return json(
       {
-        error: reason
-          ? `${model.label} declined: ${reason}`
-          : `${model.label} could not produce that image`,
+        error: exhausted
+          ? `${model.label} has no quota left for now — wait, or try ${other?.label ?? 'the other model'}, which has its own allowance.`
+          : reason
+            ? `${model.label} declined: ${reason}`
+            : `${model.label} could not produce that image`,
         code: 'upstream',
         status: attempt.status,
         reason: reason ?? null,

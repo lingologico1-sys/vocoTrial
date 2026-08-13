@@ -57,6 +57,19 @@ export class GenerateError extends Error {
   get retryable(): boolean {
     return this.status === 502 || this.status === 429 || this.status === 503;
   }
+
+  /**
+   * The provider has nothing left to give for now, as opposed to disliking this
+   * particular request.
+   *
+   * Worth telling apart. It waits on a clock rather than on chance, so it wants
+   * a different schedule; and it is not a judgement about the picture, so the
+   * advice that helps is "use the other model or come back later" rather than
+   * "try rewording it".
+   */
+  get exhausted(): boolean {
+    return this.reason === 'RESOURCE_EXHAUSTED' || this.status === 429;
+  }
 }
 
 async function post(body: unknown, signal?: AbortSignal): Promise<{ image: string; usd: number }> {
@@ -90,15 +103,23 @@ async function post(body: unknown, signal?: AbortSignal): Promise<{ image: strin
 /**
  * How long to wait before each retry, in milliseconds.
  *
- * Gemini refuses in bursts rather than at random: whole runs lose half their
- * slots, and the same slots go through untouched later. So the delays climb
- * steeply — a second attempt hard on the heels of the first lands inside the
- * same bad window and learns nothing.
+ * Two schedules, because the two things that go wrong clear on different
+ * timescales and one set of delays cannot suit both.
  *
- * Retrying is close to free, which is what makes this worth doing at all: a
- * refused request returns no image and is not billed.
+ * An ordinary hiccup is usually over in seconds. A spent quota is not: it is
+ * measured against a window, and the shortest window a provider bothers with is
+ * a minute — so a schedule whose longest wait is forty-five seconds can retry
+ * three times inside the very window it is waiting out and learn nothing from
+ * any of them. That was the earlier design, and it is why a run could burn
+ * through its attempts and still report the quota as spent.
+ *
+ * Retrying is close to free, which is what makes waiting this long worth it: a
+ * request that returns no image is not billed.
  */
 const RETRY_DELAYS_MS = [6_000, 20_000, 45_000];
+
+/** Long enough that the first retry lands beyond any per-minute window. */
+const QUOTA_DELAYS_MS = [70_000, 150_000];
 
 function wait(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -126,16 +147,21 @@ async function postWithRetry(
   signal?: AbortSignal,
   onAttempt?: OnAttempt,
 ): Promise<{ image: string; usd: number }> {
-  const total = RETRY_DELAYS_MS.length + 1;
+  // The schedule is chosen from the first failure and then kept, so a run does
+  // not flip between timescales as the reason wobbles between attempts.
+  let schedule: number[] = RETRY_DELAYS_MS;
 
   for (let attempt = 0; ; attempt++) {
-    onAttempt?.(attempt + 1, total);
+    onAttempt?.(attempt + 1, schedule.length + 1);
     try {
       return await post(body, signal);
     } catch (error) {
-      const delay = RETRY_DELAYS_MS[attempt];
-      const worthRetrying = error instanceof GenerateError && error.retryable;
-      if (delay === undefined || !worthRetrying) throw error;
+      const failure = error instanceof GenerateError ? error : null;
+      if (!failure?.retryable) throw error;
+      if (attempt === 0 && failure.exhausted) schedule = QUOTA_DELAYS_MS;
+
+      const delay = schedule[attempt];
+      if (delay === undefined) throw error;
       await wait(delay, signal);
     }
   }

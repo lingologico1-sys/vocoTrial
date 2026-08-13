@@ -78,13 +78,20 @@ export interface ImageModelChoice {
  * eyelids that kept their lashes, which no amount of prompting got out of
  * gpt-image-1. OpenAI's poses came back flatter and more photographic.
  *
- * The counterweight is reliability rather than quality: Gemini refuses in
- * bursts, returning a 200 with prose in it instead of an image, and a run can
- * lose half its slots to a bad window. The refusals are transient — the same
- * slots that failed repeatedly one hour all succeeded the next — so a retry is
- * the fix, not a reworded prompt. Rejected requests are not billed, which makes
- * retrying cheap. The error now carries the provider's own stated reason; read
- * it before assuming anything.
+ * The counterweight is reliability rather than quality, and the reason is quota
+ * rather than taste. Gemini fails in bursts — a run can lose half its slots and
+ * the same slots go through untouched an hour later — and once the error
+ * carried a stated reason, the bursts turned out to be RESOURCE_EXHAUSTED
+ * rather than the model declining the picture. Worth knowing, because it points
+ * somewhere quite different: waiting or changing model helps, rewording does
+ * not, and a burst says nothing whatever about the prompt.
+ *
+ * Pro exhausts far sooner than Flash, which is the practical argument for
+ * Flash beyond its being a third of the price.
+ *
+ * Rejected requests are not billed, which is what makes waiting it out cheap.
+ * The error carries the provider's own stated reason; read it before assuming
+ * anything.
  *
  * Rates below are per-image list prices for a single 1024x1024 generation, read
  * off each provider's pricing page. They exclude the input image's tokens,
