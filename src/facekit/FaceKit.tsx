@@ -66,6 +66,18 @@ function busyMark(attempt: number): string {
   return attempt > 1 ? `… ${attempt}` : '…';
 }
 
+/**
+ * A filename from whatever the kit is called.
+ *
+ * Falls back rather than trusting the name, because the name is now typed by
+ * hand and can be blank, punctuation, or emoji — none of which makes a filename
+ * anyone wants to find again.
+ */
+function kitSlug(name: string): string {
+  const slug = name.replace(/[^a-z0-9-]+/gi, '-').replace(/^-+|-+$/g, '').toLowerCase();
+  return slug || 'face';
+}
+
 function money(usd: number): string {
   if (usd === 0) return '$0.00';
   return usd < 0.01 ? `$${usd.toFixed(4)}` : `$${usd.toFixed(2)}`;
@@ -377,7 +389,7 @@ export default function FaceKit() {
               data: new TextEncoder().encode(JSON.stringify(manifest, null, 2)),
             },
           ]),
-          `${kit.name.replace(/[^a-z0-9-]+/gi, '-').toLowerCase()}-facekit.zip`,
+          `${kitSlug(kit.name)}-facekit.zip`,
         ),
       )
       .catch((cause: unknown) =>
@@ -432,6 +444,33 @@ export default function FaceKit() {
           </label>
         ) : (
           <>
+            <div className="flex flex-wrap items-center gap-3">
+              <input
+                aria-label="Kit name"
+                value={kit.name}
+                onChange={(event) => edit((current) => ({ ...current, name: event.target.value }))}
+                placeholder="Untitled"
+                className="min-w-0 flex-1 rounded-lg border border-transparent bg-transparent px-2 py-1 text-lg font-medium text-slate-100 placeholder:text-slate-600 hover:border-slate-800 focus:border-slate-700 focus:outline-none"
+              />
+              {/*
+                Shown rather than inferred. The name is the one thing on this
+                page you can change without a generation behind it, so it is
+                also the easiest to change and then close without saving.
+              */}
+              {/*
+                Three states, not two: a kit that has never reached the store is
+                not the same as one saved and untouched since, and calling the
+                first "saved" would be the indicator itself telling a lie.
+              */}
+              <span className="text-xs text-slate-500">
+                {!saved.some((entry) => entry.id === kit.id)
+                  ? 'not saved yet'
+                  : dirty
+                    ? 'unsaved changes'
+                    : 'saved'}
+              </span>
+            </div>
+
             <section className="grid gap-5 md:grid-cols-2">
               <div className="space-y-3">
                 <div className="flex items-center justify-between gap-3">
