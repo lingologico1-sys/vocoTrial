@@ -8,3 +8,6 @@ dist/
 *.timestamp-*.mjs
 # Per-machine Claude Code overrides; shared settings live in .claude/settings.json
 .claude/settings.local.json
+# Kits exported from /facekit, which land wherever the browser drops them. The
+# one face this repo ships is unpacked into public/faces/, not the archive.
+*.zip
