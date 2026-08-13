@@ -35,24 +35,60 @@ async function status(request: Promise<Response>): Promise<number | string> {
   }
 }
 
+/**
+ * Vertex's own explanation of a refusal, which names the project and says
+ * whether the API is simply disabled on it — the one fact a console hunt needs
+ * and cannot get from a status code.
+ *
+ * Only ever called on the Vertex probe, where the key travels in a header. The
+ * AI Studio probe puts it in the query string, so its body could quote the key
+ * back and is never read. Scrubbed anyway: cheap, and the rule that an upstream
+ * body may quote the request is exactly why it is normally kept out of here.
+ */
+async function reason(response: Response, key: string): Promise<string | undefined> {
+  const text = await response.text().catch(() => '');
+  if (!text) return undefined;
+
+  let message: string | undefined;
+  try {
+    const parsed = JSON.parse(text) as
+      | { error?: { message?: string } }
+      | { error?: { message?: string } }[];
+    const first = Array.isArray(parsed) ? parsed[0] : parsed;
+    message = first?.error?.message;
+  } catch {
+    message = undefined;
+  }
+  if (!message) return undefined;
+
+  return message.split(key).join('<redacted>').slice(0, 400);
+}
+
 async function probe(key: string): Promise<Record<string, unknown>> {
-  const vertex = status(
-    fetch(
+  const aiStudio = status(
+    fetch(`https://generativelanguage.googleapis.com/v1beta/models?pageSize=1&key=${key}`),
+  );
+
+  let vertexStatus: number | string = 'threw';
+  let vertexReason: string | undefined;
+  try {
+    const response = await fetch(
       `https://aiplatform.googleapis.com/v1/publishers/google/models/${NO_SUCH_MODEL}:generateContent`,
       {
         method: 'POST',
         headers: { 'x-goog-api-key': key, 'Content-Type': 'application/json' },
         body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: 'probe' }] }] }),
       },
-    ),
-  );
-
-  const aiStudio = status(
-    fetch(`https://generativelanguage.googleapis.com/v1beta/models?pageSize=1&key=${key}`),
-  );
+    );
+    vertexStatus = response.status;
+    vertexReason = await reason(response, key);
+  } catch (error) {
+    vertexStatus = `threw: ${error instanceof Error ? error.name : 'unknown'}`;
+  }
 
   return {
-    vertex: await vertex,
+    vertex: vertexStatus,
+    vertexReason,
     aiStudio: await aiStudio,
   };
 }
