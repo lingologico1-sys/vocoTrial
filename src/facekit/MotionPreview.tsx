@@ -1,16 +1,15 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import Face from '../live/Face';
 import { VISEMES } from '../live/visemes';
 import { CANVAS_EDGE } from './imageModels';
 import type { Box, FaceKit } from './kit';
-import { BROW_BOXES } from './slots';
 
 /**
- * The brow boxes, moving, before anyone has spoken a word at the page.
+ * The boxes that move, moving, before anyone has spoken a word at the page.
  *
  * The other previews on this page are composited: a patch cut to its box, laid
- * on the base, judged as a still or played as a strip. The lift cannot be shown
- * that way, because it is not artwork — it is a mask, a stretched row and two
+ * on the base, judged as a still or played as a strip. Motion cannot be shown
+ * that way, because it is not artwork — it is a mask, a stretched row and some
  * cropped redraws of the base, all of them recomputed per frame from a loudness
  * the compositor never sees. Rebuilding that in canvas would mean two
  * implementations of the one effect on the page, and the second one would be
@@ -20,6 +19,10 @@ import { BROW_BOXES } from './slots';
  * invents. Everything below the number is the live face's own code, which is
  * what makes the preview worth trusting: there is nothing here for the real
  * thing to disagree with.
+ *
+ * It serves the brow boxes and the head box both, because they are the same
+ * mechanism at two scales and the question asked of each is the same question:
+ * at speaking speed, does the seam read as movement or as a rectangle?
  */
 
 /** Roughly the rate a speaking voice puts stresses at. */
@@ -38,31 +41,45 @@ const PHRASES_PER_SECOND = 0.23;
 /**
  * How far in the close view goes.
  *
- * The thing being judged is a seam a few pixels tall — where the moved crop
- * meets the stretched row under it — and at the size this panel can afford, a
+ * The thing being judged is a seam a few pixels tall — where a moved crop meets
+ * whatever it was moved away from — and at the size this panel can afford, a
  * whole head puts that seam inside about four pixels of screen. Chosen to be
  * the largest zoom that still shows an eye, because a seam is only wrong
  * relative to the face it is on.
  */
 const ZOOM = 2.4;
 
-interface BrowPreviewProps {
+interface MotionPreviewProps {
   kit: FaceKit;
+  /**
+   * The rectangle the close view frames, in canvas pixels.
+   *
+   * The caller's job rather than this component's, because the interesting part
+   * of a box is not always the middle of it: for the brows it is the whole pair,
+   * and for the head it is the bottom band alone — nobody needs a close look at
+   * the crown, which moves rigidly and cannot seam. Null means there is nothing
+   * placed to look at, and is also what hides the control.
+   */
+  focus: Box | null;
+  /** Whether the close view starts on. Off when the still background is the point. */
+  startZoomed?: boolean;
+  /** What to say when `focus` is null. */
+  note: string;
 }
 
-export default function BrowPreview({ kit }: BrowPreviewProps) {
+export default function MotionPreview({ kit, focus, startZoomed, note }: MotionPreviewProps) {
   /**
    * Starts at full and starts moving.
    *
-   * Full because the extreme is the frame that fails: a box with too little
-   * forehead above it, or a bottom edge sitting on a spectacle rim, both look
-   * perfectly fine at half volume. Moving because a lift held still is a
-   * rectangle of forehead you will stare at until it looks wrong, whereas the
+   * Full because the extreme is the frame that fails: a brow box with too little
+   * forehead above it, or a head box whose bottom edge sits on a jaw rather than
+   * a neck, both look perfectly fine at half volume. Moving because a lift held
+   * still is a rectangle you will stare at until it looks wrong, whereas the
    * question is whether it reads at speaking speed.
    */
   const [level, setLevel] = useState(1);
   const [loop, setLoop] = useState(true);
-  const [zoom, setZoom] = useState(true);
+  const [zoom, setZoom] = useState(startZoomed ?? true);
 
   useEffect(() => {
     if (!loop) return;
@@ -81,29 +98,11 @@ export default function BrowPreview({ kit }: BrowPreviewProps) {
     return () => cancelAnimationFrame(frame);
   }, [loop]);
 
-  /**
-   * Where to point the close view: the middle of whatever brow boxes exist.
-   *
-   * Null when neither is placed, which is also the signal that there is nothing
-   * to zoom to — a kit with no brow boxes has no brow motion, and framing a
-   * spot on its forehead would imply otherwise.
-   */
-  const focus = useMemo(() => {
-    const boxes = BROW_BOXES.map((id) => kit.boxes[id]).filter((box): box is Box => Boolean(box));
-    if (!boxes.length) return null;
-
-    const left = Math.min(...boxes.map((box) => box.x));
-    const right = Math.max(...boxes.map((box) => box.x + box.width));
-    const top = Math.min(...boxes.map((box) => box.y));
-    const bottom = Math.max(...boxes.map((box) => box.y + box.height));
-
-    return {
-      x: (((left + right) / 2) / CANVAS_EDGE) * 100,
-      y: (((top + bottom) / 2) / CANVAS_EDGE) * 100,
-    };
-  }, [kit.boxes]);
-
-  const close = zoom && focus;
+  const origin = focus && {
+    x: ((focus.x + focus.width / 2) / CANVAS_EDGE) * 100,
+    y: ((focus.y + focus.height / 2) / CANVAS_EDGE) * 100,
+  };
+  const close = zoom && origin;
 
   return (
     <div className="space-y-2">
@@ -118,7 +117,7 @@ export default function BrowPreview({ kit }: BrowPreviewProps) {
           className="h-full w-full"
           style={
             close
-              ? { transform: `scale(${ZOOM})`, transformOrigin: `${focus.x}% ${focus.y}%` }
+              ? { transform: `scale(${ZOOM})`, transformOrigin: `${origin.x}% ${origin.y}%` }
               : undefined
           }
         >
@@ -137,7 +136,7 @@ export default function BrowPreview({ kit }: BrowPreviewProps) {
 
         {/*
           The slider is the control that answers the question, once the loop has
-          shown you there is a question: it holds the lift at an exact loudness
+          shown you there is a question: it holds the motion at an exact loudness
           so a seam can be looked at rather than glimpsed. Live while the loop
           runs, so dragging it is also how you stop the loop and take over.
         */}
@@ -156,7 +155,7 @@ export default function BrowPreview({ kit }: BrowPreviewProps) {
           />
         </label>
 
-        {focus && (
+        {origin && (
           <label className="flex items-center gap-2">
             <input
               type="checkbox"
@@ -168,12 +167,7 @@ export default function BrowPreview({ kit }: BrowPreviewProps) {
         )}
       </div>
 
-      {!focus && (
-        <p className="text-xs text-slate-500">
-          Neither brow is placed, so neither brow moves — what you can see here is the head
-          lift, which every kit has always had.
-        </p>
-      )}
+      {!focus && <p className="text-xs text-slate-500">{note}</p>}
     </div>
   );
 }

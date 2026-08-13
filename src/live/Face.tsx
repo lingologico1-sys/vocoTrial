@@ -39,6 +39,39 @@ const BLINK_EVERY_MS = 4200;
 const KIT_BROW_LIFT = 1.8;
 
 /**
+ * How far the head travels at full volume, and how far it rolls, per syllable.
+ *
+ * Unchanged from when this moved the whole picture — what changed is *what* it
+ * moves, not how much. Worth naming now that a kit can scope it to a rectangle,
+ * because the two readings of the same four units are quite different: four
+ * units of whole-frame translate is a camera bump you feel more than see, and
+ * four units of head against a still background is a head nodding.
+ */
+const HEAD_LIFT = 4;
+const HEAD_ROLL = 0.8;
+
+/**
+ * How far the head crop fades out at its bottom edge, in head units.
+ *
+ * Only the bottom, and that asymmetry is the design rather than an omission.
+ * The brows fade on three sides because their box has to cut through the brow
+ * itself, and the pixels either side of that cut are near-identical skin — a
+ * fade there costs nothing. The head's top and sides are placed somewhere they
+ * cut through nothing at all: flat background, or the edge of the canvas. Fading
+ * them would make the lifted head semi-transparent over the still one
+ * underneath, and a ghosted temple at four units of offset is far more visible
+ * than any seam it would be hiding.
+ *
+ * The bottom is the one edge that must cut through the subject, because the head
+ * has to end somewhere and that somewhere is the neck. Lifting the crop opens a
+ * gap there, and what shows through it is the still base's own neck at those
+ * rows — the right pixels in the right place, needing only a soft edge to stop
+ * announcing where one stops and the other starts. Neck is smooth enough that
+ * this works; a jaw would not be.
+ */
+const HEAD_FEATHER = 7;
+
+/**
  * How far the brow patch fades out at its top and sides, in head units.
  *
  * The one number that decides whether this looks like a lift or like a
@@ -119,7 +152,7 @@ export default function Face({ shape, viseme, level, kit, mouthRef }: FaceProps)
    * Six mouth shapes on a rigid head reads as a puppet; a head that lifts into
    * an emphasised syllable reads as someone talking. It costs three numbers.
    */
-  const lift = level * 4;
+  const lift = level * HEAD_LIFT;
   const browLift = level * 3.5;
   const eyeOpen = blinking ? 0.08 : 1 - level * 0.12;
 
@@ -127,12 +160,19 @@ export default function Face({ shape, viseme, level, kit, mouthRef }: FaceProps)
    * The drawn face, wearing artwork.
    *
    * Everything the placeholder does with `level` — the lift into an emphasised
-   * syllable, the slight roll — survives unchanged here, because it is a
-   * transform on a group rather than anything drawn. That is the part of a live
-   * face that costs nothing to keep when the art is swapped in, and it is worth
-   * noticing that it is also most of the effect.
+   * syllable, the slight roll — survives here, because it is a transform on a
+   * group rather than anything drawn. That is the part of a live face that costs
+   * nothing to keep when the art is swapped in, and it is worth noticing that it
+   * is also most of the effect.
    *
-   * What does change is the mouth: six poses instead of a spectrum, chosen by
+   * What the group *contains* is the part a kit gets to decide. With no head box
+   * it contains the whole picture, which is what every kit did before the box
+   * existed and what a head floating on nothing still wants. With one, the
+   * picture is drawn twice: once still, and once more masked to the head box and
+   * moving. Then the lift moves a head, and the background, the crop edge and the
+   * shoulders stay where the viewer left them.
+   *
+   * What also changes is the mouth: six poses instead of a spectrum, chosen by
    * `viseme` rather than interpolated from `shape`. Every pose stays mounted and
    * is revealed by opacity, because decoding a patch the first time it is
    * painted costs a frame, and dropping a frame at the exact moment a mouth
@@ -140,6 +180,28 @@ export default function Face({ shape, viseme, level, kit, mouthRef }: FaceProps)
    */
   if (kit) {
     const mouth = kit.boxes.mouth;
+
+    /**
+     * The head box in head units, and where the head turns about.
+     *
+     * The pivot is the bottom-centre of the box, which on a well-placed one is
+     * the base of the neck — where a real head is in fact hinged. The fallback
+     * pair is the old hard-coded pivot, kept exactly because a kit without a
+     * head box must animate identically to how it did before this existed.
+     */
+    const head = kit.boxes.head
+      ? {
+          x: toHead(kit.boxes.head.x),
+          y: toHead(kit.boxes.head.y),
+          width: toHead(kit.boxes.head.width),
+          height: toHead(kit.boxes.head.height),
+        }
+      : null;
+
+    const pivotX = head ? head.x + head.width / 2 : 100;
+    const pivotY = head ? head.y + head.height : 180;
+    const move = `translate(0 ${-lift}) rotate(${level * HEAD_ROLL} ${pivotX} ${pivotY})`;
+    const headFade = head ? Math.min(HEAD_FEATHER, head.height / 3) : 0;
     // Both lids are drawn from the same flag. A kit holding only one of them
     // still blinks, with one eye — visibly wrong, and better than silently
     // doing nothing while the artwork looks complete in the picker.
@@ -176,7 +238,7 @@ export default function Face({ shape, viseme, level, kit, mouthRef }: FaceProps)
     return (
       <svg viewBox="0 0 200 200" className="h-full w-full overflow-visible" aria-hidden="true">
         {/*
-          Three ramps, in bounding-box units so one definition serves a strip of
+          Four ramps, in bounding-box units so one definition serves a strip of
           any size. Black at full opacity hides, transparent reveals, and a mask
           reads luminance — so painting these over a white rectangle is what
           turns a hard-edged crop into one that tapers away.
@@ -187,6 +249,7 @@ export default function Face({ shape, viseme, level, kit, mouthRef }: FaceProps)
               ['fade-left', '0', '0', '1', '0', 1, 0],
               ['fade-right', '0', '0', '1', '0', 0, 1],
               ['fade-top', '0', '0', '0', '1', 1, 0],
+              ['fade-bottom', '0', '0', '0', '1', 0, 1],
             ] as const
           ).map(([name, x1, y1, x2, y2, from, to]) => (
             <linearGradient key={name} id={`${maskId}-${name}`} x1={x1} y1={y1} x2={x2} y2={y2}>
@@ -194,144 +257,193 @@ export default function Face({ shape, viseme, level, kit, mouthRef }: FaceProps)
               <stop offset="100%" stopColor="#000" stopOpacity={to} />
             </linearGradient>
           ))}
-        </defs>
-
-        <g transform={`translate(0 ${-lift}) rotate(${level * 0.8} 100 180)`}>
-          <image href={kit.base} x={0} y={0} width={200} height={200} />
 
           {/*
-            The brows, lifted — the one piece of the performance that moves
-            drawn artwork without a generator ever having seen it.
-
-            Two draws per brow, both of them the base image again through a
-            nested <svg>, which crops to its own bounds: source rect in the
-            viewBox, destination rect in x/y/width/height. Nested rather than a
-            clipPath so that two faces on one page cannot collide over an id.
-
-            The crop is a plain translate. The strip under it is the part worth
-            explaining: sliding the box up leaves a gap at the bottom still
-            showing the brow that used to be there, and on a face wearing
-            glasses there is no clear skin below to borrow — this portrait has
-            about five pixels between brow and spectacle rim, and the rim runs
-            diagonally, so it is nearer to nothing at one end.
-
-            So the gap is filled by taking the box's own bottom row and
-            stretching it upward. It is the nearest skin there is, which makes
-            it the right colour by construction. Filling from the *top* of the
-            box instead was the first attempt and looked wrong immediately: the
-            forehead is a good deal paler than the shaded skin just under a
-            brow, so every raise flashed a bright rectangle. Uniform across the
-            width, this drawing's skin is; uniform from forehead down to eye
-            socket, it is not.
+            The head window: opaque over the whole box, tapering away at the
+            bottom into the still picture underneath.
           */}
-          {brows.map((brow) => {
-            const fade = Math.min(BROW_FEATHER, brow.width / 3, brow.height / 2);
-            const top = brow.y - brow.rise;
-            const row = toHead(1);
-            return (
-              <g key={brow.id} mask={`url(#${maskId}-${brow.id})`}>
-                <mask
-                  id={`${maskId}-${brow.id}`}
-                  maskUnits="userSpaceOnUse"
-                  x={brow.x}
-                  y={top}
-                  width={brow.width}
-                  height={brow.height + brow.rise}
-                >
-                  <rect
-                    x={brow.x}
-                    y={top}
-                    width={brow.width}
-                    height={brow.height + brow.rise}
-                    fill="#fff"
-                  />
-                  <rect
-                    x={brow.x}
-                    y={top}
-                    width={fade}
-                    height={brow.height + brow.rise}
-                    fill={`url(#${maskId}-fade-left)`}
-                  />
-                  <rect
-                    x={brow.x + brow.width - fade}
-                    y={top}
-                    width={fade}
-                    height={brow.height + brow.rise}
-                    fill={`url(#${maskId}-fade-right)`}
-                  />
-                  <rect
-                    x={brow.x}
-                    y={top}
-                    width={brow.width}
-                    height={fade}
-                    fill={`url(#${maskId}-fade-top)`}
-                  />
-                </mask>
-
-                {/* The bottom row of the box, stretched over the gap. */}
-                <svg
-                  x={brow.x}
-                  y={brow.y + brow.height - brow.rise}
-                  width={brow.width}
-                  height={brow.rise}
-                  viewBox={`${brow.x} ${brow.y + brow.height - row} ${brow.width} ${row}`}
-                  preserveAspectRatio="none"
-                >
-                  <image href={kit.base} x={0} y={0} width={200} height={200} />
-                </svg>
-
-                {/* The box itself, drawn where the brow is going. */}
-                <svg
-                  x={brow.x}
-                  y={top}
-                  width={brow.width}
-                  height={brow.height}
-                  viewBox={`${brow.x} ${brow.y} ${brow.width} ${brow.height}`}
-                >
-                  <image href={kit.base} x={0} y={0} width={200} height={200} />
-                </svg>
-              </g>
-            );
-          })}
-
-          {VISEME_ORDER.map((id) => {
-            const patch = kit.patches[id];
-            if (!patch) return null;
-            return (
-              <image
-                key={id}
-                href={patch}
-                x={toHead(mouth.x)}
-                y={toHead(mouth.y)}
-                width={toHead(mouth.width)}
-                height={toHead(mouth.height)}
-                opacity={viseme === id ? 1 : 0}
+          {head && (
+            <mask
+              id={`${maskId}-head`}
+              maskUnits="userSpaceOnUse"
+              x={head.x}
+              y={head.y}
+              width={head.width}
+              height={head.height}
+            >
+              <rect
+                x={head.x}
+                y={head.y}
+                width={head.width}
+                height={head.height}
+                fill="#fff"
               />
-            );
-          })}
-
-          {lids.map((lid) =>
-            lid.patch ? (
-              <image
-                key={lid.id}
-                href={lid.patch}
-                x={toHead(lid.box.x)}
-                y={toHead(lid.box.y)}
-                width={toHead(lid.box.width)}
-                height={toHead(lid.box.height)}
-                opacity={blinking ? 1 : 0}
+              <rect
+                x={head.x}
+                y={head.y + head.height - headFade}
+                width={head.width}
+                height={headFade}
+                fill={`url(#${maskId}-fade-bottom)`}
               />
-            ) : null,
+            </mask>
           )}
+        </defs>
 
-          <circle
-            ref={mouthRef}
-            cx={toHead(mouth.x + mouth.width / 2)}
-            cy={toHead(mouth.y + mouth.height / 2)}
-            r="1"
-            fill="none"
-            opacity="0"
-          />
+        {/*
+          The picture, holding still. Drawn only when there is a head box to move
+          instead of it — otherwise the moving group below holds the only copy,
+          and drawing a second one here would sit a still face behind a moving
+          one with nothing masked away between them.
+        */}
+        {head && <image href={kit.base} x={0} y={0} width={200} height={200} />}
+
+        {/*
+          The moving part. Two groups rather than one because a `transform` and a
+          `mask` on the same element leave it ambiguous which coordinate system
+          the mask is resolved in; nesting says plainly that the mask is cut in
+          the base's own coordinates and the whole cut-out is then moved. Which
+          is the behaviour wanted: the head travels as one rigid piece, crown
+          included, rather than sliding upward behind a stationary window that
+          would shave the top of its head off.
+        */}
+        <g transform={move}>
+          <g mask={head ? `url(#${maskId}-head)` : undefined}>
+            <image href={kit.base} x={0} y={0} width={200} height={200} />
+
+            {/*
+              The brows, lifted — the one piece of the performance that moves
+              drawn artwork without a generator ever having seen it.
+    
+              Two draws per brow, both of them the base image again through a
+              nested <svg>, which crops to its own bounds: source rect in the
+              viewBox, destination rect in x/y/width/height. Nested rather than a
+              clipPath so that two faces on one page cannot collide over an id.
+    
+              The crop is a plain translate. The strip under it is the part worth
+              explaining: sliding the box up leaves a gap at the bottom still
+              showing the brow that used to be there, and on a face wearing
+              glasses there is no clear skin below to borrow — this portrait has
+              about five pixels between brow and spectacle rim, and the rim runs
+              diagonally, so it is nearer to nothing at one end.
+    
+              So the gap is filled by taking the box's own bottom row and
+              stretching it upward. It is the nearest skin there is, which makes
+              it the right colour by construction. Filling from the *top* of the
+              box instead was the first attempt and looked wrong immediately: the
+              forehead is a good deal paler than the shaded skin just under a
+              brow, so every raise flashed a bright rectangle. Uniform across the
+              width, this drawing's skin is; uniform from forehead down to eye
+              socket, it is not.
+            */}
+            {brows.map((brow) => {
+              const fade = Math.min(BROW_FEATHER, brow.width / 3, brow.height / 2);
+              const top = brow.y - brow.rise;
+              const row = toHead(1);
+              return (
+                <g key={brow.id} mask={`url(#${maskId}-${brow.id})`}>
+                  <mask
+                    id={`${maskId}-${brow.id}`}
+                    maskUnits="userSpaceOnUse"
+                    x={brow.x}
+                    y={top}
+                    width={brow.width}
+                    height={brow.height + brow.rise}
+                  >
+                    <rect
+                      x={brow.x}
+                      y={top}
+                      width={brow.width}
+                      height={brow.height + brow.rise}
+                      fill="#fff"
+                    />
+                    <rect
+                      x={brow.x}
+                      y={top}
+                      width={fade}
+                      height={brow.height + brow.rise}
+                      fill={`url(#${maskId}-fade-left)`}
+                    />
+                    <rect
+                      x={brow.x + brow.width - fade}
+                      y={top}
+                      width={fade}
+                      height={brow.height + brow.rise}
+                      fill={`url(#${maskId}-fade-right)`}
+                    />
+                    <rect
+                      x={brow.x}
+                      y={top}
+                      width={brow.width}
+                      height={fade}
+                      fill={`url(#${maskId}-fade-top)`}
+                    />
+                  </mask>
+    
+                  {/* The bottom row of the box, stretched over the gap. */}
+                  <svg
+                    x={brow.x}
+                    y={brow.y + brow.height - brow.rise}
+                    width={brow.width}
+                    height={brow.rise}
+                    viewBox={`${brow.x} ${brow.y + brow.height - row} ${brow.width} ${row}`}
+                    preserveAspectRatio="none"
+                  >
+                    <image href={kit.base} x={0} y={0} width={200} height={200} />
+                  </svg>
+    
+                  {/* The box itself, drawn where the brow is going. */}
+                  <svg
+                    x={brow.x}
+                    y={top}
+                    width={brow.width}
+                    height={brow.height}
+                    viewBox={`${brow.x} ${brow.y} ${brow.width} ${brow.height}`}
+                  >
+                    <image href={kit.base} x={0} y={0} width={200} height={200} />
+                  </svg>
+                </g>
+              );
+            })}
+    
+            {VISEME_ORDER.map((id) => {
+              const patch = kit.patches[id];
+              if (!patch) return null;
+              return (
+                <image
+                  key={id}
+                  href={patch}
+                  x={toHead(mouth.x)}
+                  y={toHead(mouth.y)}
+                  width={toHead(mouth.width)}
+                  height={toHead(mouth.height)}
+                  opacity={viseme === id ? 1 : 0}
+                />
+              );
+            })}
+    
+            {lids.map((lid) =>
+              lid.patch ? (
+                <image
+                  key={lid.id}
+                  href={lid.patch}
+                  x={toHead(lid.box.x)}
+                  y={toHead(lid.box.y)}
+                  width={toHead(lid.box.width)}
+                  height={toHead(lid.box.height)}
+                  opacity={blinking ? 1 : 0}
+                />
+              ) : null,
+            )}
+    
+            <circle
+              ref={mouthRef}
+              cx={toHead(mouth.x + mouth.width / 2)}
+              cy={toHead(mouth.y + mouth.height / 2)}
+              r="1"
+              fill="none"
+              opacity="0"
+            />
+          </g>
         </g>
       </svg>
     );
@@ -339,7 +451,12 @@ export default function Face({ shape, viseme, level, kit, mouthRef }: FaceProps)
 
   return (
     <svg viewBox="0 0 200 200" className="h-full w-full overflow-visible" aria-hidden="true">
-      <g transform={`translate(0 ${-lift}) rotate(${level * 0.8} 100 180)`}>
+      {/*
+        No head box here, and none wanted: the placeholder is a head on nothing,
+        so the frame and the head are the same object and moving one is moving
+        the other.
+      */}
+      <g transform={`translate(0 ${-lift}) rotate(${level * HEAD_ROLL} 100 180)`}>
         {/* Lit from the upper left, so the head reads as round, not as a disc. */}
         <defs>
           <radialGradient id="face-shade" cx="37%" cy="30%" r="80%">

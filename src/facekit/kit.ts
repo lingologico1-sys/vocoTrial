@@ -30,10 +30,16 @@ export interface Box {
  * or under a fringe, where there is no clear skin to slide them into. They are
  * independently optional: a face can lift one brow and not the other, because
  * the clearance that decides it is a property of one side of one picture.
+ *
+ * The head box is optional for a blunter reason: absent is what every kit
+ * authored before it existed says, and those kits must keep animating exactly as
+ * they did. Absent means the lift moves the whole picture, background and all.
+ * Present means it moves only what is inside this rectangle.
  */
 export interface Boxes extends Record<Region, Box> {
   browLeft?: Box;
   browRight?: Box;
+  head?: Box;
 }
 
 export interface FaceKit {
@@ -161,6 +167,37 @@ export function defaultBrowBox(which: BrowId): Box {
     width: Math.round(edge * 0.12),
     height: Math.round(edge * 0.055),
   };
+}
+
+/**
+ * A starting rectangle for the head, offered on the same terms as the brows.
+ *
+ * Not in `defaultBoxes` for the same reason and one more: placing it *changes
+ * what the lift does*. A kit that acquired one by default would quietly stop
+ * moving its background, which is the correct behaviour but not one to impose on
+ * a kit whose owner never asked for it.
+ *
+ * Full-bleed on three sides, and that is the considered default rather than a
+ * lazy one. Top and sides are hard cuts — see Face.tsx on why only the bottom is
+ * feathered — and a hard cut is invisible in exactly two places: somewhere the
+ * pixels either side of it are the same flat colour, or the edge of the canvas,
+ * where there is nothing beside it at all. Inset sides looked like the tidier
+ * answer and were tried first; on a portrait cropped anywhere near the hair they
+ * put a straight vertical line down a head of curls the moment it moved, because
+ * a box that clears the hair on that kind of crop does not exist.
+ *
+ * So the sides go to the edge, and what that costs is the background inside the
+ * box moving with the head. On flat white it costs nothing. Pull them in for a
+ * portrait with a patterned or vignetted background to hold still — and then the
+ * hair has to clear them, which is a constraint on the portrait as much as on
+ * the box.
+ *
+ * The bottom is the only edge placed with care by default: low, across the chest
+ * below the chin, which is where the one soft edge belongs.
+ */
+export function defaultHeadBox(): Box {
+  const edge = CANVAS_EDGE;
+  return { x: 0, y: 0, width: edge, height: Math.round(edge * 0.81) };
 }
 
 export function newKit(name: string, base: string): FaceKit {

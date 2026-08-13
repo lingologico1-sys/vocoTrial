@@ -31,23 +31,31 @@ export type SlotId = Viseme | 'eyeLeftClosed' | 'eyeRightClosed';
 export type Region = 'mouth' | 'eyeLeft' | 'eyeRight';
 
 /**
- * Every rectangle a kit holds, which is two more than it has regions.
+ * Every rectangle a kit holds, which is three more than it has regions.
  *
- * The brow boxes are boxes but not regions, and the distinction is the whole
- * design. Nothing is ever generated into them: each is a window onto the base
- * that gets redrawn a few pixels higher when the voice gets louder, so no model
- * is asked for a raised brow and no model gets the chance to restyle a
- * spectacle frame on the way past.
+ * The brow and head boxes are boxes but not regions, and the distinction is the
+ * whole design. Nothing is ever generated into them: each is a window onto the
+ * base that gets redrawn somewhere else when the voice gets louder, so no model
+ * is asked for a raised brow and no model gets the chance to restyle a spectacle
+ * frame on the way past.
  *
- * There are two of them for the same reason there are two eye boxes, and it is
- * the same reason again: glasses. A rim runs *diagonally* under the brows, so
+ * There are two brow boxes for the same reason there are two eye boxes, and it
+ * is the same reason again: glasses. A rim runs *diagonally* under the brows, so
  * the lowest row a brow box can safely end on differs between one side of the
  * face and the other — on the portrait in public/faces it differs by six pixels,
  * which is more than the clearance itself. One rectangle spanning both brows
  * has to take the worse of the two ends and smears frame colour under the brow
  * on the better one.
+ *
+ * The head box is the same mechanism at the other end of the scale, and it
+ * exists to answer a complaint about the lift: with no head box the whole
+ * picture translates and rolls, which reads as the camera moving rather than the
+ * person. That is fine for a head floating on nothing and wrong the moment the
+ * base has a background, a crop edge and a pair of shoulders in it — those are
+ * fixed context, and moving them moves the world. Saying where the head ends
+ * lets the lift move the head and leave the world alone.
  */
-export type BoxId = Region | 'browLeft' | 'browRight';
+export type BoxId = Region | 'browLeft' | 'browRight' | 'head';
 
 /** The brow boxes, in the order the picker offers them. */
 export const BROW_BOXES = ['browLeft', 'browRight'] as const;
@@ -56,6 +64,19 @@ export type BrowId = (typeof BROW_BOXES)[number];
 
 export function isBrow(id: BoxId): id is BrowId {
   return id === 'browLeft' || id === 'browRight';
+}
+
+/**
+ * The boxes no generator ever sees.
+ *
+ * Worth a predicate of its own rather than two comparisons at each call site,
+ * because it is the property that decides the whole of a box's behaviour: a free
+ * box never locks, can be dragged after any amount of generation, and is
+ * meaningful by its absence. Everything else on the page is a crop, and a crop
+ * that moves under artwork already cut to it is silent corruption.
+ */
+export function isFreeBox(id: BoxId): boolean {
+  return isBrow(id) || id === 'head';
 }
 
 export interface Slot {

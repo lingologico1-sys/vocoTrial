@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import BoxPicker from './BoxPicker';
-import BrowPreview from './BrowPreview';
 import Filmstrip from './Filmstrip';
+import MotionPreview from './MotionPreview';
 import { composite, dataUrlToBlob, fileToDataUrl, normalise } from './canvas';
 import { generateBase, generatePatch } from './generate';
 import {
@@ -10,8 +10,25 @@ import {
   defaultImageModelKey,
   findImageModel,
 } from './imageModels';
-import { KIT_FORMAT, defaultBrowBox, newKit, patchFilename, type FaceKit as Kit } from './kit';
-import { NEUTRALISE_BASE_PROMPT, SLOTS, isBrow, slot, type BoxId, type SlotId } from './slots';
+import {
+  KIT_FORMAT,
+  defaultBrowBox,
+  defaultHeadBox,
+  newKit,
+  patchFilename,
+  type Box,
+  type FaceKit as Kit,
+} from './kit';
+import {
+  NEUTRALISE_BASE_PROMPT,
+  BROW_BOXES,
+  SLOTS,
+  isBrow,
+  isFreeBox,
+  slot,
+  type BoxId,
+  type SlotId,
+} from './slots';
 import { deleteKit, listKits, saveKit, selectKit, selectedKitId } from './store';
 import { download, zip } from './zip';
 
@@ -43,7 +60,17 @@ const REGION_TABS: { id: BoxId; label: string }[] = [
   { id: 'eyeRight', label: 'Right eye' },
   { id: 'browLeft', label: 'Left brow' },
   { id: 'browRight', label: 'Right brow' },
+  { id: 'head', label: 'Head' },
 ];
+
+/**
+ * How deep a band at the foot of the head box the close view frames.
+ *
+ * As a fraction of the box's height, so it stays the same piece of neck on a
+ * tightly cropped portrait and a loosely cropped one. This is the only part of
+ * the head box that can go wrong in a way you have to look closely to see.
+ */
+const NECK_BAND = 0.18;
 
 /**
  * The two models the page compares, and what they start as.
@@ -248,16 +275,17 @@ export default function FaceKit() {
    * would misplace it exactly as a stored patch would.
    */
   const committed = useMemo(() => {
-    // Brows are counted for the same reason they are listed: so the rest of
-    // the page can index by box without a special case. The number stays zero
-    // — nothing is ever generated into that box — which is exactly right, as
-    // a box holding no artwork has nothing to be corrupted by a later drag.
+    // The free boxes are counted for the same reason they are listed: so the
+    // rest of the page can index by box without a special case. Their numbers
+    // stay zero — nothing is ever generated into them — which is exactly right,
+    // as a box holding no artwork has nothing to be corrupted by a later drag.
     const counts: Record<BoxId, number> = {
       mouth: 0,
       eyeLeft: 0,
       eyeRight: 0,
       browLeft: 0,
       browRight: 0,
+      head: 0,
     };
     for (const entry of SLOTS) {
       if (kit?.patches[entry.id]) counts[entry.region] += 1;
@@ -287,6 +315,49 @@ export default function FaceKit() {
       return next;
     });
   };
+
+  /**
+   * The opening rectangle for a free box, or null for a box that is not one.
+   *
+   * Null rather than a throw because the caller is a click handler in a branch
+   * the type system cannot narrow: `isFreeBox` answers a question about
+   * behaviour, not about which member of the union `region` is.
+   */
+  const placeFreeBox = (id: BoxId): Box | null =>
+    id === 'head' ? defaultHeadBox() : isBrow(id) ? defaultBrowBox(id) : null;
+
+  /**
+   * What the motion preview's close view should frame, for the box being edited.
+   *
+   * Different in kind for the two free boxes, which is why the preview takes a
+   * rectangle rather than working it out itself. For the brows it is the pair of
+   * them, because the seam is all around each box and both want watching at
+   * once. For the head it is the band of neck at the foot of the box and nothing
+   * else: the crown and the temples move rigidly with the rest of the crop and
+   * have no seam to show, so framing them would be a close look at the one part
+   * that cannot be wrong.
+   */
+  const previewFocus: Box | null = (() => {
+    if (!kit) return null;
+
+    if (region === 'head') {
+      const box = kit.boxes.head;
+      if (!box) return null;
+      const band = box.height * NECK_BAND;
+      return { ...box, y: box.y + box.height - band, height: band };
+    }
+
+    const placed = BROW_BOXES.map((id) => kit.boxes[id]).filter((box): box is Box =>
+      Boolean(box),
+    );
+    if (!placed.length) return null;
+
+    const left = Math.min(...placed.map((box) => box.x));
+    const right = Math.max(...placed.map((box) => box.x + box.width));
+    const top = Math.min(...placed.map((box) => box.y));
+    const bottom = Math.max(...placed.map((box) => box.y + box.height));
+    return { x: left, y: top, width: right - left, height: bottom - top };
+  })();
 
   const accept = (id: SlotId, candidate: Candidate) => {
     edit((current) => ({ ...current, patches: { ...current.patches, [id]: candidate.patch } }));
@@ -514,7 +585,7 @@ export default function FaceKit() {
                   }
                 />
 
-                {isBrow(region) ? (
+                {isFreeBox(region) ? (
                   <>
                     {kit.boxes[region] ? (
                       <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-800 bg-slate-900/40 px-3 py-2">
@@ -532,23 +603,33 @@ export default function FaceKit() {
                           }
                           className="rounded-md border border-slate-700 px-2 py-1 text-[11px] text-slate-400 hover:border-slate-500"
                         >
-                          Remove · this brow stops moving
+                          {region === 'head'
+                            ? 'Remove · the whole picture moves again'
+                            : 'Remove · this brow stops moving'}
                         </button>
                       </div>
                     ) : (
                       <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-800 bg-slate-900/40 px-3 py-2">
                         <p className="text-xs text-slate-400">
-                          This brow does not move.
+                          {region === 'head'
+                            ? 'No head box, so the lift moves the whole picture.'
+                            : 'This brow does not move.'}
                         </p>
                         <button
                           type="button"
-                          onClick={() =>
+                          onClick={() => {
+                            const box = placeFreeBox(region);
+                            if (!box) return;
                             edit((current) => ({
                               ...current,
-                              boxes: { ...current.boxes, [region]: defaultBrowBox(region) },
-                            }))
-                          }
-                          className="rounded-md border border-violet-700/70 px-2 py-1 text-[11px] text-violet-300 hover:border-violet-500"
+                              boxes: { ...current.boxes, [region]: box },
+                            }));
+                          }}
+                          className={`rounded-md border px-2 py-1 text-[11px] ${
+                            region === 'head'
+                              ? 'border-rose-700/70 text-rose-300 hover:border-rose-500'
+                              : 'border-violet-700/70 text-violet-300 hover:border-violet-500'
+                          }`}
                         >
                           Place a box for it
                         </button>
@@ -557,23 +638,58 @@ export default function FaceKit() {
 
                     {/*
                       Under the picker rather than in the "In motion" column,
-                      because judging a brow box is a loop of drag, watch, drag
-                      again — and a preview that lives a column away from the
-                      handles is one you stop consulting after the second drag.
-                    */}
-                    <BrowPreview kit={kit} />
+                      because judging one of these boxes is a loop of drag,
+                      watch, drag again — and a preview that lives a column away
+                      from the handles is one you stop consulting after the
+                      second drag.
 
-                    <p className="text-xs text-slate-500">
-                      Not a mask and not a crop — no generator ever sees this box, so it
-                      never locks and the glasses are never at risk. Cover the brow, give it
-                      plenty of plain forehead <em>above</em> (the height is the travel budget:
-                      the lift is capped at a third of it), and end it on the last clear row of
-                      skin <em>below</em> the brow and above the spectacle rim — that bottom row
-                      is what gets stretched up to fill the gap the brow leaves. There is one
-                      box per brow because a rim runs diagonally, so the row that is clear on
-                      one side is already frame on the other. Where a rim or a fringe leaves no
-                      clear row at all, leave the box unplaced.
-                    </p>
+                      The head starts wide rather than close, because the first
+                      thing to check is the one the box exists for: that the
+                      background has stopped moving. The seam at the neck is the
+                      second question, and the Close tick is where it is asked.
+                    */}
+                    <MotionPreview
+                      kit={kit}
+                      focus={previewFocus}
+                      startZoomed={region !== 'head'}
+                      note={
+                        region === 'head'
+                          ? 'No head box is placed, so what moves here is the whole picture — which is the thing a head box exists to stop.'
+                          : 'Neither brow is placed, so neither brow moves — what you can see here is the head lift, which every kit has always had.'
+                      }
+                    />
+
+                    {region === 'head' ? (
+                      <p className="text-xs text-slate-500">
+                        Not a mask and not a crop — no generator ever sees this box, so it
+                        never locks. It says which pixels are <em>the head</em>, and only those
+                        get the lift and the roll; everything outside it holds still. The
+                        bottom edge is the only one that is feathered, and the only one worth
+                        fussing over: end it across the <em>chest or neck</em>, below the jaw,
+                        somewhere the picture is smooth, because that is where the gap the
+                        lift opens gets hidden. The top and sides are hard cuts, so they want
+                        to be either out in plain background or hard against the edge of the
+                        canvas — which is usually the honest answer, since on a portrait
+                        cropped near the hair there is no inset line that clears the curls, and
+                        one that does not shows as a straight edge the moment the head moves.
+                        Running them to the edge means the background inside moves too: free on
+                        flat white, wrong if there is a pattern you wanted held still. Leave
+                        the box unplaced for artwork that is a head on nothing, where moving
+                        the frame and moving the head are the same act.
+                      </p>
+                    ) : (
+                      <p className="text-xs text-slate-500">
+                        Not a mask and not a crop — no generator ever sees this box, so it
+                        never locks and the glasses are never at risk. Cover the brow, give it
+                        plenty of plain forehead <em>above</em> (the height is the travel budget:
+                        the lift is capped at a third of it), and end it on the last clear row of
+                        skin <em>below</em> the brow and above the spectacle rim — that bottom row
+                        is what gets stretched up to fill the gap the brow leaves. There is one
+                        box per brow because a rim runs diagonally, so the row that is clear on
+                        one side is already frame on the other. Where a rim or a fringe leaves no
+                        clear row at all, leave the box unplaced.
+                      </p>
+                    )}
                   </>
                 ) : (
                   <>
