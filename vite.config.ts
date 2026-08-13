@@ -19,9 +19,14 @@ function buildInfo() {
   const commit = process.env.CF_PAGES_COMMIT_SHA?.slice(0, 7) ?? null;
 
   return {
-    // What the badge shows. On Pages this is the deployment; locally, the
-    // build time, so a stale tab is still obvious.
-    label: deploy ?? commit ?? new Date().toISOString().slice(11, 16),
+    // What the badge leads with. The commit, because the question actually
+    // being asked of the badge is "is what I just pushed what I am looking
+    // at", and that is answered by comparing it against `git log` rather than
+    // against anything a person can hold in their head. The deployment id is
+    // still shown, next to it — see App.tsx — so redeploys of one commit stay
+    // distinguishable. Locally, neither exists and the build time stands in,
+    // which at least makes a stale tab obvious.
+    label: commit ?? deploy ?? new Date().toISOString().slice(11, 16),
     deploy,
     commit,
     branch: process.env.CF_PAGES_BRANCH ?? null,

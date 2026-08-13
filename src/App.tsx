@@ -335,8 +335,10 @@ export default function App() {
         }
       : null;
 
-  // Deployment id, not commit: retrying a build or changing a secret redeploys
-  // the same commit, and those are exactly the redeploys worth telling apart.
+  // Both, in the order they get asked about. The commit answers "am I looking
+  // at what I pushed"; the deployment answers "is this a *different* build of
+  // it", which retrying a build or changing a secret both produce from an
+  // unchanged commit.
   const buildTitle = [
     __BUILD_INFO__.deploy && `deployment ${__BUILD_INFO__.deploy}`,
     __BUILD_INFO__.commit && `commit ${__BUILD_INFO__.commit}`,
@@ -353,6 +355,16 @@ export default function App() {
         className="fixed right-3 top-3 z-50 rounded-md border border-slate-800 bg-slate-900/80 px-2 py-1 font-mono text-[11px] leading-none text-slate-500 backdrop-blur"
       >
         {__BUILD_INFO__.label}
+        {/*
+          The deployment id trails the commit rather than replacing it, and
+          dimmer, because it is the answer to the rarer question. It is dropped
+          entirely when there is no commit beside it — on a local build the
+          label is already standing in for something, and a lone id in a paler
+          grey would read as a second fact rather than the same one.
+        */}
+        {__BUILD_INFO__.commit && __BUILD_INFO__.deploy && (
+          <span className="ml-1.5 text-slate-600">{__BUILD_INFO__.deploy}</span>
+        )}
       </span>
       <div className="mx-auto flex min-h-screen max-w-2xl flex-col gap-6 px-6 py-10">
         <header className="flex items-center justify-between gap-3">
