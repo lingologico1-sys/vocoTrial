@@ -1,5 +1,5 @@
 import { CANVAS_EDGE } from './imageModels';
-import type { BrowId, Region, SlotId } from './slots';
+import { DEFAULT_LASH_STYLE, type BrowId, type LashStyle, type Region, type SlotId } from './slots';
 
 /**
  * What a finished face kit is, in one place.
@@ -74,6 +74,19 @@ export interface FaceKit {
   boxes: Boxes;
   /** One PNG data URL per authored slot, already cropped to its region's box. */
   patches: Partial<Record<SlotId, string>>;
+  /**
+   * How much eyelash the closed-eye prompt asks for.
+   *
+   * An authoring setting rather than a rendering one: it is read when an eye is
+   * generated and never again, so changing it leaves any eye already in the kit
+   * exactly as it was — the new answer applies to the next generation, which is
+   * what a prompt knob can honestly promise.
+   *
+   * Optional, and absent means the default, so no format bump: a kit written
+   * before this existed holds artwork that is already drawn, and there is
+   * nothing about it for a migration to bring forward.
+   */
+  lashes?: LashStyle;
   /** What the kit has cost to generate so far, in USD. A floor — see below. */
   spentUsd: number;
 }
@@ -210,6 +223,7 @@ export function newKit(name: string, base: string): FaceKit {
     original: base,
     boxes: defaultBoxes(),
     patches: {},
+    lashes: DEFAULT_LASH_STYLE,
     spentUsd: 0,
   };
 }

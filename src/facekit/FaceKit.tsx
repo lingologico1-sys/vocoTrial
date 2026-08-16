@@ -22,6 +22,8 @@ import {
 import {
   NEUTRALISE_BASE_PROMPT,
   BROW_BOXES,
+  DEFAULT_LASH_STYLE,
+  LASH_STYLES,
   SLOTS,
   isBrow,
   isFreeBox,
@@ -213,7 +215,7 @@ export default function FaceKit() {
         modelKey,
         base: kit.base,
         box: kit.boxes[definition.region],
-        instruction: definition.prompt,
+        instruction: definition.prompt(kit.lashes ?? DEFAULT_LASH_STYLE),
         onAttempt: (attempt) => mark(key, attempt),
       });
 
@@ -450,6 +452,7 @@ export default function FaceKit() {
       name: kit.name,
       base: 'base.png',
       boxes: kit.boxes,
+      lashes: kit.lashes ?? DEFAULT_LASH_STYLE,
       patches: Object.fromEntries(
         SLOTS.filter((entry) => kit.patches[entry.id]).map((entry) => [
           entry.id,
@@ -815,6 +818,39 @@ export default function FaceKit() {
 
             <section className="space-y-3">
               <h2 className="text-sm font-medium text-slate-300">Slots</h2>
+
+              {/*
+                Above the list rather than inside the two eye rows, because one
+                kit has one answer and a control drawn twice invites the reader
+                to wonder whether the eyes can disagree. They cannot: both eye
+                slots share a prompt, which is what keeps a blink symmetrical.
+              */}
+              <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-800 p-3">
+                <span className="text-xs text-slate-400">Eyelashes on closed eyes</span>
+                {LASH_STYLES.map((style) => {
+                  const active = (kit.lashes ?? DEFAULT_LASH_STYLE) === style.id;
+                  return (
+                    <button
+                      key={style.id}
+                      type="button"
+                      title={style.hint}
+                      onClick={() => edit((current) => ({ ...current, lashes: style.id }))}
+                      className={`rounded-md border px-2 py-1 text-[11px] ${
+                        active
+                          ? 'border-emerald-500 text-emerald-300'
+                          : 'border-slate-700 text-slate-300 hover:border-slate-500'
+                      }`}
+                    >
+                      {style.label}
+                    </button>
+                  );
+                })}
+                <p className="w-full text-[11px] text-slate-500">
+                  {LASH_STYLES.find((style) => style.id === (kit.lashes ?? DEFAULT_LASH_STYLE))?.hint}{' '}
+                  Applies to the next eye you generate — eyes already in the kit are left as they
+                  are, so regenerate both if you change this.
+                </p>
+              </div>
 
               {SLOTS.map((entry) => {
                 const options = candidates[entry.id] ?? [];

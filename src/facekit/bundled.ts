@@ -1,5 +1,5 @@
 import { KIT_FORMAT, migrate, type Boxes, type FaceKit } from './kit';
-import type { SlotId } from './slots';
+import type { LashStyle, SlotId } from './slots';
 
 /**
  * The kit checked into public/faces/, for a browser that has never authored one.
@@ -24,6 +24,7 @@ interface BundledManifest {
   base?: string;
   boxes?: Boxes;
   patches?: Partial<Record<SlotId, string>>;
+  lashes?: LashStyle;
 }
 
 export async function loadBundledKit(name = 'face'): Promise<FaceKit | null> {
@@ -51,6 +52,7 @@ export async function loadBundledKit(name = 'face'): Promise<FaceKit | null> {
       base: `${dir}/${manifest.base}`,
       boxes: manifest.boxes,
       patches,
+      lashes: manifest.lashes,
       spentUsd: 0,
     });
   } catch {

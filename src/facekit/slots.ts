@@ -90,8 +90,14 @@ export interface Slot {
    * generator worth using; "lips spread wide, upper teeth showing" gets the
    * pose. The classifier's names are an implementation detail of the audio
    * analysis and mean nothing to an image model.
+   *
+   * A function of the kit's lash style rather than a plain string, because the
+   * eye slots vary with it and a field that is right for six slots and stale
+   * for two is a bug waiting for whoever reads it next. Mouth slots take the
+   * argument and ignore it, which costs a pair of brackets and means every
+   * call site has to have the setting in hand.
    */
-  prompt: string;
+  prompt: (lashes: LashStyle) => string;
 }
 
 /**
@@ -111,6 +117,60 @@ export const PREAMBLE = [
 ].join(' ');
 
 /**
+ * How much eyelash a closed eye keeps.
+ *
+ * Named for the mark on the page rather than for the person in the portrait,
+ * and that is the same choice the slots make when they are called "Rounded
+ * (OH)" instead of a phoneme. A male/female switch was the obvious shape for
+ * this and it is the wrong one: what actually decides the answer is whether
+ * *this drawing* has defined lashes to preserve, which is a fact about the
+ * artwork. Plenty of illustrated men are drawn with a strong lash line and
+ * plenty of women, in a flat style, with none at all, so a switch naming the
+ * subject would be wrong in both directions on the faces it was meant to fix —
+ * and would have nothing to say about a portrait that is neither.
+ */
+export type LashStyle = 'asDrawn' | 'minimal' | 'none';
+
+export const DEFAULT_LASH_STYLE: LashStyle = 'asDrawn';
+
+export const LASH_STYLES: { id: LashStyle; label: string; hint: string }[] = [
+  {
+    id: 'asDrawn',
+    label: 'As drawn',
+    hint: 'Keep whatever lashes the open eye has, and add nothing.',
+  },
+  { id: 'minimal', label: 'Minimal', hint: 'A thin lash line, no curl or fan.' },
+  { id: 'none', label: 'None', hint: 'A bare arc, with no lashes at all.' },
+];
+
+/**
+ * The lash clause, which is the only part of a closed eye that varies.
+ *
+ * The default is "as drawn" rather than the wording this prompt carried for its
+ * first several months, which asked for "the long eyelashes still curving out
+ * from it" on every face it was ever given. That is an instruction to *add*
+ * lashes, not to keep them, and a generator handed a portrait with none obliged
+ * — the blink grew a pair of lashes the open eye did not have, so the eye
+ * changed species every time it closed. Preserving what is there is the only
+ * neutral answer; removing and reducing are choices, and choices get a control.
+ */
+function lashClause(lashes: LashStyle): string {
+  if (lashes === 'none') {
+    return 'Draw no eyelashes at all on the closed eye: the arc alone, with nothing curving out from it.';
+  }
+  if (lashes === 'minimal') {
+    return [
+      'Keep the lashes on the closed eye minimal: a thin lash line only, with no long,',
+      'curled, fanned or separately drawn lashes.',
+    ].join(' ');
+  }
+  return [
+    'Keep exactly the eyelashes the open eye already has, in the same shape and',
+    'number — do not add, lengthen, thicken or curl them.',
+  ].join(' ');
+}
+
+/**
  * Shared by both eye slots, and asking for *both* eyes on purpose.
  *
  * A masked provider paints only inside the one box it was given, so the other
@@ -119,20 +179,22 @@ export const PREAMBLE = [
  * contains a closed eye. One prompt that is correct under either regime beats
  * two that each assume one.
  */
-const EYES_CLOSED_PROMPT = [
-  'Close both eyes.',
-  // Naming the mark to draw, rather than the state to depict. Asking for
-  // "gentle downward curves" produced creased, wrinkled lids that read as a
-  // wince: told only what the eye is doing, the model reached for the shading
-  // that would sell a photograph, on a drawing that has no shading anywhere.
-  'Draw each closed eye as one smooth clean downward arc, in the same dark line',
-  'weight as the original lashes, with the long eyelashes still curving out from it.',
-  'The skin above and around each closed eye stays flat, smooth and exactly the',
-  'colour of the surrounding face — no eyelid crease, no fold, no wrinkle, no',
-  'extra shading or texture of any kind.',
-  'Keep the eyebrows unchanged, and keep any glasses exactly as they are: the same',
-  'frame colour, thickness and shape. Do not restyle the eyewear.',
-].join(' ');
+const eyesClosedPrompt = (lashes: LashStyle): string =>
+  [
+    'Close both eyes.',
+    // Naming the mark to draw, rather than the state to depict. Asking for
+    // "gentle downward curves" produced creased, wrinkled lids that read as a
+    // wince: told only what the eye is doing, the model reached for the shading
+    // that would sell a photograph, on a drawing that has no shading anywhere.
+    'Draw each closed eye as one smooth clean downward arc, in the same dark line',
+    'weight as the eye it replaces.',
+    lashClause(lashes),
+    'The skin above and around each closed eye stays flat, smooth and exactly the',
+    'colour of the surrounding face — no eyelid crease, no fold, no wrinkle, no',
+    'extra shading or texture of any kind.',
+    'Keep the eyebrows unchanged, and keep any glasses exactly as they are: the same',
+    'frame colour, thickness and shape. Do not restyle the eyewear.',
+  ].join(' ');
 
 /**
  * Appended to every mouth pose, and doing the same job the eyelid prompt's
@@ -157,7 +219,10 @@ const MOUTH_NOTE = [
   'Do not change the nose, chin, cheeks or jawline.',
 ].join(' ');
 
-const mouth = (shape: string): string => `${shape} ${MOUTH_NOTE}`;
+const mouth =
+  (shape: string) =>
+  (): string =>
+    `${shape} ${MOUTH_NOTE}`;
 
 export const SLOTS: Slot[] = [
   {
@@ -212,13 +277,13 @@ export const SLOTS: Slot[] = [
     id: 'eyeLeftClosed',
     label: 'Left eye closed',
     region: 'eyeLeft',
-    prompt: EYES_CLOSED_PROMPT,
+    prompt: eyesClosedPrompt,
   },
   {
     id: 'eyeRightClosed',
     label: 'Right eye closed',
     region: 'eyeRight',
-    prompt: EYES_CLOSED_PROMPT,
+    prompt: eyesClosedPrompt,
   },
 ];
 
