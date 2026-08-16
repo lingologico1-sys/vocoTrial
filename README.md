@@ -13,16 +13,27 @@ OpenAI ── ephemeral secret, then audio goes direct ────────�
      └──────── WebRTC audio, no relay ────────────────────► OpenAI ◄───┘
 
 Gemini ── no usable browser credential exists, so the socket is relayed
-  browser ──WS /api/live/gemini──► Worker ──WS ?key=…──► Vertex AI
-     └──────── audio both ways, through Cloudflare ───────────┘
+  browser ──WS /api/live/gemini──► Worker ──WS ?key=…──► Vertex AI or AI Studio
+     └──────── audio both ways, through Cloudflare ───────────┘   (per model)
 ```
 
-Everything Google here — the Live socket and face-kit image generation both —
-runs on **Vertex AI in express mode**, billed through GCP rather than AI Studio.
-Express mode is what makes it possible from a Worker at all: it takes an API key
-and infers the project, with no OAuth exchange to sign. See
-[functions/api/_vertex.ts](functions/api/_vertex.ts), which is the only file
-that knows any of this.
+Google is **two APIs**, and a model is served by whichever one carries it —
+Vertex and AI Studio publish overlapping but different catalogues. So the
+surface is a property of each model in
+[src/realtime/models.ts](src/realtime/models.ts), not a global setting:
+
+| model | surface | why |
+| --- | --- | --- |
+| `gemini-live-2.5-flash-native-audio` | Vertex (GCP billing) | GA there; the native-audio dialect |
+| `gemini-3.1-flash-live-preview` | AI Studio | **no Vertex build in any region** |
+| face-kit image models | Vertex | both confirmed generating |
+
+Vertex runs in **express mode**, which is what makes it usable from a Worker at
+all: it takes an API key and infers the project, with no OAuth exchange to sign.
+There is deliberately **no cross-surface fallback** — an error on one is not a
+reason to spend the other account on a catalogue that may not have the model.
+See [functions/api/_vertex.ts](functions/api/_vertex.ts) and
+[functions/api/_aistudio.ts](functions/api/_aistudio.ts).
 
 **Vertex is two surfaces wearing one name**, and they disagree about the host:
 
@@ -61,8 +72,9 @@ the key private at the cost of a latency leg.
 | [functions/api/auth/](functions/api/auth/) | Trades the site password for a signed session cookie |
 | [src/PasswordGate.tsx](src/PasswordGate.tsx) | The sign-in screen. Cosmetic — the middleware is what actually refuses |
 | [functions/api/session/openai.ts](functions/api/session/openai.ts) | Mints an OpenAI Realtime client secret (`ek_…`) |
-| [functions/api/live/gemini.ts](functions/api/live/gemini.ts) | Relays the Gemini Live socket to Vertex with the API key attached |
-| [functions/api/_vertex.ts](functions/api/_vertex.ts) | Where the Vertex host, key pair and express-mode model naming live — the one file that knows the surface |
+| [functions/api/live/gemini.ts](functions/api/live/gemini.ts) | Relays the Gemini Live socket with the API key attached, to whichever surface carries the model |
+| [functions/api/_vertex.ts](functions/api/_vertex.ts) | Vertex host, key pair, region and express-mode model naming |
+| [functions/api/_aistudio.ts](functions/api/_aistudio.ts) | The same three facts for AI Studio, for models Vertex has no build of |
 | [src/realtime/instructions.ts](src/realtime/instructions.ts) | The prompt presets, and the default the server falls back to |
 | [src/realtime/settings.ts](src/realtime/settings.ts) | Which provider knobs exist, which models take them, and the sanitiser |
 | [functions/api/session/_providerConfig.ts](functions/api/session/_providerConfig.ts) | Translates those settings into each provider's payload shape |
@@ -122,6 +134,7 @@ gates the build.
    - `OPENAI_API_KEY`
    - `GEMINI_API_KEY` (Vertex AI key — see below, it is a particular kind)
    - `GEMINI_API_KEY2` (optional fallback Vertex key)
+   - `GOOGLE_API_KEY` (ordinary AI Studio key, for models with no Vertex build)
 
    **A Vertex key is not an ordinary API key**, and the difference is invisible:
    both are 39–53 characters of `AIza…`. Vertex refuses a plain one with `403`
@@ -206,11 +219,11 @@ npm run lint
 | Same-origin gate (`403` on a forged Origin) | working |
 | Password gate (`401` on every `/api/*` without a cookie, fetch and WebSocket alike) | working — verified against `wrangler pages dev`, including a tampered cookie and an unset `SITE_PASSWORD` |
 | `/api/session/openai` | mints ephemeral secrets correctly |
-| `/api/live/gemini` | **working on Vertex** — a socket through the relay reached `setupComplete` |
+| `/api/live/gemini` | **working on both surfaces** — `setupComplete` through the relay on Vertex *and* AI Studio |
 | `/api/live/models` | probes candidate ids with `generateContent`, the only call this key may make |
 | `/api/image/generate` | **working on Vertex** — returned an image in ~16s on Flash |
 | OpenAI voice conversation | **working** — confirmed from a browser on `gpt-realtime` and `gpt-realtime-mini`, and untouched by the Vertex move |
-| Gemini handshake | **working on Vertex**; the 12/12 run on AI Studio is history, not evidence |
+| Gemini handshake | **working** — 2.5 native audio on Vertex, 3.1 Flash Live on AI Studio |
 | Gemini audio in a browser | untested; needs a mic |
 
 ### Which model ids are actually confirmed
@@ -226,31 +239,33 @@ nothing either.
 Both OpenAI ids are confirmed by real browser calls, and the Vertex move does
 not touch them.
 
-Every Gemini id was re-confirmed against Vertex after the move, and all of them
-changed or were removed in the process. **A model id belongs to a surface**: the
-two Live ids that had reached `setupComplete` twelve times out of twelve on AI
-Studio both `404` on Vertex.
+Both Gemini Live ids reach `setupComplete` today, each on its own surface — and
+the responses differ in a way that confirms it: Vertex returns a `sessionId`, AI
+Studio an empty `setupComplete`.
 
-Nine Live spellings went to Vertex and exactly one came back:
+**A model id belongs to a surface.** The two ids that had reached
+`setupComplete` twelve times out of twelve on AI Studio both `404` on Vertex.
+Sixteen Live spellings across four Vertex regions produced exactly one hit:
 
 ```
-400  gemini-live-2.5-flash-preview-native-audio-09-2025   ← the only one
-404  gemini-3.1-flash-live-preview            (our old id)
-404  gemini-2.5-flash-native-audio-latest     (our old id)
-404  gemini-live-3.1-flash-preview / gemini-live-3.1-flash
+✅  gemini-live-2.5-flash-native-audio                   ← GA alias, in use
+✅  gemini-live-2.5-flash-preview-native-audio-09-2025   ← works, but dated
+404  gemini-3.1-flash-live-preview            (AI Studio only)
+404  gemini-live-3.1-flash-preview / -3.1-flash / dated variants
 404  gemini-live-2.5-flash / -preview / -preview-native-audio
-404  gemini-2.0-flash-live-preview-04-09
+404  gemini-2.0-flash-live-preview-04-09 · gemini-3-flash-live-*
 ```
 
-The date suffix is load-bearing, and **there is no 3.1 Flash Live on Vertex in
-`us-central1`** — which is why the picker now offers one Gemini model rather
-than two. Availability is regional, so re-run `/api/live/models` before
-concluding a 3.1 Live model exists nowhere.
+Prefer the **GA alias** over a dated preview: previews retire 45 days after
+their replacement ships, and a replacement for the `-09-2025` one already exists
+on AI Studio. Note the near-misses differ from the real id by a single word or a
+date — do not guess.
 
-Do not guess a Gemini id — the two closest near-misses above differ from the
-real one only by a date. Ask `/api/live/models`, which probes candidates with
-`generateContent`: `404` is a wrong id, `400` is a real id that is bidi-only,
-and neither is billed.
+**Sunset watch: the 2.5 family retires 2026-10-16**, and Vertex currently
+publishes no Gemini 3 or 3.1 Live model to succeed it. Re-run
+`/api/live/models` before then rather than finding out on the day. It probes
+candidates with `generateContent`: `404` is a wrong id, `400` is a real id that
+is bidi-only, and neither is billed.
 
 ### Why Gemini is proxied and OpenAI is not
 
