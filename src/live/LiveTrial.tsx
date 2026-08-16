@@ -9,7 +9,14 @@ import type { FaceKit } from '../facekit/kit';
 import { activeKit } from '../facekit/store';
 import Stage from './Stage';
 import { RevealQueue } from './reveal';
-import { DEFAULT_HEAD_MOTION, HEAD_MOTIONS, type HeadMotion } from './headMotion';
+import {
+  DEFAULT_CADENCE,
+  DEFAULT_HEAD_MOTION,
+  HEAD_MOTIONS,
+  MOTION_CADENCES,
+  type HeadMotion,
+  type MotionCadence,
+} from './headMotion';
 import type { MouthDriver } from './visemes';
 import { tailSentences } from './text';
 
@@ -49,6 +56,8 @@ interface Prefs {
   driver: MouthDriver;
   lookaheadMs: number;
   motion: HeadMotion;
+  cadence: MotionCadence;
+  idle: boolean;
 }
 
 /**
@@ -122,6 +131,12 @@ export default function LiveTrial() {
   // Swing by default for the same reason scheduled is: it is the better motion,
   // and rise is kept beside it as the thing to compare against.
   const [motion, setMotion] = useState<HeadMotion>(prefs.motion ?? DEFAULT_HEAD_MOTION);
+  // Which way the head goes and how often it goes there are separate questions,
+  // so they are separate settings — every combination of the two is legal.
+  const [cadence, setCadence] = useState<MotionCadence>(prefs.cadence ?? DEFAULT_CADENCE);
+  // Defaulted on, and it is the one setting here that does something while
+  // nobody is speaking at all.
+  const [idle, setIdle] = useState<boolean>(prefs.idle ?? true);
 
   const [status, setStatus] = useState<SessionStatus>('idle');
   const [detail, setDetail] = useState<string | null>(null);
@@ -167,12 +182,20 @@ export default function LiveTrial() {
     try {
       window.localStorage.setItem(
         PREFS_KEY,
-        JSON.stringify({ language, presetKey, driver, lookaheadMs, motion } satisfies Prefs),
+        JSON.stringify({
+          language,
+          presetKey,
+          driver,
+          lookaheadMs,
+          motion,
+          cadence,
+          idle,
+        } satisfies Prefs),
       );
     } catch {
       // Private browsing. Losing the pick is not worth an error.
     }
-  }, [language, presetKey, driver, lookaheadMs, motion]);
+  }, [language, presetKey, driver, lookaheadMs, motion, cadence, idle]);
 
   useEffect(() => () => session.current?.stop(), []);
 
@@ -343,6 +366,8 @@ export default function LiveTrial() {
           lookaheadMs={lookaheadMs}
           kit={kit}
           motion={motion}
+          cadence={cadence}
+          idle={idle}
           speaking={speaking}
         />
 
@@ -394,11 +419,21 @@ export default function LiveTrial() {
           performance and is judged on its own. Sharing a box would imply they
           interact, which they do not.
         */}
-        <fieldset className="rounded-lg border border-slate-800 px-3 pb-2.5 pt-1">
+        {/*
+          Two rows, one box — unlike the driver above, which earns a box of its
+          own by answering an unrelated question. These two are the same
+          question asked along two axes: which way the head goes, and how often
+          it goes there. Every pairing is legal, neither is a tuning of the
+          other, and separating them into two bordered boxes would suggest they
+          were as unrelated as the driver is, which they are not.
+        */}
+        <fieldset className="space-y-2 rounded-lg border border-slate-800 px-3 pb-2.5 pt-1">
           <legend className="px-1 text-[11px] uppercase tracking-wide text-slate-500">
             Head motion
           </legend>
+
           <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+            <span className="w-16 shrink-0 text-xs text-slate-500">Direction</span>
             {HEAD_MOTIONS.map((option) => (
               <label
                 key={option.id}
@@ -418,6 +453,52 @@ export default function LiveTrial() {
               </label>
             ))}
           </div>
+
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+            <span className="w-16 shrink-0 text-xs text-slate-500">Cadence</span>
+            {MOTION_CADENCES.map((option) => (
+              <label
+                key={option.id}
+                title={option.hint}
+                className="flex cursor-help items-center gap-2 text-sm text-slate-300"
+              >
+                <input
+                  type="radio"
+                  name="cadence"
+                  checked={cadence === option.id}
+                  onChange={() => setCadence(option.id)}
+                  className="accent-sky-500"
+                />
+                {option.label}
+              </label>
+            ))}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+            <span className="w-16 shrink-0 text-xs text-slate-500">Idle</span>
+            <label
+              title="A slight sway on its own clock, running whether or not anyone is speaking. Untick it to see how still the face is between turns."
+              className="flex cursor-help items-center gap-2 text-sm text-slate-300"
+            >
+              <input
+                type="checkbox"
+                checked={idle}
+                onChange={(event) => setIdle(event.target.checked)}
+                className="accent-sky-500"
+              />
+              Sway between turns
+            </label>
+          </div>
+
+          {/*
+            Spelled out rather than left in the tooltip, because the three
+            cadences differ in a way their labels cannot carry: two of them are
+            distinguished by how *often* they move rather than by how they look
+            in any one frame, which is exactly what you cannot see by hovering.
+          */}
+          <p className="text-xs leading-relaxed text-slate-500">
+            {MOTION_CADENCES.find((option) => option.id === cadence)?.hint}
+          </p>
         </fieldset>
 
         <div className="flex items-center gap-3 rounded-lg border border-slate-800 px-4 py-2.5">

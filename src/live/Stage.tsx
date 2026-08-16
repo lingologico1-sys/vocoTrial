@@ -1,7 +1,7 @@
 import { useLayoutEffect, useRef, useState } from 'react';
 import type { AudioTap } from '../realtime/audio';
 import type { FaceKit } from '../facekit/kit';
-import type { HeadMotion } from './headMotion';
+import type { HeadMotion, MotionCadence } from './headMotion';
 import SpeakingFace from './SpeakingFace';
 import type { MouthDriver } from './visemes';
 import Bubble, { BUBBLE_FILL } from './Bubble';
@@ -62,8 +62,12 @@ interface StageProps {
   lookaheadMs: number;
   /** Artwork for the face to wear, from /facekit. Null keeps the placeholder. */
   kit?: FaceKit | null;
-  /** Which way the head moves. See HEAD_MOTIONS in Face.tsx. */
+  /** Which way the head moves. See HEAD_MOTIONS in headMotion.ts. */
   motion?: HeadMotion;
+  /** On what schedule it moves. See MOTION_CADENCES in headMotion.ts. */
+  cadence?: MotionCadence;
+  /** Whether the head drifts between turns. */
+  idle?: boolean;
   /** Dims the agent balloon once the words are no longer being said. */
   speaking: boolean;
 }
@@ -76,6 +80,8 @@ export default function Stage({
   lookaheadMs,
   kit,
   motion,
+  cadence,
+  idle,
   speaking,
 }: StageProps) {
   const stage = useRef<HTMLDivElement>(null);
@@ -167,6 +173,8 @@ export default function Stage({
               lookaheadMs={lookaheadMs}
               kit={kit}
               motion={motion}
+              cadence={cadence}
+              idle={idle}
               mouthRef={mouth}
             />
           </div>

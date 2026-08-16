@@ -3,12 +3,16 @@ import { CANVAS_EDGE } from '../facekit/imageModels';
 import type { FaceKit } from '../facekit/kit';
 import { BROW_BOXES } from '../facekit/slots';
 import {
+  DEFAULT_CADENCE,
   DEFAULT_HEAD_MOTION,
+  HeadPerformer,
   MOTION,
   OVERSCAN,
   PIVOT_X,
   PIVOT_Y,
   type HeadMotion,
+  type MotionCadence,
+  type Performance,
 } from './headMotion';
 import { MOUTH_BOX, lipPath, type LipShape, type Viseme } from './visemes';
 
@@ -75,6 +79,10 @@ interface FaceProps {
   kit?: FaceKit | null;
   /** Which way the head moves. See HEAD_MOTIONS. */
   motion?: HeadMotion;
+  /** On what schedule it moves, and the brows with it. See MOTION_CADENCES. */
+  cadence?: MotionCadence;
+  /** Whether the head drifts when nobody is speaking. See IDLE_SWAY. */
+  idle?: boolean;
   /** Anchor for the speech bubble's tail. Marks the mouth, not the head. */
   mouthRef?: React.Ref<SVGCircleElement>;
 }
@@ -97,13 +105,30 @@ export default function Face({
   level,
   kit,
   motion = DEFAULT_HEAD_MOTION,
+  cadence = DEFAULT_CADENCE,
+  idle = true,
   mouthRef,
 }: FaceProps) {
   const [blinking, setBlinking] = useState(false);
+  const [perf, setPerf] = useState<Performance>({ head: 0, brow: 0 });
   const timers = useRef<number[]>([]);
   // Two faces on one page must not share a mask id, and nothing here knows
   // whether it is the only one.
   const maskId = useId().replace(/:/g, '');
+
+  /**
+   * The latest of everything the performer reads, kept where its loop can see it.
+   *
+   * Refs rather than dependencies on purpose. The loop below must not be torn
+   * down and rebuilt when the cadence changes, because rebuilding it resets the
+   * phrase envelope and both lockouts — and a switch that costs a second of the
+   * face finding its feet cannot be used for the one thing it exists for, which
+   * is flipping between two schedules on the same sentence.
+   */
+  const latest = useRef({ level, cadence, idle });
+  useEffect(() => {
+    latest.current = { level, cadence, idle };
+  }, [level, cadence, idle]);
 
   useEffect(() => {
     const schedule = () => {
@@ -131,10 +156,55 @@ export default function Face({
   }, []);
 
   /**
-   * The rest of the performance, all of it from `level`.
+   * The head's own clock, which is the blink's argument applied to the rest of
+   * the face.
    *
-   * Six mouth shapes on a rigid head reads as a puppet; a head that lifts into
-   * an emphasised syllable reads as someone talking. It costs three numbers.
+   * It lives here rather than in SpeakingFace's loop for two reasons, and the
+   * second is the load-bearing one. A schedule has to keep running when nothing
+   * is being said — a lockout has to expire, an idle sway has to carry on — and
+   * SpeakingFace's loop stops entirely between calls. And MotionPreview drives
+   * this component with a loudness it invents, with no analyser anywhere near
+   * it; a performance computed upstream would leave that preview showing
+   * something the live page does not do, which is the one thing that preview
+   * promises never to do.
+   */
+  useEffect(() => {
+    const performer = new HeadPerformer();
+    let frame = 0;
+    let last = performance.now();
+
+    const step = (time: number) => {
+      // Clamped for the analyser's reason: a backgrounded tab resumes with a gap
+      // of seconds, and feeding that in as one frame would expire every lockout
+      // and snap the envelope to its target.
+      const dt = Math.min(0.1, (time - last) / 1000);
+      last = time;
+      const next = performer.read(dt, latest.current.level, latest.current.cadence, latest.current.idle);
+      // Returning the identical object when nothing has moved is what keeps a
+      // silent face cheap: with the sway off, this loop then costs one callback
+      // a frame and no renders at all, rather than re-rendering a whole portrait
+      // sixty times a second to draw the same transform.
+      setPerf((current) =>
+        Math.abs(current.head - next.head) < 1e-4 && Math.abs(current.brow - next.brow) < 1e-4
+          ? current
+          : next,
+      );
+      frame = requestAnimationFrame(step);
+    };
+
+    frame = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(frame);
+  }, []);
+
+  /**
+   * The rest of the performance.
+   *
+   * Six mouth shapes on a rigid head reads as a puppet; a head that carries the
+   * emphasis reads as someone talking. What changed is where the two numbers
+   * come from: `level` is the loudness of this frame and moves at syllable rate,
+   * whereas `perf` is that loudness put through a schedule — see MOTION_CADENCES.
+   * The mouth still reads `level` directly, because the mouth *should* move once
+   * per syllable; it is the only thing here that should.
    */
   // Not destructured: `rise` would shadow the per-brow travel of the same name
   // a few dozen lines down, where the shadowing would be harmless and confusing.
@@ -149,8 +219,12 @@ export default function Face({
    * anyway, because a mode that ever moves both at once would be reading its
    * feel off an order nobody chose.
    */
-  const move = `translate(0 ${-level * travel.rise}) rotate(${level * travel.roll} ${PIVOT_X} ${PIVOT_Y})`;
-  const browLift = level * 3.5;
+  const move = `translate(0 ${-perf.head * travel.rise}) rotate(${perf.head * travel.roll} ${PIVOT_X} ${PIVOT_Y})`;
+  const browLift = perf.brow * 3.5;
+  // Left on the raw loudness, alone among these. It is not a gesture — it is a
+  // twelve percent narrowing that happens to the eyes of anyone raising their
+  // voice, and putting it on a schedule would make the face blink-adjacent at
+  // moments it had not chosen to blink.
   const eyeOpen = blinking ? 0.08 : 1 - level * 0.12;
 
   /**
@@ -205,7 +279,7 @@ export default function Face({
     const brows = BROW_BOXES.flatMap((id) => {
       const box = kit.boxes[id];
       if (!box) return [];
-      const rise = Math.min(level * KIT_BROW_LIFT, toHead(box.height) / 3);
+      const rise = Math.min(perf.brow * KIT_BROW_LIFT, toHead(box.height) / 3);
       if (rise <= 0) return [];
       return [
         {

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { AudioTap } from '../realtime/audio';
 import type { FaceKit } from '../facekit/kit';
 import Face from './Face';
-import type { HeadMotion } from './headMotion';
+import type { HeadMotion, MotionCadence } from './headMotion';
 import {
   MouthAnalyser,
   VISEMES,
@@ -33,6 +33,10 @@ interface SpeakingFaceProps {
   kit?: FaceKit | null;
   /** Which way the head moves. Switchable mid-call, like the driver above. */
   motion?: HeadMotion;
+  /** On what schedule it moves. Switchable mid-call, and most worth doing so. */
+  cadence?: MotionCadence;
+  /** Whether the head drifts between turns. */
+  idle?: boolean;
   mouthRef?: React.Ref<SVGCircleElement>;
 }
 
@@ -48,6 +52,8 @@ export default function SpeakingFace({
   lookaheadMs,
   kit,
   motion,
+  cadence,
+  idle,
   mouthRef,
 }: SpeakingFaceProps) {
   const [mouth, setMouth] = useState(RESTING);
@@ -120,6 +126,8 @@ export default function SpeakingFace({
       level={mouth.level}
       kit={kit}
       motion={motion}
+      cadence={cadence}
+      idle={idle}
       mouthRef={mouthRef}
     />
   );

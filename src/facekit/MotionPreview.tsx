@@ -1,6 +1,13 @@
 import { useEffect, useState } from 'react';
 import Face from '../live/Face';
-import { DEFAULT_HEAD_MOTION, HEAD_MOTIONS, type HeadMotion } from '../live/headMotion';
+import {
+  DEFAULT_CADENCE,
+  DEFAULT_HEAD_MOTION,
+  HEAD_MOTIONS,
+  MOTION_CADENCES,
+  type HeadMotion,
+  type MotionCadence,
+} from '../live/headMotion';
 import { VISEMES } from '../live/visemes';
 import { CANVAS_EDGE } from './imageModels';
 import type { Box, FaceKit } from './kit';
@@ -93,6 +100,19 @@ export default function MotionPreview({ kit, focus, note }: MotionPreviewProps) 
    * the live page. This one is here to be flipped, not to be saved.
    */
   const [motion, setMotion] = useState<HeadMotion>(DEFAULT_HEAD_MOTION);
+  /**
+   * Local for the same reason, and worth having here rather than only on the
+   * live page: the brows are the thing this panel exists to judge, and the
+   * cadence is what decides how often they move at all.
+   *
+   * It does change what the slider means, which is worth knowing before you
+   * reach for it. Under 'Every syllable' the slider is a direct control on brow
+   * height. Under 'Every phrase' it still is, a beat later, once the envelope
+   * has settled on whatever you dragged to. Under 'Occasional' it is not a
+   * control at all — it can trigger a gesture and then the gesture ignores it,
+   * which is the entire point of that setting and is best watched on the loop.
+   */
+  const [cadence, setCadence] = useState<MotionCadence>(DEFAULT_CADENCE);
 
   useEffect(() => {
     if (!loop) return;
@@ -134,7 +154,18 @@ export default function MotionPreview({ kit, focus, note }: MotionPreviewProps) 
               : undefined
           }
         >
-          <Face shape={VISEMES.rest} viseme="rest" level={level} kit={kit} motion={motion} />
+          <Face
+            shape={VISEMES.rest}
+            viseme="rest"
+            level={level}
+            kit={kit}
+            motion={motion}
+            cadence={cadence}
+            // Off here, unlike the live page. This panel is for judging a seam
+            // against a loudness you set, and a drift nobody asked for moves the
+            // very edge being stared at.
+            idle={false}
+          />
         </div>
       </div>
 
@@ -186,7 +217,7 @@ export default function MotionPreview({ kit, focus, note }: MotionPreviewProps) 
         how you are looking at it.
       */}
       <div className="flex flex-wrap items-center gap-2 text-xs">
-        <span className="text-slate-500">Head</span>
+        <span className="w-12 shrink-0 text-slate-500">Head</span>
         <div className="flex overflow-hidden rounded-lg border border-slate-700">
           {HEAD_MOTIONS.map((option) => (
             <button
@@ -206,8 +237,29 @@ export default function MotionPreview({ kit, focus, note }: MotionPreviewProps) 
         </div>
       </div>
 
-      <p className="text-xs text-slate-500">
-        {HEAD_MOTIONS.find((option) => option.id === motion)?.hint}
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        <span className="w-12 shrink-0 text-slate-500">When</span>
+        <div className="flex overflow-hidden rounded-lg border border-slate-700">
+          {MOTION_CADENCES.map((option) => (
+            <button
+              key={option.id}
+              type="button"
+              title={option.hint}
+              onClick={() => setCadence(option.id)}
+              className={`px-2.5 py-1 ${
+                cadence === option.id
+                  ? 'bg-slate-800 text-slate-100'
+                  : 'text-slate-500 hover:text-slate-300'
+              }`}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <p className="text-xs leading-relaxed text-slate-500">
+        {MOTION_CADENCES.find((option) => option.id === cadence)?.hint}
       </p>
 
       {!focus && <p className="text-xs text-slate-500">{note}</p>}
