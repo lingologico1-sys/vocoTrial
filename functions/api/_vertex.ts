@@ -54,19 +54,33 @@ export function vertexGenerateContentUrl(id: string): string {
 }
 
 /**
+ * The region this key's models live in.
+ *
+ * Express mode infers it rather than taking it in a URL, and says so when it
+ * refuses: a bad model id comes back naming
+ * `projects/…/locations/us-central1/publishers/…`. It is a constant here only
+ * because the Live socket has to name it (see below); REST never does.
+ */
+export const VERTEX_LOCATION = 'us-central1';
+
+/**
  * The Live socket, on Vertex's bidi service rather than Google AI's.
  *
  * https, not wss, for the reason live/gemini.ts sets out at length: a Worker
  * opens an outbound socket by fetching with an Upgrade header, and the Fetch
  * API refuses any scheme but http(s).
  *
- * UNVERIFIED against the account, in the sense models.ts gives the word — this
- * path and the express-mode `publishers/google/models/<id>` in the setup frame
- * are how the surface is documented to work, but the only proof is a call that
- * reaches `setupComplete`, and the keys live in Cloudflare. If the socket opens
- * and then closes on the setup frame, the model path is the first suspect and
- * the model *id* is the second: Vertex spells its Live models differently from
- * AI Studio, and POST /api/live/models is there to say how.
+ * REGIONAL, unlike everything else here, and that is the whole trick. The
+ * global host serves REST generateContent perfectly well but has no bidi
+ * service behind it, and it does not say so — it closes the socket with 1007
+ * "Invalid resource field value in the request" for a `publishers/…` model, or
+ * 1008 "Publisher model … was not found" for a fully-qualified one. Both read
+ * as "your model id is wrong" and neither is: the same frames reach
+ * `setupComplete` against us-central1-aiplatform.googleapis.com, on v1 and
+ * v1beta1 alike and with either spelling of the model path.
+ *
+ * Verified by a real handshake, which is the only thing that verifies a Live
+ * endpoint. If it ever stops, check the region before the model id.
  */
 export const VERTEX_LIVE_URL =
-  `https://${VERTEX_HOST}/ws/google.cloud.aiplatform.v1beta1.LlmBidiService/BidiGenerateContent`;
+  `https://${VERTEX_LOCATION}-${VERTEX_HOST}/ws/google.cloud.aiplatform.v1beta1.LlmBidiService/BidiGenerateContent`;
