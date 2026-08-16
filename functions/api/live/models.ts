@@ -1,48 +1,79 @@
 import { MODELS } from '../../../src/realtime/models';
-import { VERTEX_HOST, VERTEX_KEY_NAMES, vertexKey } from '../_vertex';
+import { IMAGE_MODELS } from '../../../src/facekit/imageModels';
+import { VERTEX_KEY_NAMES, vertexGenerateContentUrl, vertexKey } from '../_vertex';
 import { type GateEnv, json } from '../_middleware';
 
 /**
- * Asks Vertex which model ids it will actually accept.
+ * Asks Vertex which model ids it will actually serve this key.
  *
- * This exists because guessing model ids cost several deploys, and the move to
- * Vertex made the question live again: Vertex spells its Live models
- * differently from AI Studio — the same weights can sit behind
- * `gemini-live-2.5-flash…` on one surface and `gemini-2.5-flash-native-audio…`
- * on the other — so an id confirmed against the old catalogue proves nothing
- * about this one. Nothing else in the chain will tell you: the socket only
- * objects once it is open, and by then the failure looks like a broken relay.
+ * The obvious way to ask — list the publisher catalogue, or GET a model by
+ * name — does not work here and cannot be made to. Those are metadata
+ * endpoints, and the credential is an API key bound to a service account and
+ * restricted to aiplatform.googleapis.com; Vertex answers 401 to every one of
+ * them. The only question this key may ask is `generateContent`.
  *
- * Two questions, because Vertex answers them separately:
+ * Which turns out to be enough, because the *failures* are informative and free
+ * (a rejected request is not billed):
  *
- *  - `catalogue` lists the publisher models the key can see at all. Express mode
- *    is not obliged to serve this listing; if it refuses, the status says so
- *    rather than the route pretending there are no models.
- *  - `allowlist` fetches each Gemini id in src/realtime/models.ts by name. That
- *    is the question actually worth answering — a 200 means the id exists as a
- *    publisher model on this key, a 404 means the picker is offering something
- *    that cannot work and the entry needs correcting.
+ *   404  no such publisher model in this key's region — the id is wrong
+ *   400  the id exists, but does not do generateContent. For a Live model that
+ *        is the expected answer and the one worth having: it is bidi-only.
+ *   200  the id exists and generated something. Only image and text models
+ *        should ever land here, and maxOutputTokens keeps that cheap.
  *
- * Neither proves the model supports *bidi* — the old route could filter on
- * `supportedGenerationMethods` and this one has no equivalent field to read. A
- * call that reaches `setupComplete` is still the only proof of that, which is
- * what the unverified flags in models.ts are for.
+ * So a Live id that answers 400 is confirmed to exist, and nothing else in the
+ * chain can tell you that. It is still not proof the *socket* will accept it —
+ * only a call that reaches `setupComplete` is — but it separates "wrong id"
+ * from "right id, something else is broken", which is exactly the confusion
+ * that has cost this project several deploys.
  *
- * Read-only, same-origin, and returns nothing but public model metadata and
- * HTTP statuses — the key never leaves the Worker.
+ * Candidates below deliberately include spellings we do not use. Vertex names
+ * its Live models differently from AI Studio, and the whole point is to find
+ * out how rather than to confirm what we already believe.
  */
 
-interface PublisherModel {
-  name?: string;
-  versionId?: string;
-  launchStage?: string;
-}
+/** Vertex Live spellings worth trying, beyond whatever models.ts holds today. */
+const LIVE_CANDIDATES = [
+  'gemini-live-3.1-flash-preview',
+  'gemini-live-3.1-flash',
+  'gemini-live-2.5-flash',
+  'gemini-live-2.5-flash-preview',
+  'gemini-live-2.5-flash-preview-native-audio',
+  'gemini-live-2.5-flash-preview-native-audio-09-2025',
+  'gemini-2.0-flash-live-preview-04-09',
+];
 
-const VERSIONS = ['v1beta1', 'v1'] as const;
+/** Image spellings, including the one PanelForge generates with on Vertex. */
+const IMAGE_CANDIDATES = ['gemini-3.1-flash-image'];
 
-/** `publishers/google/models/gemini-x` -> `gemini-x`, for a readable list. */
-function shortName(name: string | undefined): string | undefined {
-  return name?.replace(/^publishers\/google\/models\//, '');
+/** Cheapest possible request: it exists to be rejected, not to produce text. */
+const PROBE_BODY = JSON.stringify({
+  contents: [{ role: 'user', parts: [{ text: 'probe' }] }],
+  generationConfig: { maxOutputTokens: 1 },
+});
+
+async function probe(id: string, key: string): Promise<Record<string, unknown>> {
+  try {
+    const response = await fetch(vertexGenerateContentUrl(id), {
+      method: 'POST',
+      headers: { 'x-goog-api-key': key, 'Content-Type': 'application/json' },
+      body: PROBE_BODY,
+    });
+
+    // 404 and 400 both mean "not billed"; 400 additionally means the id is real.
+    const verdict =
+      response.status === 404
+        ? 'no such model'
+        : response.status === 400
+          ? 'exists, not a generateContent model'
+          : response.ok
+            ? 'exists and generated'
+            : 'other';
+
+    return { id, status: response.status, verdict };
+  } catch (error) {
+    return { id, status: null, verdict: `threw: ${error instanceof Error ? error.name : 'unknown'}` };
+  }
 }
 
 export async function onRequestPost(
@@ -55,41 +86,22 @@ export async function onRequestPost(
     return json({ error: `${VERTEX_KEY_NAMES} is not configured`, code: 'no_key' }, 500);
   }
 
-  const headers = { 'x-goog-api-key': key };
-  const catalogue: Record<string, unknown> = {};
+  // Whatever the pickers offer today, plus the spellings worth discovering.
+  const live = [
+    ...MODELS.filter((model) => model.provider === 'gemini').map((model) => model.id),
+    ...LIVE_CANDIDATES,
+  ];
+  const image = [
+    ...IMAGE_MODELS.filter((model) => model.provider === 'gemini').map((model) => model.id),
+    ...IMAGE_CANDIDATES,
+  ];
 
-  for (const version of VERSIONS) {
-    const url = new URL(`https://${VERTEX_HOST}/${version}/publishers/google/models`);
-    url.searchParams.set('pageSize', '1000');
+  const unique = (ids: string[]) => [...new Set(ids)];
 
-    const response = await fetch(url.toString(), { headers });
-    if (!response.ok) {
-      // The status alone, never the body: an error can quote the request back,
-      // and the request was signed with the account's key.
-      catalogue[version] = { error: response.status };
-      continue;
-    }
+  const [liveResults, imageResults] = await Promise.all([
+    Promise.all(unique(live).map((id) => probe(id, key))),
+    Promise.all(unique(image).map((id) => probe(id, key))),
+  ]);
 
-    const body = (await response.json()) as { publisherModels?: PublisherModel[] };
-    const models = body.publisherModels ?? [];
-    catalogue[version] = {
-      total: models.length,
-      ids: models.map((model) => shortName(model.name)).filter(Boolean),
-    };
-  }
-
-  // One probe per allowlisted Gemini id, on the version the relay talks to.
-  const allowlist = await Promise.all(
-    MODELS.filter((model) => model.provider === 'gemini').map(async (model) => {
-      const url = `https://${VERTEX_HOST}/v1beta1/publishers/google/models/${encodeURIComponent(model.id)}`;
-      try {
-        const response = await fetch(url, { headers });
-        return { key: model.key, id: model.id, status: response.status };
-      } catch {
-        return { key: model.key, id: model.id, status: null };
-      }
-    }),
-  );
-
-  return json({ surface: 'vertex', catalogue, allowlist });
+  return json({ surface: 'vertex', live: liveResults, image: imageResults });
 }
