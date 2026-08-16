@@ -1,5 +1,6 @@
 import { geminiSetup } from '../session/_providerConfig';
 import { VERTEX_KEY_NAMES, VERTEX_LIVE_URL, vertexKey, vertexModel } from '../_vertex';
+import { AISTUDIO_KEY_NAME, AISTUDIO_LIVE_URL, aiStudioKey, aiStudioModel } from '../_aistudio';
 import { resolveInstructions, resolveSettings } from '../session/_resolve';
 import { findModel } from '../../../src/realtime/models';
 import { defaultLanguageCode, findLanguage } from '../../../src/realtime/languages';
@@ -23,11 +24,14 @@ import { type GateEnv, json } from '../_middleware';
  * server-side, and the agent's configuration is not the browser's to choose —
  * see the setup handling below.
  *
- * The upstream is now Vertex AI in express mode rather than Google AI Studio,
- * on PanelForge's keys and PanelForge's meter. The relay itself is indifferent
- * to which: the socket is opened the same way, the frames are forwarded
- * verbatim, and the whole difference is the URL and how the model is named in
- * the setup frame. See _vertex.ts.
+ * The upstream is whichever of Google's two APIs carries the chosen model —
+ * Vertex AI in express mode for 2.5 native audio, AI Studio for 3.1 Flash Live,
+ * which has no Vertex build in any region. The relay is indifferent to which:
+ * the socket is opened the same way and the frames are forwarded verbatim, and
+ * the entire difference is three values resolved below from the model itself —
+ * the URL, the key, and how the model is spelled in the setup frame. See
+ * _vertex.ts and _aistudio.ts, and the Surface type in models.ts for why this
+ * is a property of the model rather than a setting.
  */
 
 /**
@@ -69,11 +73,6 @@ export async function onRequest(
     return json({ error: 'Expected a WebSocket upgrade', code: 'not_websocket' }, 426);
   }
 
-  const key = vertexKey(env);
-  if (!key) {
-    return json({ error: `${VERTEX_KEY_NAMES} is not configured`, code: 'no_key' }, 500);
-  }
-
   // Same allowlist the session routes use: a key, never a raw model id.
   const params = new URL(request.url).searchParams;
   const modelKey = params.get('model') ?? '';
@@ -81,6 +80,25 @@ export async function onRequest(
   if (!choice || choice.provider !== 'gemini') {
     return json({ error: `Unknown Gemini model "${modelKey}"`, code: 'bad_model' }, 400);
   }
+
+  /**
+   * Surface, key and model spelling all come from the model, not from config.
+   *
+   * The allowlist decides this, as it decides everything else spendable here:
+   * the browser sends a key like "gemini-flash-31" and cannot reach for the
+   * other account by asking. Note there is deliberately no cross-surface
+   * fallback — see the note in _aistudio.ts on why an error is not a reason to
+   * retry somewhere else.
+   */
+  const aiStudio = choice.surface === 'aistudio';
+  const key = aiStudio ? aiStudioKey(env) : vertexKey(env);
+  if (!key) {
+    const names = aiStudio ? AISTUDIO_KEY_NAME : VERTEX_KEY_NAMES;
+    return json({ error: `${names} is not configured`, code: 'no_key' }, 500);
+  }
+
+  const liveUrl = aiStudio ? AISTUDIO_LIVE_URL : VERTEX_LIVE_URL;
+  const modelPath = aiStudio ? aiStudioModel(choice.id) : vertexModel(choice.id);
 
   const language = findLanguage(params.get('language') ?? defaultLanguageCode());
   if (!language) {
@@ -96,7 +114,7 @@ export async function onRequest(
    */
   const scrub = (text: string) => text.split(key).join('<redacted>');
 
-  const upstreamUrl = new URL(VERTEX_LIVE_URL);
+  const upstreamUrl = new URL(liveUrl);
   upstreamUrl.searchParams.set('key', key);
 
   let upstream: Response;
@@ -188,7 +206,7 @@ export async function onRequest(
 
     google.send(
       JSON.stringify({
-        setup: geminiSetup(vertexModel(choice.id), written.value, resolveSettings(config, choice)),
+        setup: geminiSetup(modelPath, written.value, resolveSettings(config, choice)),
       }),
     );
     return true;

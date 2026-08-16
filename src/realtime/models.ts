@@ -13,6 +13,21 @@
 
 export type Provider = 'openai' | 'gemini';
 
+/**
+ * Which of Google's two APIs a Gemini model is served by.
+ *
+ * Not a preference and not a billing switch — a fact about the model. Vertex
+ * and AI Studio publish overlapping but different catalogues, and a model is
+ * reachable on the one that carries it or not at all: 2.5 native audio is GA on
+ * Vertex, and 3.1 Flash Live exists only on AI Studio, with no Vertex build in
+ * any region. So the surface travels with the entry rather than sitting in a
+ * global setting, and adding a model means saying where it lives.
+ *
+ * The meters differ as a consequence: Vertex bills through Cloud Billing on the
+ * GCP project, AI Studio through its own account.
+ */
+export type Surface = 'vertex' | 'aistudio';
+
 export interface ModelChoice {
   /** What the client sends. Stable; the id underneath may change. */
   key: string;
@@ -20,6 +35,8 @@ export interface ModelChoice {
   label: string;
   /** The provider's own model id. */
   id: string;
+  /** Gemini only: which Google surface serves this model. See Surface. */
+  surface?: Surface;
   /** Allowed by the server but kept out of the picker (verification probes). */
   hidden?: boolean;
   /**
@@ -36,6 +53,7 @@ export const MODELS: ModelChoice[] = [
     provider: 'gemini',
     label: 'Gemini 2.5 Flash Native Audio',
     id: 'gemini-live-2.5-flash-native-audio',
+    surface: 'vertex',
     // The GA id, not the dated preview. Both work — this and
     // gemini-live-2.5-flash-preview-native-audio-09-2025 each reach
     // setupComplete — but a dated preview retires 45 days after its replacement
@@ -47,13 +65,20 @@ export const MODELS: ModelChoice[] = [
     // any spelling tried, so plan on re-probing before then rather than
     // discovering it on the day.
   },
-  // There is no 3.1 Flash Live here, and not because of the id or the region:
-  // gemini-3.1-flash-live-preview is published on AI Studio only, with no
-  // Vertex build in any region (Google's own forum answer, May 2026). Sixteen
-  // spellings across four regions all closed 1008. It is a real model — this
-  // project reached setupComplete on it twelve times out of twelve — just not
-  // one this surface carries. If it is wanted back, the honest route is a
-  // per-model surface choice, not a better guess at the id.
+  {
+    key: 'gemini-flash-31',
+    provider: 'gemini',
+    label: 'Gemini 3.1 Flash Live',
+    id: 'gemini-3.1-flash-live-preview',
+    surface: 'aistudio',
+    // AI Studio only, and not for want of looking: sixteen spellings across
+    // four Vertex regions all closed 1008, and Google's own answer is that this
+    // model has no Vertex build in any region. So it is here on the surface
+    // that carries it, billed to the AI Studio account rather than GCP.
+    //
+    // Half-cascade rather than native audio, which is why settings.ts refuses
+    // it affectiveDialog and proactivity — those are native-audio dialects.
+  },
   {
     key: 'openai-realtime',
     provider: 'openai',

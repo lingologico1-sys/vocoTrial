@@ -7,12 +7,13 @@ pages_build_output_dir = "dist"
 # dashboard will only accept Secrets. So the split is:
 #
 #   here      the model ids below — not sensitive, they ship in every request
-#   dashboard OPENAI_API_KEY, GEMINI_API_KEY, GEMINI_API_KEY2
+#   dashboard OPENAI_API_KEY, GEMINI_API_KEY, GEMINI_API_KEY2, GOOGLE_API_KEY
 #             (encrypted, per environment)
 #
-# The Google keys are Vertex AI keys — PanelForge's, off the same GCP project —
-# because every Google call here goes to aiplatform.googleapis.com now. See
-# functions/api/_vertex.ts.
+# There are two Google keys because there are two Google APIs, and a model is
+# served by the one that carries it. GEMINI_API_KEY* are Vertex keys (GCP
+# billing, service-account-bound); GOOGLE_API_KEY is AI Studio, for models with
+# no Vertex build. See functions/api/_vertex.ts and _aistudio.ts.
 #
 # Locally, put the keys in .dev.vars (gitignored) and run `npm run dev:api`.
 #

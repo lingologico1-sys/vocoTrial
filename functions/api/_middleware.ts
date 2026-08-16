@@ -31,6 +31,12 @@ export interface GateEnv {
   /** Vertex AI key (GCP billing), primary then fallback — see _vertex.ts. */
   GEMINI_API_KEY?: string;
   GEMINI_API_KEY2?: string;
+  /**
+   * AI Studio key (AI Studio billing) — see _aistudio.ts. Not a fallback for
+   * the Vertex keys: it reaches a different catalogue on a different meter, and
+   * only the models marked `surface: 'aistudio'` are served by it.
+   */
+  GOOGLE_API_KEY?: string;
   OPENAI_REALTIME_VOICE?: string;
   /** The site password. A Secret in the dashboard — never in wrangler.toml. */
   SITE_PASSWORD?: string;
