@@ -1,5 +1,13 @@
 import { CANVAS_EDGE } from './imageModels';
-import { DEFAULT_LASH_STYLE, type BrowId, type LashStyle, type Region, type SlotId } from './slots';
+import {
+  DEFAULT_LASH_STYLE,
+  isBrow,
+  type BoxId,
+  type BrowId,
+  type LashStyle,
+  type Region,
+  type SlotId,
+} from './slots';
 
 /**
  * What a finished face kit is, in one place.
@@ -217,6 +225,43 @@ export function defaultBrowBox(which: BrowId): Box {
 export function defaultHeadBox(): Box {
   const edge = CANVAS_EDGE;
   return { x: 0, y: 0, width: edge, height: Math.round(edge * 0.81) };
+}
+
+/**
+ * The size a box of this kind is handed when nobody has said otherwise.
+ *
+ * Read by the picker to answer a question it cannot ask directly: whether a
+ * box's size was chosen or merely given. A kit that has been saved and reopened
+ * has forgotten which of its boxes were dragged, and a box still sitting at the
+ * exact pixel dimensions of the opening guess is the one it is safe to resize on
+ * the owner's behalf. It is possible to drag a box back to precisely these
+ * numbers and lose that distinction; the cost of being wrong is a box that
+ * follows its partner one more time, on a kit with nothing cut to it yet.
+ */
+export function defaultBoxSize(id: BoxId): { width: number; height: number } {
+  const box = isBrow(id)
+    ? defaultBrowBox(id)
+    : id === 'head'
+      ? defaultHeadBox()
+      : defaultBoxes()[id];
+  return { width: box.width, height: box.height };
+}
+
+/**
+ * The same box at a new size, pinned by its centre.
+ *
+ * Centre rather than corner, because this is used to carry a size from one eye
+ * to the other and the thing that must not move is what the box is over. Growing
+ * a box from its top-left corner slides it off the eye it was placed on and
+ * makes the owner re-place a box they never asked to have resized.
+ */
+export function resizeAbout(box: Box, size: { width: number; height: number }): Box {
+  return clampBox({
+    x: box.x + (box.width - size.width) / 2,
+    y: box.y + (box.height - size.height) / 2,
+    width: size.width,
+    height: size.height,
+  });
 }
 
 export function newKit(name: string, base: string): FaceKit {

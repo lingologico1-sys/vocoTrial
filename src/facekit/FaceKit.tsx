@@ -12,10 +12,12 @@ import {
 } from './imageModels';
 import {
   KIT_FORMAT,
+  defaultBoxSize,
   defaultBrowBox,
   defaultHeadBox,
   newKit,
   patchFilename,
+  resizeAbout,
   type Box,
   type FaceKit as Kit,
 } from './kit';
@@ -27,6 +29,7 @@ import {
   SLOTS,
   isBrow,
   isFreeBox,
+  partnerBox,
   slot,
   type BoxId,
   type SlotId,
@@ -184,6 +187,26 @@ export default function FaceKit() {
    * afternoon and a dollar of generations with no confirmation at all.
    */
   const [dirty, setDirty] = useState(false);
+  /**
+   * Which boxes are still taking their size from the box across the face.
+   *
+   * A face is symmetric enough that sizing the left eye has just said what the
+   * right eye wants too, and making that second drag by hand is a fiddly way of
+   * arriving at a number the page already knows. So a size carries across — and
+   * then has to stop carrying, or the answer given to the second box could never
+   * be kept. Setting a box's own size is what stops it: from then on it holds
+   * what it was told and its partner can be dragged freely.
+   *
+   * Absent means "not decided yet in this session", not "no": the answer for a
+   * box nobody has touched is worked out from its size (see `defaultBoxSize`),
+   * which is what lets a kit saved with two carefully placed eyes be reopened
+   * without one of them being resized by a drag on the other.
+   *
+   * Session state rather than part of the kit, because it describes an editing
+   * session and not the artwork. A kit is boxes and pictures; which of its boxes
+   * were dragged in what order is nothing a face needs to animate.
+   */
+  const [following, setFollowing] = useState<Partial<Record<BoxId, boolean>>>({});
 
   const refresh = useCallback(() => {
     listKits()
@@ -292,6 +315,7 @@ export default function FaceKit() {
       const normalised = await normalise(await fileToDataUrl(file));
       setKit(newKit(file.name.replace(/\.[^.]+$/, '') || 'face', normalised));
       setCandidates({});
+      setFollowing({});
       setDirty(false);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'That file could not be read');
@@ -429,8 +453,72 @@ export default function FaceKit() {
    * the type system cannot narrow: `isFreeBox` answers a question about
    * behaviour, not about which member of the union `region` is.
    */
-  const placeFreeBox = (id: BoxId): Box | null =>
-    id === 'head' ? defaultHeadBox() : isBrow(id) ? defaultBrowBox(id) : null;
+  const placeFreeBox = (id: BoxId): Box | null => {
+    if (id === 'head') return defaultHeadBox();
+    if (!isBrow(id)) return null;
+
+    // A brow placed second starts at the size of the brow placed first, at the
+    // default position for its own side. The size is the part that was work —
+    // finding the depth that clears the rim and still holds a lift — and doing
+    // that work twice on a symmetric face is the thing worth sparing.
+    const partner = partnerBox(id);
+    const other = partner ? kit?.boxes[partner] : undefined;
+    const box = defaultBrowBox(id);
+    return other ? resizeAbout(box, other) : box;
+  };
+
+  /**
+   * Whether this box's size is still the page's to choose.
+   *
+   * Locked boxes never are: artwork has been cut to them, and resizing one
+   * behind the owner's back is the exact corruption the lock exists to prevent —
+   * worse here than a stray drag, because nobody would be looking at the box
+   * that moved.
+   */
+  const boxFollows = (id: BoxId): boolean => {
+    if (committed[id] > 0) return false;
+    const known = following[id];
+    if (known !== undefined) return known;
+
+    const box = kit?.boxes[id];
+    if (!box) return false;
+    const size = defaultBoxSize(id);
+    return box.width === size.width && box.height === size.height;
+  };
+
+  /**
+   * Writes a dragged box back, carrying a new size across to its partner.
+   *
+   * Only a *size* carries, and only when the drag changed one: moving a box
+   * leaves its partner alone, because where the other eye sits is a fact about
+   * the portrait and not about this box.
+   *
+   * Every reading of the kit here comes from the render the drag started on, and
+   * that is what makes it stable. The picker installs its pointer listeners once
+   * per drag, so this closure is the one they keep calling — the partner's
+   * geometry and its right to follow are settled at pointer-down and cannot
+   * flicker part way through a resize as the page re-renders under it.
+   */
+  const moveBox = (which: BoxId, box: Box) => {
+    const was = kit?.boxes[which];
+    const resized = was ? was.width !== box.width || was.height !== box.height : false;
+    const partner = partnerBox(which);
+    const other = partner ? kit?.boxes[partner] : undefined;
+    const carry = resized && partner && other && boxFollows(partner) ? partner : null;
+
+    const carried: Partial<Record<BoxId, Box>> = {};
+    if (carry && other) carried[carry] = resizeAbout(other, box);
+
+    edit((current) => ({ ...current, boxes: { ...current.boxes, [which]: box, ...carried } }));
+
+    if (resized) {
+      setFollowing((current) => ({
+        ...current,
+        [which]: false,
+        ...(carry ? { [carry]: true } : {}),
+      }));
+    }
+  };
 
   /**
    * What the motion preview's close view should frame, for the box being edited.
@@ -503,6 +591,7 @@ export default function FaceKit() {
     }
     setKit(null);
     setCandidates({});
+    setFollowing({});
     setDirty(false);
   };
 
@@ -687,9 +776,7 @@ export default function FaceKit() {
                   boxes={kit.boxes}
                   active={region}
                   locked={committed[region] > 0}
-                  onChange={(which, box) =>
-                    edit((current) => ({ ...current, boxes: { ...current.boxes, [which]: box } }))
-                  }
+                  onChange={moveBox}
                 />
 
                 {isFreeBox(region) ? (
@@ -731,6 +818,12 @@ export default function FaceKit() {
                               ...current,
                               boxes: { ...current.boxes, [region]: box },
                             }));
+                            // Handed the other brow's size, so it keeps taking
+                            // it until this one is sized on its own account.
+                            const partner = partnerBox(region);
+                            if (partner && kit.boxes[partner]) {
+                              setFollowing((current) => ({ ...current, [region]: true }));
+                            }
                           }}
                           className={`rounded-md border px-2 py-1 text-[11px] ${
                             region === 'head'
@@ -794,7 +887,10 @@ export default function FaceKit() {
                         is what gets stretched up to fill the gap the brow leaves. There is one
                         box per brow because a rim runs diagonally, so the row that is clear on
                         one side is already frame on the other. Where a rim or a fringe leaves no
-                        clear row at all, leave the box unplaced.
+                        clear row at all, leave the box unplaced. The second brow is placed at the
+                        size of the first and keeps following it, so only its <em>position</em>
+                        needs the diagonal thought — until you size it yourself, after which it
+                        holds what you gave it.
                       </p>
                     )}
                   </>
@@ -840,7 +936,10 @@ export default function FaceKit() {
                           {' '}
                           Keep it <em>inside</em> the lens. A box that catches a spectacle rim
                           invites the model to redesign the glasses; one that stops short of the
-                          frame throws any such damage away with the rest of the crop.
+                          frame throws any such damage away with the rest of the crop. Resizing
+                          one eye resizes the other to match, about its own centre and without
+                          moving it — until you size that one yourself, after which it keeps
+                          what you gave it.
                         </>
                       )}
                     </p>
@@ -1140,7 +1239,17 @@ export default function FaceKit() {
             <ul className="flex flex-wrap gap-3">
               {saved.map((entry) => (
                 <li key={entry.id} className="space-y-1 text-center">
-                  <button type="button" onClick={() => setKit(entry)} title="Open">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setKit(entry);
+                      // A kit arriving from the store has boxes but no history
+                      // of how they got there, so every box goes back to being
+                      // judged on its size alone.
+                      setFollowing({});
+                    }}
+                    title="Open"
+                  >
                     <img
                       src={entry.base}
                       alt=""

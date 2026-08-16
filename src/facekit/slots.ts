@@ -79,6 +79,28 @@ export function isFreeBox(id: BoxId): boolean {
   return isBrow(id) || id === 'head';
 }
 
+/**
+ * The box across the face from this one, or null for a box that stands alone.
+ *
+ * Eyes pair with eyes and brows with brows, and the pairing is worth naming
+ * because of what a face is: near enough symmetric that a rectangle sized to
+ * one eye is very nearly the rectangle the other one wants. Nothing here mirrors
+ * a *position* — the two sides of a portrait sit where they sit, and a face at
+ * three-quarters would be ruined by a box that assumed otherwise. It is only the
+ * size that carries, which is the part that is genuinely the same on both sides.
+ *
+ * The mouth and the head have no partner, and null says so rather than an
+ * exception, because the caller is a drag handler that has whichever box the
+ * pointer landed on.
+ */
+export function partnerBox(id: BoxId): BoxId | null {
+  if (id === 'eyeLeft') return 'eyeRight';
+  if (id === 'eyeRight') return 'eyeLeft';
+  if (id === 'browLeft') return 'browRight';
+  if (id === 'browRight') return 'browLeft';
+  return null;
+}
+
 export interface Slot {
   id: SlotId;
   label: string;
