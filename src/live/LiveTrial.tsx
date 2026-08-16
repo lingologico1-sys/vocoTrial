@@ -70,7 +70,7 @@ interface Prefs {
 }
 
 /**
- * Whether a chunk of speech that just became audible ended in a question.
+ * Whether a chunk of speech that just became audible carried a question.
  *
  * Deliberately looser than "the last character is a question mark". The
  * transcript arrives in fragments split wherever the model felt like splitting
@@ -78,8 +78,33 @@ interface Prefs {
  * in the same delta — and it is the mark being *heard* that matters, not where
  * the chunk happens to stop. A mark anywhere in newly audible text means the
  * question has just landed.
+ *
+ * Three marks rather than one, which is the difference between this working in
+ * the language the page happens to be set to and working in the one it was
+ * written in. `?` covers most of the list including Spanish, whose opening `¿`
+ * is decorative here — the closing mark is the ordinary ASCII one and it is the
+ * one that lands last. `？` is the full-width form Chinese and Japanese use, and
+ * `؟` is Arabic's. Without them the tilt is simply dead in four of the languages
+ * on offer, silently and only for the people using them.
  */
-const ASKS = /\?/;
+const ASKS = /[?？؟]/;
+
+/**
+ * Greek, which asks with a semicolon and cannot share the pattern above.
+ *
+ * U+037E, the Greek question mark, canonically decomposes to the ordinary
+ * semicolon and in practice Greek text simply uses U+003B — so there is nothing
+ * to match that is not also the mark French and German use in the middle of a
+ * sentence. Adding it to ASKS would have the face lean at a clause boundary in
+ * half of Europe, which is a worse failure than the one it fixes, so it is
+ * gated on the language actually being Greek.
+ *
+ * A special case rather than a field on LanguageChoice: that type is shared with
+ * the Pages Functions and is the allowlist a request is checked against, and one
+ * language's punctuation is not something the server has any business carrying.
+ */
+const ASKS_EL = /[?？؟;]/;
+const asksIn = (code: string) => (code === 'el' ? ASKS_EL : ASKS);
 
 /**
  * The two ways of driving the mouth, side by side.
@@ -289,9 +314,10 @@ export default function LiveTrial() {
       // would tilt the head at a question that was either not yet asked or, if
       // the user cut in, never asked at all. Everything in `due` has just been
       // heard, which is the moment the gesture belongs to.
-      if (due.some((item) => ASKS.test(item.text))) cue('question');
+      const asks = asksIn(language);
+      if (due.some((item) => asks.test(item.text))) cue('question');
     },
-    [append, cue],
+    [append, cue, language],
   );
 
   useEffect(() => {
