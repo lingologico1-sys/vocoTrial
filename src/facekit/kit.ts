@@ -144,6 +144,12 @@ export function defaultBoxes(): Boxes {
     // gets cropped and the open one is the tall one. A box drawn snugly round
     // the lips of a resting face silently guillotines the dropped jaw of an
     // "aa" — the patch looks fine in the picker and wrong in motion.
+    //
+    // It has to reach past the chin, not just past the lips: the open pose is
+    // allowed to take the chin down with the jaw (see JAW_DROPS in slots.ts),
+    // so a box ending at the resting chin leaves the lowered one cropped off
+    // above the original, which reads as two chins. This default is a starting
+    // position to drag, and on most portraits it wants dragging lower.
     mouth: {
       x: Math.round(edge * 0.33),
       y: Math.round(edge * 0.54),

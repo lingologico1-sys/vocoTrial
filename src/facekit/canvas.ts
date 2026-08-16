@@ -339,6 +339,72 @@ export async function featherPatch(patch: string, box: Box, radius = 10): Promis
   return feather(image, box, applied).toDataURL('image/png');
 }
 
+/**
+ * How much of two patches actually differ, as a share of the area compared.
+ *
+ * For catching the failure that is invisible in a contact sheet and fatal in
+ * motion: a pose that came back as a copy of one already in the kit. Two closed
+ * mouths are the usual pair, because a model asked to close a mouth that is
+ * already closed has nothing to do and returns what it was given — but any two
+ * slots can collide, and a kit whose "uh" and "ee" are the same drawing plays as
+ * a mouth that stops moving on half the vowels.
+ *
+ * Counted rather than averaged, and that is the whole reason this reads
+ * cleanly. A mean difference over the box is dominated by the pixels that are
+ * *supposed* to match — the chin and cheeks around the lips are identical
+ * between every pose by construction — so two genuinely different mouths and
+ * two identical ones separate by very little, and the threshold ends up sitting
+ * in resampling noise. Asking instead what share of pixels differ *visibly*
+ * puts a real pose change up in the tens of percent and leaves noise at
+ * approximately zero, which is a gap you can put a number in the middle of.
+ *
+ * Measured over the middle of the box only. The outer quarter is feathered to
+ * transparency and holds the face around the mouth rather than the mouth, so
+ * including it would dilute every comparison by the one region that can never
+ * disagree.
+ */
+export async function patchDivergence(a: string, b: string, box: Box): Promise<number> {
+  const [first, second] = await Promise.all([loadImage(a), loadImage(b)]);
+
+  const read = (image: HTMLImageElement) => {
+    const ctx = context(box.width, box.height);
+    ctx.drawImage(image, 0, 0, box.width, box.height);
+    return ctx.getImageData(0, 0, box.width, box.height).data;
+  };
+
+  const one = read(first);
+  const two = read(second);
+
+  const insetX = Math.round(box.width * 0.25);
+  const insetY = Math.round(box.height * 0.25);
+
+  /** A per-channel step below which two pixels are the same colour to the eye. */
+  const VISIBLE = 24;
+
+  let compared = 0;
+  let differing = 0;
+
+  for (let y = insetY; y < box.height - insetY; y++) {
+    for (let x = insetX; x < box.width - insetX; x++) {
+      const i = (y * box.width + x) * 4;
+      // Transparent on either side is outside the artwork on that side, and a
+      // pixel with nothing drawn in it cannot disagree about what is drawn.
+      if (one[i + 3] < 250 || two[i + 3] < 250) continue;
+      compared++;
+      const gap = Math.max(
+        Math.abs(one[i] - two[i]),
+        Math.abs(one[i + 1] - two[i + 1]),
+        Math.abs(one[i + 2] - two[i + 2]),
+      );
+      if (gap >= VISIBLE) differing++;
+    }
+  }
+
+  // Nothing overlapping to compare is not agreement; reporting it as a total
+  // difference keeps the caller from flagging a pair it never actually saw.
+  return compared === 0 ? 1 : differing / compared;
+}
+
 export interface Overlay {
   patch: string;
   box: Box;

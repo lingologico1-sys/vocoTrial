@@ -196,41 +196,115 @@ const eyesClosedPrompt = (lashes: LashStyle): string =>
     'frame colour, thickness and shape. Do not restyle the eyewear.',
   ].join(' ');
 
+/*
+ * The clauses every mouth pose is assembled from.
+ *
+ * Split into named parts rather than written out per slot because they are not
+ * all compatible with each other: a pose that presses the lips thinner and a
+ * pose that drops the jaw each need one of the guarantees relaxed, and the only
+ * honest way to relax one is to say which. A single block appended to
+ * everything ends up either forbidding what the pose is for, or permitting it
+ * everywhere.
+ */
+
 /**
- * Appended to every mouth pose, and doing the same job the eyelid prompt's
- * second half does.
+ * True of every mouth pose, however much else it is asked to change.
+ *
+ * The lids' lesson repeated: told only what the mouth is doing, these models
+ * reach for photographic shading and put gradients on a cel-shaded drawing.
+ */
+const MOUTH_STYLE = [
+  'Use flat cel-shaded colour: no gradients, no soft shading, no highlights, no',
+  'added creases or wrinkles.',
+].join(' ');
+
+/**
+ * What the mouth may not do, on every pose but the pressed one.
  *
  * The failure it exists to stop is the mouth changing *size* between poses. An
  * early AA came back so much wider than the rest pose that cycling the two read
  * as the whole mouth inflating rather than as a jaw opening — a real mouth
  * drops its jaw without moving the corners much, and saying so is cheaper than
  * regenerating until one happens to comply.
- *
- * The flat-colour clause is the lids' lesson repeated: told only what the mouth
- * is doing, these models reach for photographic shading and put gradients on a
- * cel-shaded drawing.
  */
-const MOUTH_NOTE = [
+const CORNERS_FIXED = [
   'Keep the lips the same colour, thickness and line weight as the original, and',
-  'keep the outer corners of the mouth in the same place — only the opening',
-  'between the lips changes, never the width of the mouth itself.',
-  'Use flat cel-shaded colour: no gradients, no soft shading, no highlights, no',
-  'added creases or wrinkles.',
-  'Do not change the nose, chin, cheeks or jawline.',
+  'keep the outer corners of the mouth in the same place — the mouth opens by',
+  'parting the lips, never by growing wider.',
 ].join(' ');
 
+/**
+ * The compression exemption, for the one pose that is defined by it.
+ *
+ * Everything CORNERS_FIXED protects is protected here too — colour, line
+ * weight, the mouth staying put — except the thickness, which is the single
+ * property the pose is about. A prompt that asks for lips squeezed thinner
+ * while forbidding any change of thickness is arguing with itself.
+ */
+const MBP_COMPRESSES = [
+  'Keep the lips the same colour and line weight as the original, and keep the',
+  'mouth centred exactly where it is: the corners may travel outward very',
+  'slightly with the compression, but the mouth does not slide, tilt or grow.',
+].join(' ');
+
+/** What holds still when the jaw holds still, which is most of the time. */
+const FACE_FIXED = 'Do not change the nose, chin, cheeks or jawline.';
+
+/**
+ * What holds still when the jaw does not, which is the wide-open pose only.
+ *
+ * A dropped jaw moves the chin — that is what a dropped jaw *is* — so a pose
+ * asked to drop one while holding the chin still can only comply by cutting a
+ * hole in a face that is otherwise at rest, and a hole is what it looks like in
+ * motion. Everything above the mouth stays put, because none of it moves when
+ * a real jaw opens either.
+ *
+ * The crop is what makes this safe to permit, and also what bounds it: a chin
+ * that travels below the mouth box is cut off there, leaving the patch's
+ * lowered chin sitting above the base's original one. kit.ts already asks for a
+ * box tall enough to clear the dropped jaw for this reason — it now has to
+ * clear the dropped *chin* as well, which is a few pixels lower again.
+ */
+const JAW_DROPS = [
+  'The chin and the skin between the lower lip and the chin travel downward with',
+  'the jaw, as far as the jaw opens and no further, so the lower face lengthens',
+  'the way a real jaw drop lengthens it.',
+  'Do not change the nose or the cheeks, and do not move the sides of the face or',
+  'the outer edges of the jaw.',
+].join(' ');
+
+const MOUTH_NOTE = [CORNERS_FIXED, MOUTH_STYLE, FACE_FIXED].join(' ');
+const MBP_NOTE = [MBP_COMPRESSES, MOUTH_STYLE, FACE_FIXED].join(' ');
+const OPEN_NOTE = [CORNERS_FIXED, MOUTH_STYLE, JAW_DROPS].join(' ');
+
 const mouth =
-  (shape: string) =>
+  (shape: string, note: string = MOUTH_NOTE) =>
   (): string =>
-    `${shape} ${MOUTH_NOTE}`;
+    `${shape} ${note}`;
 
 export const SLOTS: Slot[] = [
+  /*
+   * The two closed poses are written against each other, and that is not
+   * stylistic. Both are generated from a base that has usually just been
+   * neutralised into a closed, relaxed mouth — so an instruction that merely
+   * describes a closed mouth is already satisfied by the input, and an
+   * instruct-edit model handed a request it considers met returns the input.
+   * That is how rest and mbp came back indistinguishable: neither prompt asked
+   * for a change, so neither got one.
+   *
+   * The fix is to name the *difference* rather than the state, and to push the
+   * two descriptions apart at both ends — full and softly curved here, thin and
+   * flat there — so that each prompt describes something its input demonstrably
+   * is not. Stated as a contrast with "a relaxed closed mouth" rather than with
+   * "the mouth in this picture", because the picture is only reliably relaxed
+   * after a neutralising pass and the wording has to hold either way.
+   */
   {
     id: 'rest',
     label: 'Rest',
     region: 'mouth',
     prompt: mouth(
-      'Close the mouth into a relaxed neutral expression: the lips together in a single soft line, no teeth and no gap.',
+      'Close the mouth into a relaxed neutral expression: the lips together in a single soft line, no teeth and no gap. The lips keep their full natural thickness and the line between them curves gently, lifting a touch at the corners — a mouth simply at rest, not a mouth being held shut.',
     ),
   },
   {
@@ -238,7 +312,8 @@ export const SLOTS: Slot[] = [
     label: 'M / B / P',
     region: 'mouth',
     prompt: mouth(
-      'Press the lips together into one firm, slightly compressed straight line, as when beginning to say "m". No teeth and no opening at all.',
+      'Press the lips firmly together so that they roll slightly inward, as when beginning to say "m". Compared with a relaxed closed mouth, the coloured area of both lips must end up visibly thinner — the lower lip most of all — and the line where they meet must become straighter, flatter and a little longer, reaching very slightly wider, with a small tuck of tension at each corner. The result has to be plainly distinguishable from a relaxed closed mouth: thinner lips, a longer and flatter seam. No teeth and no opening at all, and no pursing, pouting or dimples.',
+      MBP_NOTE,
     ),
   },
   {
@@ -263,6 +338,7 @@ export const SLOTS: Slot[] = [
     region: 'mouth',
     prompt: mouth(
       'Drop the jaw to open the mouth into a rounded oval about as tall as the closed mouth is wide, and no wider than the closed mouth. Show one simple row of upper teeth along the top and a plain dark interior below.',
+      OPEN_NOTE,
     ),
   },
   {

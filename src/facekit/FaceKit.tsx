@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import BoxPicker from './BoxPicker';
 import Filmstrip from './Filmstrip';
 import MotionPreview from './MotionPreview';
-import { composite, dataUrlToBlob, fileToDataUrl, normalise } from './canvas';
+import { composite, dataUrlToBlob, fileToDataUrl, normalise, patchDivergence } from './canvas';
 import { generateBase, generatePatch } from './generate';
 import {
   IMAGE_MODELS,
@@ -51,6 +51,35 @@ import { download, zip } from './zip';
  */
 
 type Candidate = { modelKey: string; patch: string; full: string; usd: number };
+
+/** The poses that get compared against each other. Eyes have nothing to collide with. */
+const MOUTH_SLOTS = SLOTS.filter((entry) => entry.region === 'mouth');
+
+/**
+ * Below this share of visibly differing pixels, two mouths are the same drawing.
+ *
+ * Four percent, and the number is not delicate — the statistic it reads is
+ * strongly bimodal. A pose that genuinely changed puts tens of percent of the
+ * compared area over the visibility step; a generation that returned its input
+ * puts a fraction of one percent there, since the only disagreement is encoding
+ * noise. Anything in this range is a mouth that moved by a few pixels of lip
+ * line, which is a mouth that will not read as a different shape at twelve
+ * frames a second.
+ */
+const SAME_MOUTH = 0.04;
+
+/** Identifies one thumbnail on the page: a slot's accepted patch, or its nth candidate. */
+const twinKey = (id: SlotId, index: number | 'kept') => `${id}:${index}`;
+
+/** "same as Rest", or "same as Rest and Neutral open (UH)". */
+function sameAs(ids: SlotId[]): string {
+  const labels = ids.map((id) => slot(id).label);
+  const listed =
+    labels.length < 2
+      ? labels.join('')
+      : `${labels.slice(0, -1).join(', ')} and ${labels[labels.length - 1]}`;
+  return `same as ${listed}`;
+}
 
 /**
  * The eye tabs say which side of the *picture*, not which of her eyes, because
@@ -135,6 +164,18 @@ export default function FaceKit() {
   const [modelB, setModelB] = useState(DEFAULT_B);
   const [assembled, setAssembled] = useState<string | null>(null);
   /**
+   * Which mouths have come back as copies of one already in the kit.
+   *
+   * Keyed by `twinKey`, valued with the slots the artwork duplicates. It exists
+   * because this is the one defect the page could not show you: a duplicate
+   * looks *correct* in the contact sheet — a perfectly good closed mouth, drawn
+   * in the right style, on the right face — and only announces itself in the
+   * filmstrip, as a mouth that stops moving for a beat. Two closed poses
+   * generated from an already-closed base collide almost by default, so without
+   * this the failure ships quietly, which is exactly what it did.
+   */
+  const [twins, setTwins] = useState<Record<string, SlotId[]>>({});
+  /**
    * Whether the kit holds work that has not reached the store.
    *
    * Tracked rather than compared, because comparing means diffing megabytes of
@@ -181,6 +222,69 @@ export default function FaceKit() {
       live = false;
     };
   }, [kit]);
+
+  /**
+   * Compares every mouth on the page against every mouth in the kit.
+   *
+   * Against the *accepted* ones only, in that direction, because the question
+   * being answered is "would keeping this leave me with two of the same
+   * drawing" — a pair of candidates that resemble each other is not a problem
+   * until one of them is chosen, and by then it is this comparison again.
+   *
+   * Serial rather than parallel, and guarded by `live` rather than cancelled:
+   * each comparison decodes two images and walks a few thousand pixels, which
+   * is cheap enough to be invisible next to a generation and not so cheap that
+   * firing fifteen of them at once during a drag is free.
+   */
+  useEffect(() => {
+    const box = kit?.boxes.mouth;
+    const patches = kit?.patches;
+    if (!box || !patches) {
+      setTwins({});
+      return;
+    }
+
+    let live = true;
+    (async () => {
+      const kept = MOUTH_SLOTS.map((entry) => ({ id: entry.id, patch: patches[entry.id] })).filter(
+        (entry): entry is { id: SlotId; patch: string } => Boolean(entry.patch),
+      );
+
+      const pending: { key: string; id: SlotId; patch: string }[] = [];
+      for (const entry of MOUTH_SLOTS) {
+        const current = patches[entry.id];
+        if (current) pending.push({ key: twinKey(entry.id, 'kept'), id: entry.id, patch: current });
+        (candidates[entry.id] ?? []).forEach((candidate, index) =>
+          pending.push({ key: twinKey(entry.id, index), id: entry.id, patch: candidate.patch }),
+        );
+      }
+
+      const found: Record<string, SlotId[]> = {};
+      for (const item of pending) {
+        const matches: SlotId[] = [];
+        for (const other of kept) {
+          if (other.id === item.id) continue;
+          // The cheap answer first: accepting one candidate into two slots
+          // makes them the same string, and there is nothing to measure.
+          if (other.patch === item.patch) {
+            matches.push(other.id);
+            continue;
+          }
+          if ((await patchDivergence(item.patch, other.patch, box)) < SAME_MOUTH) {
+            matches.push(other.id);
+          }
+        }
+        if (!live) return;
+        if (matches.length) found[item.key] = matches;
+      }
+
+      if (live) setTwins(found);
+    })().catch(() => undefined);
+
+    return () => {
+      live = false;
+    };
+  }, [kit?.patches, kit?.boxes.mouth, candidates]);
 
   const upload = async (file: File) => {
     setError(null);
@@ -723,9 +827,13 @@ export default function FaceKit() {
                         <>
                           {' '}
                           Cover the whole of the existing mouth — anything it leaves showing stays
-                          showing — and leave room <em>below</em> it for a dropped jaw. Every pose
-                          is cropped at this box, so one sized to the closed mouth cuts the bottom
-                          off the open one.
+                          showing — and leave room <em>below</em> it for a dropped jaw. The open
+                          pose takes the chin down with it, as a real jaw drop does, so the bottom
+                          edge has to sit below where the chin <em>ends up</em>, not where it rests:
+                          low on the chin at least, and across the neck if the portrait allows it.
+                          Every pose is cropped at this box, so one sized to the closed mouth cuts
+                          the bottom off the open one — and one sized to the resting chin leaves the
+                          dropped chin above the original, which reads as two chins.
                         </>
                       ) : (
                         <>
@@ -911,6 +1019,11 @@ export default function FaceKit() {
                               return from ? ` · ${from.short}` : '';
                             })()}
                           </figcaption>
+                          {twins[twinKey(entry.id, 'kept')] && (
+                            <figcaption className="max-w-[7rem] text-[10px] text-amber-400">
+                              {sameAs(twins[twinKey(entry.id, 'kept')])}
+                            </figcaption>
+                          )}
                         </figure>
                       )}
 
@@ -929,13 +1042,18 @@ export default function FaceKit() {
                           .slice(0, index)
                           .filter((earlier) => earlier.modelKey === candidate.modelKey).length;
                         const name = from?.short ?? candidate.modelKey;
+                        const duplicate = twins[twinKey(entry.id, index)];
 
                         return (
                           <figure key={`${candidate.modelKey}-${index}`} className="space-y-1">
                             <button
                               type="button"
                               onClick={() => accept(entry.id, candidate)}
-                              title={`Use this one — ${from?.label ?? candidate.modelKey}, attempt ${seen + 1}`}
+                              title={
+                                duplicate
+                                  ? `${sameAs(duplicate)} — accepting it would put the same drawing in two slots`
+                                  : `Use this one — ${from?.label ?? candidate.modelKey}, attempt ${seen + 1}`
+                              }
                             >
                               <img
                                 src={candidate.patch}
@@ -943,13 +1061,20 @@ export default function FaceKit() {
                                 className={`h-20 rounded-md border bg-slate-900 ${
                                   candidate.patch === current
                                     ? 'border-emerald-500'
-                                    : 'border-slate-700 hover:border-slate-400'
+                                    : duplicate
+                                      ? 'border-amber-500/70 hover:border-amber-400'
+                                      : 'border-slate-700 hover:border-slate-400'
                                 }`}
                               />
                             </button>
                             <figcaption className="text-[10px] text-slate-500">
                               {seen > 0 ? `${name} ${seen + 1}` : name}
                             </figcaption>
+                            {duplicate && (
+                              <figcaption className="max-w-[7rem] text-[10px] text-amber-400">
+                                {sameAs(duplicate)}
+                              </figcaption>
+                            )}
                           </figure>
                         );
                       })}
