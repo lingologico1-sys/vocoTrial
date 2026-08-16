@@ -128,6 +128,43 @@ async function post(body: unknown, signal?: AbortSignal): Promise<{ image: strin
 }
 
 /**
+ * Asks whether the model has any capacity, without spending a generation on the
+ * question. See functions/api/image/capacity.ts for why that is possible.
+ *
+ * Three answers rather than two, and the third is the important one: a probe
+ * that fails, times out, or is refused must never become a new way for a
+ * generation to fail. `unknown` means "go and find out properly", which is
+ * exactly the behaviour this app had before the check existed.
+ */
+type Capacity = 'exhausted' | 'available' | 'unknown';
+
+async function capacityOf(modelKey: string, signal?: AbortSignal): Promise<Capacity> {
+  // OpenAI is deliberately out of scope — the probe is a Vertex behaviour and
+  // its 429 means something else. Asking would get a 400 and prove nothing.
+  if (findImageModel(modelKey)?.provider !== 'gemini') return 'unknown';
+
+  try {
+    const response = await fetch('/api/image/capacity', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: modelKey }),
+      signal,
+    });
+    if (!response.ok) return 'unknown';
+    const payload = (await response.json()) as { exhausted?: boolean | null };
+    return payload?.exhausted === true
+      ? 'exhausted'
+      : payload?.exhausted === false
+        ? 'available'
+        : 'unknown';
+  } catch (error) {
+    // An abort is the user leaving, not a verdict — it has to keep travelling.
+    if (error instanceof DOMException && error.name === 'AbortError') throw error;
+    return 'unknown';
+  }
+}
+
+/**
  * How long to wait before each retry, in milliseconds.
  *
  * Two schedules, because the two things that go wrong clear on different
@@ -145,7 +182,23 @@ async function post(body: unknown, signal?: AbortSignal): Promise<{ image: strin
  */
 const RETRY_DELAYS_MS = [6_000, 20_000, 45_000];
 
-/** Long enough that the first retry lands beyond any per-minute window. */
+/**
+ * Long enough that the first retry lands beyond any per-minute window.
+ *
+ * Probably not long enough for Pro, and that is measured rather than feared: a
+ * free probe fired during a real burst found gemini-3-pro-image still
+ * RESOURCE_EXHAUSTED after a hundred seconds of total silence from us, while
+ * gemini-2.5-flash-image had capacity in the same second on the same key. A
+ * per-minute bucket of our own would have refilled; this did not, so the pool
+ * is either shared with everyone else or metered over something much longer
+ * than a minute.
+ *
+ * Both entries are kept even though a quota run now usually ends on the first
+ * check, because that check can also come back `unknown` — an unreachable or
+ * refused probe falls through to a real attempt, and then this schedule is the
+ * only thing pacing it, exactly as before. So the second number is not dead; it
+ * is what the retry path degrades to when the cheap answer is unavailable.
+ */
 const QUOTA_DELAYS_MS = [70_000, 150_000];
 
 /**
@@ -198,6 +251,7 @@ export type OnAttempt = (attempt: number, total: number) => void;
 async function postWithRetry(
   body: unknown,
   run: RunHandle,
+  modelKey: string,
   signal?: AbortSignal,
   onAttempt?: OnAttempt,
 ): Promise<{ image: string; usd: number }> {
@@ -205,12 +259,53 @@ async function postWithRetry(
   // not flip between timescales as the reason wobbles between attempts.
   let schedule: number[] = RETRY_DELAYS_MS;
 
+  /**
+   * Set once the provider has said RESOURCE_EXHAUSTED, and never cleared.
+   *
+   * It is what turns every later attempt into a free question before an
+   * expensive one. Not cleared on a recovery, because a pool that has just been
+   * empty is the one most likely to be empty again, and the check costs nothing
+   * to repeat.
+   */
+  let quotaBlocked = false;
+
+  /** Kept so a run that ends on a free check can still throw a real error. */
+  let lastError: unknown;
+
   for (let attempt = 0; ; attempt++) {
     onAttempt?.(attempt + 1, schedule.length + 1);
     run.attemptStarted(attempt + 1);
+
+    // A free look before a paid one — but only from the second attempt on.
+    // Probing the instant a 429 arrives samples the moment that just failed and
+    // can do nothing but agree with it; the answer is only worth having on the
+    // far side of a wait, which is precisely where the expensive alternative is
+    // to send the whole picture again to find out.
+    if (quotaBlocked) {
+      const capacity = await capacityOf(modelKey, signal);
+      if (capacity === 'exhausted') {
+        // Recorded as a failed attempt because that is what it is — a real
+        // question put to the provider and refused. The reason says it cost
+        // nothing, so the transcript cannot be misread as billed tries.
+        run.attemptFailed(502, 'RESOURCE_EXHAUSTED (checked free, not billed)', 429);
+        // And then stop, rather than sleeping out the rest of the schedule.
+        // This is the one place the app now knows something instead of hoping:
+        // the pool was empty a minute ago and is still empty, verified, so the
+        // remaining wait would be time spent on a conclusion already reached.
+        // A burst measured at the time this was written was still exhausted
+        // after a hundred idle seconds, which is longer than anything left on
+        // the clock here.
+        throw lastError;
+      }
+      // 'available' or 'unknown' both fall through to a real attempt. Unknown
+      // deliberately behaves exactly as this function did before the check
+      // existed: a broken probe must not invent a failure.
+    }
+
     try {
       return await post(body, signal);
     } catch (error) {
+      lastError = error;
       const failure = error instanceof GenerateError ? error : null;
       run.attemptFailed(
         failure?.status,
@@ -219,6 +314,7 @@ async function postWithRetry(
       );
       if (!failure?.retryable) throw error;
       if (attempt === 0 && failure.exhausted) schedule = QUOTA_DELAYS_MS;
+      if (failure.exhausted) quotaBlocked = true;
 
       // The schedule still decides how many attempts there are, even when the
       // provider is dictating their spacing — otherwise a stated one-second
@@ -275,6 +371,7 @@ export async function generatePatch({
         mask,
       },
       run,
+      modelKey,
       signal,
       onAttempt,
     );
@@ -333,6 +430,7 @@ export async function generateBase({
         mask,
       },
       run,
+      modelKey,
       signal,
       onAttempt,
     );
