@@ -9,6 +9,7 @@ import type { FaceKit } from '../facekit/kit';
 import { activeKit } from '../facekit/store';
 import Stage from './Stage';
 import { RevealQueue } from './reveal';
+import { DEFAULT_HEAD_MOTION, HEAD_MOTIONS, type HeadMotion } from './headMotion';
 import type { MouthDriver } from './visemes';
 import { tailSentences } from './text';
 
@@ -47,6 +48,7 @@ interface Prefs {
   presetKey: string;
   driver: MouthDriver;
   lookaheadMs: number;
+  motion: HeadMotion;
 }
 
 /**
@@ -117,6 +119,9 @@ export default function LiveTrial() {
   // it as the thing to compare against rather than the thing to start from.
   const [driver, setDriver] = useState<MouthDriver>(prefs.driver ?? 'scheduled');
   const [lookaheadMs, setLookaheadMs] = useState(prefs.lookaheadMs ?? DEFAULT_LOOKAHEAD_MS);
+  // Swing by default for the same reason scheduled is: it is the better motion,
+  // and rise is kept beside it as the thing to compare against.
+  const [motion, setMotion] = useState<HeadMotion>(prefs.motion ?? DEFAULT_HEAD_MOTION);
 
   const [status, setStatus] = useState<SessionStatus>('idle');
   const [detail, setDetail] = useState<string | null>(null);
@@ -162,12 +167,12 @@ export default function LiveTrial() {
     try {
       window.localStorage.setItem(
         PREFS_KEY,
-        JSON.stringify({ language, presetKey, driver, lookaheadMs } satisfies Prefs),
+        JSON.stringify({ language, presetKey, driver, lookaheadMs, motion } satisfies Prefs),
       );
     } catch {
       // Private browsing. Losing the pick is not worth an error.
     }
-  }, [language, presetKey, driver, lookaheadMs]);
+  }, [language, presetKey, driver, lookaheadMs, motion]);
 
   useEffect(() => () => session.current?.stop(), []);
 
@@ -337,6 +342,7 @@ export default function LiveTrial() {
           driver={driver}
           lookaheadMs={lookaheadMs}
           kit={kit}
+          motion={motion}
           speaking={speaking}
         />
 
@@ -378,6 +384,39 @@ export default function LiveTrial() {
                 <span className="w-14 text-right font-mono text-slate-300">{lookaheadMs}ms</span>
               </label>
             )}
+          </div>
+        </fieldset>
+
+        {/*
+          Its own fieldset rather than a third control in the driver's, because
+          it answers an unrelated question. The driver is about *timing* and is
+          judged against the voice; this is about how the head carries the
+          performance and is judged on its own. Sharing a box would imply they
+          interact, which they do not.
+        */}
+        <fieldset className="rounded-lg border border-slate-800 px-3 pb-2.5 pt-1">
+          <legend className="px-1 text-[11px] uppercase tracking-wide text-slate-500">
+            Head motion
+          </legend>
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+            {HEAD_MOTIONS.map((option) => (
+              <label
+                key={option.id}
+                title={option.hint}
+                className="flex cursor-help items-center gap-2 text-sm text-slate-300"
+              >
+                <input
+                  type="radio"
+                  name="motion"
+                  checked={motion === option.id}
+                  // Never disabled, for the driver's reason: the comparison is
+                  // only worth anything on the same sentence.
+                  onChange={() => setMotion(option.id)}
+                  className="accent-sky-500"
+                />
+                {option.label}
+              </label>
+            ))}
           </div>
         </fieldset>
 

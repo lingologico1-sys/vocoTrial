@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import Face from '../live/Face';
+import { DEFAULT_HEAD_MOTION, HEAD_MOTIONS, type HeadMotion } from '../live/headMotion';
 import { VISEMES } from '../live/visemes';
 import { CANVAS_EDGE } from './imageModels';
 import type { Box, FaceKit } from './kit';
@@ -20,9 +21,12 @@ import type { Box, FaceKit } from './kit';
  * what makes the preview worth trusting: there is nothing here for the real
  * thing to disagree with.
  *
- * It serves the brow boxes and the head box both, because they are the same
- * mechanism at two scales and the question asked of each is the same question:
- * at speaking speed, does the seam read as movement or as a rectangle?
+ * Two questions get asked here, and they are different in kind. The brow boxes
+ * ask a question about a seam — at speaking speed, does the edge of the moved
+ * crop read as movement or as a rectangle? The head motion asks a question about
+ * taste, which is why it is a switch rather than a number: swing and rise are
+ * both defensible and the only way to have an opinion is to flip between them
+ * while the loop runs.
  */
 
 /** Roughly the rate a speaking voice puts stresses at. */
@@ -61,25 +65,34 @@ interface MotionPreviewProps {
    * placed to look at, and is also what hides the control.
    */
   focus: Box | null;
-  /** Whether the close view starts on. Off when the still background is the point. */
-  startZoomed?: boolean;
   /** What to say when `focus` is null. */
   note: string;
 }
 
-export default function MotionPreview({ kit, focus, startZoomed, note }: MotionPreviewProps) {
+export default function MotionPreview({ kit, focus, note }: MotionPreviewProps) {
   /**
    * Starts at full and starts moving.
    *
    * Full because the extreme is the frame that fails: a brow box with too little
-   * forehead above it, or a head box whose bottom edge sits on a jaw rather than
-   * a neck, both look perfectly fine at half volume. Moving because a lift held
-   * still is a rectangle you will stare at until it looks wrong, whereas the
+   * forehead above it looks perfectly fine at half volume. Moving because a lift
+   * held still is a rectangle you will stare at until it looks wrong, whereas the
    * question is whether it reads at speaking speed.
    */
   const [level, setLevel] = useState(1);
   const [loop, setLoop] = useState(true);
-  const [zoom, setZoom] = useState(startZoomed ?? true);
+  /**
+   * Starts close, because the brows are the only thing `focus` ever frames now
+   * and a brow seam is a few pixels tall. Untick it to watch the head instead.
+   */
+  const [zoom, setZoom] = useState(true);
+  /**
+   * Local to the preview, and deliberately not written back to the kit.
+   *
+   * How the head moves is a property of the face component, not of the artwork —
+   * every kit animates the same way — so the setting that survives is the one on
+   * the live page. This one is here to be flipped, not to be saved.
+   */
+  const [motion, setMotion] = useState<HeadMotion>(DEFAULT_HEAD_MOTION);
 
   useEffect(() => {
     if (!loop) return;
@@ -121,7 +134,7 @@ export default function MotionPreview({ kit, focus, startZoomed, note }: MotionP
               : undefined
           }
         >
-          <Face shape={VISEMES.rest} viseme="rest" level={level} kit={kit} />
+          <Face shape={VISEMES.rest} viseme="rest" level={level} kit={kit} motion={motion} />
         </div>
       </div>
 
@@ -166,6 +179,36 @@ export default function MotionPreview({ kit, focus, startZoomed, note }: MotionP
           </label>
         )}
       </div>
+
+      {/*
+        The motion switch, under the controls rather than beside them, because
+        it is the one thing here that changes what the face *does* rather than
+        how you are looking at it.
+      */}
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        <span className="text-slate-500">Head</span>
+        <div className="flex overflow-hidden rounded-lg border border-slate-700">
+          {HEAD_MOTIONS.map((option) => (
+            <button
+              key={option.id}
+              type="button"
+              title={option.hint}
+              onClick={() => setMotion(option.id)}
+              className={`px-2.5 py-1 ${
+                motion === option.id
+                  ? 'bg-slate-800 text-slate-100'
+                  : 'text-slate-500 hover:text-slate-300'
+              }`}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <p className="text-xs text-slate-500">
+        {HEAD_MOTIONS.find((option) => option.id === motion)?.hint}
+      </p>
 
       {!focus && <p className="text-xs text-slate-500">{note}</p>}
     </div>

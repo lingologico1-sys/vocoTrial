@@ -2,6 +2,14 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { CANVAS_EDGE } from '../facekit/imageModels';
 import type { FaceKit } from '../facekit/kit';
 import { BROW_BOXES } from '../facekit/slots';
+import {
+  DEFAULT_HEAD_MOTION,
+  MOTION,
+  OVERSCAN,
+  PIVOT_X,
+  PIVOT_Y,
+  type HeadMotion,
+} from './headMotion';
 import { MOUTH_BOX, lipPath, type LipShape, type Viseme } from './visemes';
 
 /**
@@ -39,39 +47,6 @@ const BLINK_EVERY_MS = 4200;
 const KIT_BROW_LIFT = 1.8;
 
 /**
- * How far the head travels at full volume, and how far it rolls, per syllable.
- *
- * Unchanged from when this moved the whole picture — what changed is *what* it
- * moves, not how much. Worth naming now that a kit can scope it to a rectangle,
- * because the two readings of the same four units are quite different: four
- * units of whole-frame translate is a camera bump you feel more than see, and
- * four units of head against a still background is a head nodding.
- */
-const HEAD_LIFT = 4;
-const HEAD_ROLL = 0.8;
-
-/**
- * How far the head crop fades out at its bottom edge, in head units.
- *
- * Only the bottom, and that asymmetry is the design rather than an omission.
- * The brows fade on three sides because their box has to cut through the brow
- * itself, and the pixels either side of that cut are near-identical skin — a
- * fade there costs nothing. The head's top and sides are placed somewhere they
- * cut through nothing at all: flat background, or the edge of the canvas. Fading
- * them would make the lifted head semi-transparent over the still one
- * underneath, and a ghosted temple at four units of offset is far more visible
- * than any seam it would be hiding.
- *
- * The bottom is the one edge that must cut through the subject, because the head
- * has to end somewhere and that somewhere is the neck. Lifting the crop opens a
- * gap there, and what shows through it is the still base's own neck at those
- * rows — the right pixels in the right place, needing only a soft edge to stop
- * announcing where one stops and the other starts. Neck is smooth enough that
- * this works; a jaw would not be.
- */
-const HEAD_FEATHER = 7;
-
-/**
  * How far the brow patch fades out at its top and sides, in head units.
  *
  * The one number that decides whether this looks like a lift or like a
@@ -98,6 +73,8 @@ interface FaceProps {
   level: number;
   /** Artwork to wear instead of the drawing. Null falls back to the placeholder. */
   kit?: FaceKit | null;
+  /** Which way the head moves. See HEAD_MOTIONS. */
+  motion?: HeadMotion;
   /** Anchor for the speech bubble's tail. Marks the mouth, not the head. */
   mouthRef?: React.Ref<SVGCircleElement>;
 }
@@ -114,7 +91,14 @@ const toHead = (value: number) => (value / CANVAS_EDGE) * 200;
  */
 const VISEME_ORDER: Viseme[] = ['rest', 'mbp', 'ee', 'uh', 'aa', 'oh'];
 
-export default function Face({ shape, viseme, level, kit, mouthRef }: FaceProps) {
+export default function Face({
+  shape,
+  viseme,
+  level,
+  kit,
+  motion = DEFAULT_HEAD_MOTION,
+  mouthRef,
+}: FaceProps) {
   const [blinking, setBlinking] = useState(false);
   const timers = useRef<number[]>([]);
   // Two faces on one page must not share a mask id, and nothing here knows
@@ -152,25 +136,36 @@ export default function Face({ shape, viseme, level, kit, mouthRef }: FaceProps)
    * Six mouth shapes on a rigid head reads as a puppet; a head that lifts into
    * an emphasised syllable reads as someone talking. It costs three numbers.
    */
-  const lift = level * HEAD_LIFT;
+  // Not destructured: `rise` would shadow the per-brow travel of the same name
+  // a few dozen lines down, where the shadowing would be harmless and confusing.
+  const travel = MOTION[motion];
+  /**
+   * The move, as one transform both branches share.
+   *
+   * SVG applies a transform list right to left, so this rotates about the pivot
+   * and then translates — the order the face has always used, which is what lets
+   * `rise` reproduce the old behaviour exactly rather than approximately. At
+   * these angles the other order differs by a fraction of a unit, which is
+   * precisely why it is worth pinning down rather than leaving to chance.
+   */
+  const move = `translate(0 ${-level * travel.rise}) rotate(${level * travel.roll} ${PIVOT_X} ${PIVOT_Y})`;
   const browLift = level * 3.5;
   const eyeOpen = blinking ? 0.08 : 1 - level * 0.12;
 
   /**
    * The drawn face, wearing artwork.
    *
-   * Everything the placeholder does with `level` — the lift into an emphasised
-   * syllable, the slight roll — survives here, because it is a transform on a
-   * group rather than anything drawn. That is the part of a live face that costs
-   * nothing to keep when the art is swapped in, and it is worth noticing that it
-   * is also most of the effect.
+   * Everything the placeholder does with `level` — the swing into an emphasised
+   * syllable — survives here, because it is a transform on a group rather than
+   * anything drawn. That is the part of a live face that costs nothing to keep
+   * when the art is swapped in, and it is worth noticing that it is also most of
+   * the effect.
    *
-   * What the group *contains* is the part a kit gets to decide. With no head box
-   * it contains the whole picture, which is what every kit did before the box
-   * existed and what a head floating on nothing still wants. With one, the
-   * picture is drawn twice: once still, and once more masked to the head box and
-   * moving. Then the lift moves a head, and the background, the crop edge and the
-   * shoulders stay where the viewer left them.
+   * The group contains the whole picture, and the overscan is what pays for
+   * that: the artwork is drawn a tenth oversize inside the moving group, so the
+   * frame stays covered however far the picture turns. Everything registered to
+   * the base — patches, lids, brow crops — sits inside the same group and scales
+   * with it, which is the only way the registration survives.
    *
    * What also changes is the mouth: six poses instead of a spectrum, chosen by
    * `viseme` rather than interpolated from `shape`. Every pose stays mounted and
@@ -182,26 +177,14 @@ export default function Face({ shape, viseme, level, kit, mouthRef }: FaceProps)
     const mouth = kit.boxes.mouth;
 
     /**
-     * The head box in head units, and where the head turns about.
+     * The overscan, as a transform about the centre of the frame.
      *
-     * The pivot is the bottom-centre of the box, which on a well-placed one is
-     * the base of the neck — where a real head is in fact hinged. The fallback
-     * pair is the old hard-coded pivot, kept exactly because a kit without a
-     * head box must animate identically to how it did before this existed.
+     * Centre rather than the pivot, because what has to stay covered is the
+     * whole frame rather than the neighbourhood of one point — scaling about a
+     * pivot sitting 20 units off the bottom edge pushes that edge out barely at
+     * all, and the bottom corners are exactly where the rotation uncovers.
      */
-    const head = kit.boxes.head
-      ? {
-          x: toHead(kit.boxes.head.x),
-          y: toHead(kit.boxes.head.y),
-          width: toHead(kit.boxes.head.width),
-          height: toHead(kit.boxes.head.height),
-        }
-      : null;
-
-    const pivotX = head ? head.x + head.width / 2 : 100;
-    const pivotY = head ? head.y + head.height : 180;
-    const move = `translate(0 ${-lift}) rotate(${level * HEAD_ROLL} ${pivotX} ${pivotY})`;
-    const headFade = head ? Math.min(HEAD_FEATHER, head.height / 3) : 0;
+    const grow = `translate(100 100) scale(${OVERSCAN}) translate(-100 -100)`;
     // Both lids are drawn from the same flag. A kit holding only one of them
     // still blinks, with one eye — visibly wrong, and better than silently
     // doing nothing while the artwork looks complete in the picker.
@@ -236,9 +219,16 @@ export default function Face({ shape, viseme, level, kit, mouthRef }: FaceProps)
     });
 
     return (
-      <svg viewBox="0 0 200 200" className="h-full w-full overflow-visible" aria-hidden="true">
+      /*
+        Clipped, unlike the placeholder below, and the overscan is why: the
+        artwork is deliberately drawn a tenth wider than the frame, so something
+        has to cut it back to the frame or a portrait bleeds a tenth of its width
+        over whatever sits beside it. The live stage puts a speech balloon
+        exactly there and does not clip on its own account.
+      */
+      <svg viewBox="0 0 200 200" className="h-full w-full overflow-hidden" aria-hidden="true">
         {/*
-          Four ramps, in bounding-box units so one definition serves a strip of
+          Three ramps, in bounding-box units so one definition serves a strip of
           any size. Black at full opacity hides, transparent reveals, and a mask
           reads luminance — so painting these over a white rectangle is what
           turns a hard-edged crop into one that tapers away.
@@ -249,7 +239,6 @@ export default function Face({ shape, viseme, level, kit, mouthRef }: FaceProps)
               ['fade-left', '0', '0', '1', '0', 1, 0],
               ['fade-right', '0', '0', '1', '0', 0, 1],
               ['fade-top', '0', '0', '0', '1', 1, 0],
-              ['fade-bottom', '0', '0', '0', '1', 0, 1],
             ] as const
           ).map(([name, x1, y1, x2, y2, from, to]) => (
             <linearGradient key={name} id={`${maskId}-${name}`} x1={x1} y1={y1} x2={x2} y2={y2}>
@@ -257,57 +246,19 @@ export default function Face({ shape, viseme, level, kit, mouthRef }: FaceProps)
               <stop offset="100%" stopColor="#000" stopOpacity={to} />
             </linearGradient>
           ))}
-
-          {/*
-            The head window: opaque over the whole box, tapering away at the
-            bottom into the still picture underneath.
-          */}
-          {head && (
-            <mask
-              id={`${maskId}-head`}
-              maskUnits="userSpaceOnUse"
-              x={head.x}
-              y={head.y}
-              width={head.width}
-              height={head.height}
-            >
-              <rect
-                x={head.x}
-                y={head.y}
-                width={head.width}
-                height={head.height}
-                fill="#fff"
-              />
-              <rect
-                x={head.x}
-                y={head.y + head.height - headFade}
-                width={head.width}
-                height={headFade}
-                fill={`url(#${maskId}-fade-bottom)`}
-              />
-            </mask>
-          )}
         </defs>
 
         {/*
-          The picture, holding still. Drawn only when there is a head box to move
-          instead of it — otherwise the moving group below holds the only copy,
-          and drawing a second one here would sit a still face behind a moving
-          one with nothing masked away between them.
-        */}
-        {head && <image href={kit.base} x={0} y={0} width={200} height={200} />}
-
-        {/*
-          The moving part. Two groups rather than one because a `transform` and a
-          `mask` on the same element leave it ambiguous which coordinate system
-          the mask is resolved in; nesting says plainly that the mask is cut in
-          the base's own coordinates and the whole cut-out is then moved. Which
-          is the behaviour wanted: the head travels as one rigid piece, crown
-          included, rather than sliding upward behind a stationary window that
-          would shave the top of its head off.
+          The moving part, which is all of it. Two nested groups rather than one
+          because they answer two separate questions and collapsing them would
+          hide that: the outer one is where the head goes this frame, the inner
+          one is the fixed overscan that keeps the frame covered while it gets
+          there. Nesting also keeps the base's own coordinate system intact for
+          everything drawn inside — the brow crops in particular are written in
+          base pixels and would need rewriting against a scaled origin otherwise.
         */}
         <g transform={move}>
-          <g mask={head ? `url(#${maskId}-head)` : undefined}>
+          <g transform={grow}>
             <image href={kit.base} x={0} y={0} width={200} height={200} />
 
             {/*
@@ -452,11 +403,12 @@ export default function Face({ shape, viseme, level, kit, mouthRef }: FaceProps)
   return (
     <svg viewBox="0 0 200 200" className="h-full w-full overflow-visible" aria-hidden="true">
       {/*
-        No head box here, and none wanted: the placeholder is a head on nothing,
-        so the frame and the head are the same object and moving one is moving
-        the other.
+        No overscan here, and none wanted: the placeholder is a head on nothing,
+        so there is no frame edge to swing out of view and nothing behind it to
+        uncover. Scaling it a tenth larger would only make the head a tenth
+        larger, which is a change to the drawing rather than to the motion.
       */}
-      <g transform={`translate(0 ${-lift}) rotate(${level * HEAD_ROLL} 100 180)`}>
+      <g transform={move}>
         {/* Lit from the upper left, so the head reads as round, not as a disc. */}
         <defs>
           <radialGradient id="face-shade" cx="37%" cy="30%" r="80%">

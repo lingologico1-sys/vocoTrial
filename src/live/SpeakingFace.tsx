@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { AudioTap } from '../realtime/audio';
 import type { FaceKit } from '../facekit/kit';
 import Face from './Face';
+import type { HeadMotion } from './headMotion';
 import {
   MouthAnalyser,
   VISEMES,
@@ -30,6 +31,8 @@ interface SpeakingFaceProps {
   lookaheadMs: number;
   /** Artwork for the face to wear. Null leaves the drawn placeholder in place. */
   kit?: FaceKit | null;
+  /** Which way the head moves. Switchable mid-call, like the driver above. */
+  motion?: HeadMotion;
   mouthRef?: React.Ref<SVGCircleElement>;
 }
 
@@ -44,6 +47,7 @@ export default function SpeakingFace({
   driver,
   lookaheadMs,
   kit,
+  motion,
   mouthRef,
 }: SpeakingFaceProps) {
   const [mouth, setMouth] = useState(RESTING);
@@ -115,6 +119,7 @@ export default function SpeakingFace({
       viseme={mouth.viseme}
       level={mouth.level}
       kit={kit}
+      motion={motion}
       mouthRef={mouthRef}
     />
   );

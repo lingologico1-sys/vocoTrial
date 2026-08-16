@@ -23,17 +23,18 @@ const BOX_STYLE: Record<BoxId, { ring: string; label: string; name: string }> = 
   eyeRight: { ring: 'border-emerald-400', label: 'text-emerald-300', name: 'right eye' },
   browLeft: { ring: 'border-violet-400', label: 'text-violet-300', name: 'left brow' },
   browRight: { ring: 'border-fuchsia-400', label: 'text-fuchsia-300', name: 'right brow' },
-  head: { ring: 'border-rose-400', label: 'text-rose-300', name: 'head' },
 };
 
 /**
  * Above this far down the canvas, a box wears its label on the inside.
  *
- * The head box is the reason. Every other box sits somewhere in the middle of a
- * portrait with room above it for a caption, but a head box is placed correctly
- * when its top edge is up in the background clear of the hair — which on most
- * portraits is within a few percent of the top of the frame, where a label hung
- * above the rectangle is cropped away by the panel that holds it.
+ * The head box was the reason and is gone, but the rule outlives it: every box
+ * here is draggable anywhere on the canvas, and one dragged up near the top of
+ * the frame has its caption cropped away by the panel that holds it. No box now
+ * *wants* to live up there — the highest of them, a brow, sits about a third of
+ * the way down — so this fires rarely. It costs one comparison, and the failure
+ * it prevents is a label you cannot read on a box you are in the middle of
+ * placing.
  */
 const LABEL_INSIDE_ABOVE = 0.08;
 

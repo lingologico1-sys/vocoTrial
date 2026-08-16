@@ -31,12 +31,12 @@ export type SlotId = Viseme | 'eyeLeftClosed' | 'eyeRightClosed';
 export type Region = 'mouth' | 'eyeLeft' | 'eyeRight';
 
 /**
- * Every rectangle a kit holds, which is three more than it has regions.
+ * Every rectangle a kit holds, which is two more than it has regions.
  *
- * The brow and head boxes are boxes but not regions, and the distinction is the
- * whole design. Nothing is ever generated into them: each is a window onto the
- * base that gets redrawn somewhere else when the voice gets louder, so no model
- * is asked for a raised brow and no model gets the chance to restyle a spectacle
+ * The brow boxes are boxes but not regions, and the distinction is the whole
+ * design. Nothing is ever generated into them: each is a window onto the base
+ * that gets redrawn somewhere else when the voice gets louder, so no model is
+ * asked for a raised brow and no model gets the chance to restyle a spectacle
  * frame on the way past.
  *
  * There are two brow boxes for the same reason there are two eye boxes, and it
@@ -47,15 +47,15 @@ export type Region = 'mouth' | 'eyeLeft' | 'eyeRight';
  * has to take the worse of the two ends and smears frame colour under the brow
  * on the better one.
  *
- * The head box is the same mechanism at the other end of the scale, and it
- * exists to answer a complaint about the lift: with no head box the whole
- * picture translates and rolls, which reads as the camera moving rather than the
- * person. That is fine for a head floating on nothing and wrong the moment the
- * base has a background, a crop edge and a pair of shoulders in it — those are
- * fixed context, and moving them moves the world. Saying where the head ends
- * lets the lift move the head and leave the world alone.
+ * There was a third kind, a `head` box, which said which pixels the lift should
+ * move so that the background and shoulders could hold still. It is gone, and
+ * the reason is written out at length against HeadMotion in live/headMotion.ts:
+ * the same-scale trick that works for a brow does not survive being asked to cut
+ * across a neck, because a brow can borrow clear skin to fill the gap it leaves
+ * and a neck has a collar under it. The head now moves the whole picture. Kits
+ * stored with a head box keep it in their JSON, harmlessly — nothing reads it.
  */
-export type BoxId = Region | 'browLeft' | 'browRight' | 'head';
+export type BoxId = Region | 'browLeft' | 'browRight';
 
 /** The brow boxes, in the order the picker offers them. */
 export const BROW_BOXES = ['browLeft', 'browRight'] as const;
@@ -74,9 +74,14 @@ export function isBrow(id: BoxId): id is BrowId {
  * box never locks, can be dragged after any amount of generation, and is
  * meaningful by its absence. Everything else on the page is a crop, and a crop
  * that moves under artwork already cut to it is silent corruption.
+ *
+ * Since the head box went, the free boxes are exactly the brows and this answers
+ * the same question `isBrow` does. Kept apart anyway: `isBrow` narrows a type and
+ * this one states a behaviour, and it is the behaviour the page branches on. A
+ * third free box would arrive here and nowhere else.
  */
 export function isFreeBox(id: BoxId): boolean {
-  return isBrow(id) || id === 'head';
+  return isBrow(id);
 }
 
 /**
@@ -89,9 +94,8 @@ export function isFreeBox(id: BoxId): boolean {
  * three-quarters would be ruined by a box that assumed otherwise. It is only the
  * size that carries, which is the part that is genuinely the same on both sides.
  *
- * The mouth and the head have no partner, and null says so rather than an
- * exception, because the caller is a drag handler that has whichever box the
- * pointer landed on.
+ * The mouth has no partner, and null says so rather than an exception, because
+ * the caller is a drag handler that has whichever box the pointer landed on.
  */
 export function partnerBox(id: BoxId): BoxId | null {
   if (id === 'eyeLeft') return 'eyeRight';
