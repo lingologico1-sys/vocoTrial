@@ -113,6 +113,26 @@ export default function MotionPreview({ kit, focus, note }: MotionPreviewProps) 
    * which is the entire point of that setting and is best watched on the loop.
    */
   const [cadence, setCadence] = useState<MotionCadence>(DEFAULT_CADENCE);
+  /**
+   * Off, alone among the settings here, and against this panel's own subject.
+   *
+   * The brow flash is brow motion, so a page built to judge brow motion is the
+   * obvious place to watch it — but it fires on the blink's clock, which takes
+   * no notice of the slider. The slider's whole promise is that it holds the
+   * lift at an exact height so a seam can be looked at rather than glimpsed,
+   * and the flash outranks it: the two combine as a maximum, so any setting
+   * below the flash's own share is not nudged by one but replaced by it. The
+   * readout would say 30% while the face went to 70% and back, every eight
+   * seconds or so, at 2.4x zoom, on a seam a few pixels tall.
+   *
+   * So it defaults off and is offered as a thing to turn on deliberately. What
+   * it buys when you do is the one test the slider cannot set up: a lift
+   * arriving from rest in 90ms, which is a different question of the stretched
+   * row than the same height reached slowly. The loop under 'Every syllable'
+   * gets close — a brow cycle every 310ms — but starts from wherever the last
+   * syllable left it rather than from rest.
+   */
+  const [browBlink, setBrowBlink] = useState(false);
 
   useEffect(() => {
     if (!loop) return;
@@ -161,13 +181,7 @@ export default function MotionPreview({ kit, focus, note }: MotionPreviewProps) 
             kit={kit}
             motion={motion}
             cadence={cadence}
-            // Off here, unlike the live page, and it costs more to give up than
-            // the head sway this replaced: brow motion is what this panel is
-            // for. It goes anyway, because judging a seam means holding the
-            // brow at a height you chose and looking at it — and a lift
-            // arriving on the blink's clock moves the very edge being stared
-            // at, at a moment nothing on this page asked for.
-            browBlink={false}
+            browBlink={browBlink}
           />
         </div>
       </div>
@@ -256,6 +270,52 @@ export default function MotionPreview({ kit, focus, note }: MotionPreviewProps) 
               }`}
             >
               {option.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/*
+        Third in the group that changes what the face does, and serving the
+        seam question rather than the taste one: it is here to put a faster
+        lift on the brow than the slider can hold or the loop can start from,
+        which is a different test of the stretched row and not a different
+        opinion about it.
+
+        Named for what the blink carries rather than as on and off, because
+        "on" says nothing about what arrives — and what arrives, at a moment
+        this page did not choose, is the whole reason it defaults to the
+        quieter of the two.
+      */}
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        <span className="w-12 shrink-0 text-slate-500">Blink</span>
+        <div className="flex overflow-hidden rounded-lg border border-slate-700">
+          {(
+            [
+              [
+                false,
+                'Lids only',
+                'The lids close and nothing else moves, so the slider is the only thing setting the brow height and a seam stays where you put it.',
+              ],
+              [
+                true,
+                'Lids and brows',
+                'What the live page does: about half of blinks lift the brows to 70% in 90ms and ease them back. It ignores the slider and outranks any setting below 70%, so expect the readout to disagree with the face.',
+              ],
+            ] as const
+          ).map(([value, label, hint]) => (
+            <button
+              key={label}
+              type="button"
+              title={hint}
+              onClick={() => setBrowBlink(value)}
+              className={`px-2.5 py-1 ${
+                browBlink === value
+                  ? 'bg-slate-800 text-slate-100'
+                  : 'text-slate-500 hover:text-slate-300'
+              }`}
+            >
+              {label}
             </button>
           ))}
         </div>
