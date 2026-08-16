@@ -8,6 +8,7 @@ import {
   maskFor,
   normalise,
 } from './canvas';
+import { beginRun, type RunHandle } from './diagnostics';
 import { findImageModel } from './imageModels';
 import type { Box } from './kit';
 import { PREAMBLE } from './slots';
@@ -36,6 +37,8 @@ interface GenerateArgs {
   box: Box;
   /** The slot's instruction. The shared preamble is added here, not by callers. */
   instruction: string;
+  /** What to call this run in the diagnostics panel. The slot's own label. */
+  label: string;
   signal?: AbortSignal;
   onAttempt?: OnAttempt;
 }
@@ -52,6 +55,15 @@ export class GenerateError extends Error {
     readonly reason?: string,
     /** The provider's own stated wait, when it gave one. Milliseconds. */
     readonly retryAfterMs?: number,
+    /**
+     * What the provider itself answered, when the Worker knew.
+     *
+     * Distinct from `status`, which is the Worker's own — and the Worker turns
+     * every upstream failure into a 502, so without this the log would call a
+     * spent quota and a refused picture by the same number. Nothing branches on
+     * it; it exists to be read.
+     */
+    readonly upstreamStatus?: number,
   ) {
     super(message);
     this.name = 'GenerateError';
@@ -98,6 +110,7 @@ async function post(body: unknown, signal?: AbortSignal): Promise<{ image: strin
     code?: string;
     reason?: string;
     retryAfterMs?: number | null;
+    status?: number;
   } | null;
 
   if (!response.ok || !payload?.image) {
@@ -107,6 +120,7 @@ async function post(body: unknown, signal?: AbortSignal): Promise<{ image: strin
       payload?.code,
       payload?.reason,
       typeof payload?.retryAfterMs === 'number' ? payload.retryAfterMs : undefined,
+      typeof payload?.status === 'number' ? payload.status : undefined,
     );
   }
 
@@ -183,6 +197,7 @@ export type OnAttempt = (attempt: number, total: number) => void;
 
 async function postWithRetry(
   body: unknown,
+  run: RunHandle,
   signal?: AbortSignal,
   onAttempt?: OnAttempt,
 ): Promise<{ image: string; usd: number }> {
@@ -192,10 +207,16 @@ async function postWithRetry(
 
   for (let attempt = 0; ; attempt++) {
     onAttempt?.(attempt + 1, schedule.length + 1);
+    run.attemptStarted(attempt + 1);
     try {
       return await post(body, signal);
     } catch (error) {
       const failure = error instanceof GenerateError ? error : null;
+      run.attemptFailed(
+        failure?.status,
+        failure?.reason ?? failure?.code ?? (error instanceof Error ? error.name : undefined),
+        failure?.upstreamStatus,
+      );
       if (!failure?.retryable) throw error;
       if (attempt === 0 && failure.exhausted) schedule = QUOTA_DELAYS_MS;
 
@@ -213,7 +234,9 @@ async function postWithRetry(
       // metered over a minute, and obeying that spends both attempts inside the
       // window that was already closed.
       const stated = Math.min(failure.retryAfterMs ?? 0, MAX_STATED_MS);
-      await wait(spread(Math.max(scheduled, stated)), signal);
+      const sleep = spread(Math.max(scheduled, stated));
+      run.waitingFor(sleep);
+      await wait(sleep, signal);
     }
   }
 }
@@ -223,38 +246,59 @@ export async function generatePatch({
   base,
   box,
   instruction,
+  label,
   signal,
   onAttempt,
 }: GenerateArgs): Promise<Generated> {
   const model = findImageModel(modelKey);
   if (!model) throw new Error(`Unknown image model "${modelKey}"`);
 
-  const { image, usd } = await postWithRetry(
-    {
-      model: modelKey,
-      prompt: `${PREAMBLE} ${instruction}`,
-      // Sent with a backdrop behind it when the portrait has none, and a
-      // no-op otherwise. The kit keeps the cut-out either way — see the clip
-      // below, which is what actually holds that promise.
-      image: await flattenBackground(base),
-      // Sent only where it means something. A provider steered by prompt alone
-      // is not handicapped by its absence, because the crop is what actually
-      // protects the rest of the face either way.
-      mask: model.masked ? maskFor(box) : undefined,
-    },
-    signal,
-    onAttempt,
-  );
+  // Opened before the first canvas call rather than around the fetch alone,
+  // because "the button has been down for two minutes" is a question about the
+  // whole round trip and the local work is part of it.
+  const run = beginRun(label, model.label);
+  try {
+    // Sent with a backdrop behind it when the portrait has none, and a
+    // no-op otherwise. The kit keeps the cut-out either way — see the clip
+    // below, which is what actually holds that promise.
+    const flattened = await flattenBackground(base);
+    // Sent only where it means something. A provider steered by prompt alone
+    // is not handicapped by its absence, because the crop is what actually
+    // protects the rest of the face either way.
+    const mask = model.masked ? maskFor(box) : undefined;
 
-  // Crop, clip, match the seam, then fade it. The order matters throughout:
-  // clipping before matching keeps the seam ring off invented background,
-  // matching before fading measures the real border pixels rather than ones
-  // already blended toward transparency, and fading last means the alpha
-  // survives into the kit.
-  const cropped = await cropToBox(image, box);
-  const clipped = await clipToBase(cropped, base, box);
-  const matched = await matchTone(clipped, base, box);
-  return { patch: await featherPatch(matched, box), full: await normalise(image), usd };
+    const { image, usd } = await postWithRetry(
+      {
+        model: modelKey,
+        prompt: `${PREAMBLE} ${instruction}`,
+        image: flattened,
+        mask,
+      },
+      run,
+      signal,
+      onAttempt,
+    );
+
+    run.phase('stitching');
+    // Crop, clip, match the seam, then fade it. The order matters throughout:
+    // clipping before matching keeps the seam ring off invented background,
+    // matching before fading measures the real border pixels rather than ones
+    // already blended toward transparency, and fading last means the alpha
+    // survives into the kit.
+    const cropped = await cropToBox(image, box);
+    const clipped = await clipToBase(cropped, base, box);
+    const matched = await matchTone(clipped, base, box);
+    const generated = {
+      patch: await featherPatch(matched, box),
+      full: await normalise(image),
+      usd,
+    };
+    run.succeeded(usd);
+    return generated;
+  } catch (cause) {
+    run.failed(cause instanceof Error ? cause.message : String(cause));
+    throw cause;
+  }
 }
 
 /**
@@ -264,33 +308,47 @@ export async function generatePatch({
  * is to give every later patch something sane to sit on: a closed, neutral
  * mouth. Everything downstream treats whatever this returns as the original.
  */
-export async function generateBase(
-  modelKey: string,
-  base: string,
-  instruction: string,
-  box: Box,
-  signal?: AbortSignal,
-  onAttempt?: OnAttempt,
-): Promise<{ base: string; usd: number }> {
+export async function generateBase({
+  modelKey,
+  base,
+  instruction,
+  box,
+  label,
+  signal,
+  onAttempt,
+}: GenerateArgs): Promise<{ base: string; usd: number }> {
   const model = findImageModel(modelKey);
   if (!model) throw new Error(`Unknown image model "${modelKey}"`);
 
-  const { image, usd } = await postWithRetry(
-    {
-      model: modelKey,
-      prompt: `${PREAMBLE} ${instruction}`,
-      image: await flattenBackground(base),
-      mask: model.masked ? maskFor(box) : undefined,
-    },
-    signal,
-    onAttempt,
-  );
+  const run = beginRun(label, model.label);
+  try {
+    const flattened = await flattenBackground(base);
+    const mask = model.masked ? maskFor(box) : undefined;
 
-  // The silhouette is the one thing this pass may not change. It is allowed to
-  // redraw the whole frame, but a cut-out portrait that comes back with an
-  // invented background is no longer the picture that was uploaded — and since
-  // every later patch is clipped to *this* base's alpha, a base that lost its
-  // hole would take the whole kit with it.
-  const normalised = await normalise(image);
-  return { base: await clipToBase(normalised, base, FULL_FRAME), usd };
+    const { image, usd } = await postWithRetry(
+      {
+        model: modelKey,
+        prompt: `${PREAMBLE} ${instruction}`,
+        image: flattened,
+        mask,
+      },
+      run,
+      signal,
+      onAttempt,
+    );
+
+    run.phase('stitching');
+    // The silhouette is the one thing this pass may not change. It is allowed
+    // to redraw the whole frame, but a cut-out portrait that comes back with an
+    // invented background is no longer the picture that was uploaded — and
+    // since every later patch is clipped to *this* base's alpha, a base that
+    // lost its hole would take the whole kit with it.
+    const normalised = await normalise(image);
+    const clipped = await clipToBase(normalised, base, FULL_FRAME);
+    run.succeeded(usd);
+    return { base: clipped, usd };
+  } catch (cause) {
+    run.failed(cause instanceof Error ? cause.message : String(cause));
+    throw cause;
+  }
 }

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import BoxPicker from './BoxPicker';
+import Diagnostics from './Diagnostics';
 import Filmstrip from './Filmstrip';
 import MotionPreview from './MotionPreview';
 import { composite, dataUrlToBlob, fileToDataUrl, normalise, patchDivergence } from './canvas';
@@ -344,6 +345,7 @@ export default function FaceKit() {
         base: kit.base,
         box: kit.boxes[definition.region],
         instruction: definition.prompt(kit.lashes ?? DEFAULT_LASH_STYLE),
+        label: definition.label,
         onAttempt: (attempt) => mark(key, attempt),
       });
 
@@ -371,14 +373,14 @@ export default function FaceKit() {
     try {
       // From the upload, never from the current base. Pressing this again means
       // "try that again", not "edit the last attempt".
-      const result = await generateBase(
+      const result = await generateBase({
         modelKey,
-        kit.original ?? kit.base,
-        NEUTRALISE_BASE_PROMPT,
-        kit.boxes.mouth,
-        undefined,
-        (attempt) => mark(key, attempt),
-      );
+        base: kit.original ?? kit.base,
+        instruction: NEUTRALISE_BASE_PROMPT,
+        box: kit.boxes.mouth,
+        label: 'Neutral base',
+        onAttempt: (attempt) => mark(key, attempt),
+      });
       // Patches cut from the old base no longer describe this face, so they go
       // with it. Keeping them would leave a mouth drawn for a jaw that moved.
       edit((current) => ({
@@ -1279,6 +1281,13 @@ export default function FaceKit() {
             </ul>
           </section>
         )}
+
+        {/*
+          Last on the page and outside the kit branch on purpose: a run that
+          failed is most worth reading after the kit it belonged to has been
+          closed, and the log outlives the kit either way.
+        */}
+        <Diagnostics />
       </div>
     </div>
   );
