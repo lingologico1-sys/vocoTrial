@@ -74,6 +74,7 @@ the key private at the cost of a latency leg.
 | [functions/api/session/openai.ts](functions/api/session/openai.ts) | Mints an OpenAI Realtime client secret (`ek_…`) |
 | [functions/api/live/gemini.ts](functions/api/live/gemini.ts) | Relays the Gemini Live socket with the API key attached, to whichever surface carries the model |
 | [functions/api/_vertex.ts](functions/api/_vertex.ts) | Vertex host, key pair, region and express-mode model naming |
+| [functions/api/live/regions.ts](functions/api/live/regions.ts) | Asks every region which models it serves, and whether it has capacity — free, and the A/B behind the quota question |
 | [functions/api/_aistudio.ts](functions/api/_aistudio.ts) | The same three facts for AI Studio, for models Vertex has no build of |
 | [src/realtime/instructions.ts](src/realtime/instructions.ts) | The prompt presets, and the default the server falls back to |
 | [src/realtime/settings.ts](src/realtime/settings.ts) | Which provider knobs exist, which models take them, and the sanitiser |
@@ -221,6 +222,7 @@ npm run lint
 | `/api/session/openai` | mints ephemeral secrets correctly |
 | `/api/live/gemini` | **working on both surfaces** — `setupComplete` through the relay on Vertex *and* AI Studio |
 | `/api/live/models` | probes candidate ids with `generateContent`, the only call this key may make |
+| `/api/live/regions` | **run 2026-08-16** — all twelve hosts take the key; Pro is global-endpoint-only, Flash is in seven regions |
 | `/api/image/generate` | **working on Vertex** — returned an image in ~16s on Flash |
 | OpenAI voice conversation | **working** — confirmed from a browser on `gpt-realtime` and `gpt-realtime-mini`, and untouched by the Vertex move |
 | Gemini handshake | **working** — 2.5 native audio on Vertex, 3.1 Flash Live on AI Studio |
@@ -271,6 +273,90 @@ Still worth a periodic check, because Vertex publishes no Gemini 3 or 3.1 Live
 model to migrate *to* if that ever changes. `/api/live/models` probes candidates
 with `generateContent`: `404` is a wrong id, `400` is a real id that is
 bidi-only, and neither is billed.
+
+### Where the RESOURCE_EXHAUSTED bursts come from
+
+Not yet known, and `/api/live/regions` exists to settle it. Image generation
+fails in bursts that clear on their own (see the note in
+[src/facekit/imageModels.ts](src/facekit/imageModels.ts)), and there are two
+explanations that want opposite responses:
+
+- **Dynamic shared quota.** Capacity is pooled per *region* across everyone
+  using the model, so a `429` means the region was full at that instant — not
+  that this project spent an allowance. Another region genuinely helps, and
+  `us-central1`, where express mode puts us by default, is the busiest one
+  Google has.
+- **A cap on the project.** Express tier, or a per-project ceiling. That applies
+  in every region at once, and moving is a change of hostname and nothing else.
+
+The error is identical either way, so the way to tell them apart is to ask two
+regions **during the same burst**:
+
+```js
+// from the page's console, which already holds the session cookie
+await (await fetch('/api/live/regions', {
+  method: 'POST', headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ regions: ['us-central1', 'europe-west4'] }),
+})).json()
+```
+
+One `EXHAUSTED` and one `served here` means the pool is regional and the fix is
+to move. Both `EXHAUSTED` at the same moment means it is the project, and the
+levers are the billing tier or Provisioned Throughput instead. POST with no body
+walks the whole candidate list, which is the run to do first — it also reports
+which region the global endpoint actually resolves to.
+
+#### What the first sweep found (2026-08-16)
+
+All twelve hosts authenticate this key, so express mode is not pinned to one
+region the way the URL shape suggests. What differs is the catalogue:
+
+```
+                          3-pro-image   2.5-flash-image
+global                    SERVED        SERVED
+us-central1               404           SERVED
+us-east4 / -east5         404           SERVED
+us-west1 / -west4         404           SERVED
+europe-west1 / -west4     404           SERVED
+northamerica-northeast1   404           404
+asia-northeast1           404           404
+asia-southeast1           404           404
+australia-southeast1      404           404
+```
+
+**`gemini-3-pro-image` is published on the global endpoint and nowhere else** —
+including `us-central1`, which is the region the global endpoint names in its
+own error text. So "global" is not an alias for a region here; it is a distinct
+routing layer that reaches capacity no regional host exposes. Flash is the
+control that makes this readable: the identical probe body at the identical
+hosts returns `400` for Flash wherever it returns `404` for Pro.
+
+Two consequences, and the first is a trap:
+
+- **Pinning a region would break Pro outright**, with a `404` that reads like a
+  wrong model id rather than a wrong endpoint. Anything that adds a region to
+  the generating path has to leave Pro on global. See the warning in
+  [functions/api/_vertex.ts](functions/api/_vertex.ts).
+- **Region-switching is a lever for Flash only** — seven regions serve it, so
+  the burst A/B above is worth running on Flash and is meaningless on Pro.
+
+It also explains, with evidence rather than suspicion, why Pro exhausts so much
+sooner than Flash: Pro has exactly one pool and no fallback, while Flash has
+eight places to be asked. Nothing returned `429` during the sweep, so the
+capacity question itself is still open — that needs a run fired *during* a
+burst.
+
+Eleven regions is not all of them. Pro may be published somewhere unprobed;
+`404` across every major US and European region is strong evidence for
+global-only, not proof.
+
+None of it is billed. Phase one sends a well-formed body to a fake model id, so
+routing refuses it before the body matters; phase two sends a deliberately empty
+`contents` to the real ids, so a published model gets far enough to complain
+about the body (`400`, the hit) and an unpublished one still `404`s. Nothing
+generates. `429` is the exception worth watching for in either phase — quota is
+checked at admission, ahead of both, so a region can refuse a probe it would
+otherwise have answered for free. That refusal *is* the measurement.
 
 ### Why Gemini is proxied and OpenAI is not
 

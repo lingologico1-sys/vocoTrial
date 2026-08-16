@@ -148,6 +148,14 @@ export const IMAGE_MODELS: ImageModelChoice[] = [
     // exhausted so much sooner than Flash — same model, thinner capacity — so
     // watch whether that survived the move to the GA id and GCP quota.
     //
+    // Partly answered, and not in favour of the preview theory: this model is
+    // published on Vertex's *global* endpoint and on no regional host at all
+    // (404 on eleven, us-central1 included), while Flash is served by seven of
+    // them. One pool and no fallback is a better explanation for exhausting
+    // first than anything about the id. It also means Pro cannot be moved off a
+    // busy region, because it is not in one — see the warning in _vertex.ts
+    // before adding a region to the generating path.
+    //
     // What the preview id did, for comparison once this one has run: returned an
     // image in about forty-seven seconds, the slowest of the four and the most
     // expensive.

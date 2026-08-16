@@ -25,6 +25,38 @@ export const VERTEX_HOST = 'aiplatform.googleapis.com';
 export const VERTEX_KEY_NAMES = 'GEMINI_API_KEY / GEMINI_API_KEY2';
 
 /**
+ * The host for a region, or the global one when no region is named.
+ *
+ * Both forms exist because Vertex serves the same API from a global endpoint
+ * and from a per-region one, and in express mode they differ in what they
+ * decide rather than in what they accept. The global host lets the key choose
+ * the region — us-central1, as it turns out (see VERTEX_LOCATION). A regional
+ * host names it in the DNS, which is the only place express mode *can* name it,
+ * since the URL below carries no `locations/` segment to put it in.
+ *
+ * Worth having as a lever rather than a constant because quota for these models
+ * is metered per region. When a burst of RESOURCE_EXHAUSTED is regional
+ * contention it clears by asking a different region; when it is a cap on the
+ * project it does not, and asking is how you find out which.
+ *
+ * DO NOT PIN A REGION ON THE GENERATING PATH WITHOUT READING THIS.
+ *
+ * The two are not interchangeable, and the sweep that established it is in the
+ * README. `gemini-3-pro-image` is published on the *global* endpoint only — it
+ * 404s on all eleven regional hosts probed, us-central1 included, which is the
+ * very region the global endpoint names in its own error text. Global is a
+ * routing layer, not an alias for a region.
+ *
+ * So a region is safe to pass for Flash, which seven regions serve, and takes
+ * Pro out entirely. The failure would arrive as a 404 that reads exactly like a
+ * wrong model id — the same confusion the note on VERTEX_LIVE_URL describes,
+ * for the same underlying reason.
+ */
+export function vertexHost(region?: string): string {
+  return region ? `${region}-${VERTEX_HOST}` : VERTEX_HOST;
+}
+
+/**
  * The Vertex key, primary then fallback — the same order PanelForge uses.
  *
  * The second key is a spare for when the first is exhausted or rotated, not a
@@ -48,9 +80,16 @@ export function vertexModel(id: string): string {
   return `publishers/google/models/${id}`;
 }
 
-/** REST generateContent, the endpoint PanelForge has been generating on. */
-export function vertexGenerateContentUrl(id: string): string {
-  return `https://${VERTEX_HOST}/v1/publishers/google/models/${encodeURIComponent(id)}:generateContent`;
+/**
+ * REST generateContent, the endpoint PanelForge has been generating on.
+ *
+ * The region is optional and omitted everywhere that generates today, which
+ * keeps the live path exactly as it was. Pass one only to aim a call at a
+ * specific region's capacity — see live/regions.ts, which is the only caller
+ * that does.
+ */
+export function vertexGenerateContentUrl(id: string, region?: string): string {
+  return `https://${vertexHost(region)}/v1/publishers/google/models/${encodeURIComponent(id)}:generateContent`;
 }
 
 /**
@@ -83,4 +122,4 @@ export const VERTEX_LOCATION = 'us-central1';
  * endpoint. If it ever stops, check the region before the model id.
  */
 export const VERTEX_LIVE_URL =
-  `https://${VERTEX_LOCATION}-${VERTEX_HOST}/ws/google.cloud.aiplatform.v1beta1.LlmBidiService/BidiGenerateContent`;
+  `https://${vertexHost(VERTEX_LOCATION)}/ws/google.cloud.aiplatform.v1beta1.LlmBidiService/BidiGenerateContent`;
