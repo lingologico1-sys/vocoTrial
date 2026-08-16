@@ -37,11 +37,8 @@ export const MODELS: ModelChoice[] = [
     label: 'Gemini 2.5 Flash Native Audio',
     id: 'gemini-live-2.5-flash-preview-native-audio-09-2025',
     // The only Live model Vertex serves this key, out of nine spellings tried
-    // (POST /api/live/models). It answers generateContent with 400 rather than
-    // 404 — the id is real and bidi-only, which is exactly what a Live model
-    // should say. Still flagged until a socket reaches setupComplete, because
-    // existing and accepting a handshake are different claims.
-    unverified: true,
+    // (POST /api/live/models), and confirmed the way a Live id can only be
+    // confirmed: a socket through the relay reached setupComplete.
   },
   // There is no 3.1 Flash Live here. `gemini-3.1-flash-live-preview` was the
   // confirmed AI Studio id and 404s on Vertex, as do gemini-live-3.1-flash,
@@ -71,12 +68,12 @@ export const MODELS: ModelChoice[] = [
  * Unchecked, not suspect. A model id can only be confirmed by a call that
  * actually connects, because nothing earlier in the chain looks at it:
  *
- * The Gemini entry carries the flag as of the move to Vertex AI. The two ids
- * that were here before had reached `setupComplete` twelve times out of twelve
- * — against AI Studio, and that confirmation did not travel: both 404 on
- * Vertex, which publishes its Live models under quite different names. The id
- * here replaced them because Vertex answered for it and for nothing else.
- * Clear the flag on a connection that reaches `setupComplete`, not before.
+ * Nothing here is flagged today. The Gemini entry was, briefly, through the
+ * move to Vertex AI: the two ids that used to be here had reached
+ * `setupComplete` twelve times out of twelve against AI Studio, and that
+ * confirmation did not travel — both 404 on Vertex, which publishes its Live
+ * models under quite different names. The id here replaced them because Vertex
+ * answered for it and for nothing else, and the flag came off on a handshake.
  *
  *
  *  - Neither provider validates the model when issuing a credential. Google's

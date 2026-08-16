@@ -18,12 +18,23 @@ Gemini ── no usable browser credential exists, so the socket is relayed
 ```
 
 Everything Google here — the Live socket and face-kit image generation both —
-runs on **Vertex AI in express mode** (`aiplatform.googleapis.com`), on the same
-`GEMINI_API_KEY` / `GEMINI_API_KEY2` that PanelForge uses in `bannerMaker`, so
-it bills through that GCP project rather than AI Studio. Express mode is the
-part that makes it possible from a Worker at all: it takes a plain API key and
-infers the project, with no OAuth exchange to sign. See
-[functions/api/_vertex.ts](functions/api/_vertex.ts).
+runs on **Vertex AI in express mode**, billed through GCP rather than AI Studio.
+Express mode is what makes it possible from a Worker at all: it takes an API key
+and infers the project, with no OAuth exchange to sign. See
+[functions/api/_vertex.ts](functions/api/_vertex.ts), which is the only file
+that knows any of this.
+
+**Vertex is two surfaces wearing one name**, and they disagree about the host:
+
+| | host | why |
+| --- | --- | --- |
+| REST `generateContent` | `aiplatform.googleapis.com` | global; express mode infers project *and* region |
+| Live socket (bidi) | `us-central1-aiplatform.googleapis.com` | **regional only** — the global host has no bidi service |
+
+That second row cost an afternoon. The global host does not answer "no bidi
+here": it closes the socket with `1007 Invalid resource field value` or `1008
+Publisher model … was not found`, both of which read as a wrong model id. The
+identical frames reach `setupComplete` against the regional host.
 
 The one rule the whole design turns on: **the provider API keys never reach the
 browser.** Anything in a JS bundle is public, and a leaked Realtime key is a
@@ -109,8 +120,49 @@ gates the build.
    plain text) to Production *and* Preview:
    - `SITE_PASSWORD`
    - `OPENAI_API_KEY`
-   - `GEMINI_API_KEY` (Vertex AI key — the one PanelForge uses)
+   - `GEMINI_API_KEY` (Vertex AI key — see below, it is a particular kind)
    - `GEMINI_API_KEY2` (optional fallback Vertex key)
+
+   **A Vertex key is not an ordinary API key**, and the difference is invisible:
+   both are 39–53 characters of `AIza…`. Vertex refuses a plain one with `403`
+   *"Requests to this API … are blocked"*. What it wants is an **authorization
+   key** — an API key bound to a service account — which cannot be made from the
+   Credentials page (the console greys out Agent Platform there, because the API
+   does not accept unbound keys). Make it with gcloud:
+
+   ```bash
+   gcloud services enable aiplatform.googleapis.com
+   gcloud iam service-accounts create vocotrial-vertex --display-name="vocoTrial Vertex"
+   gcloud projects add-iam-policy-binding PROJECT_ID \
+     --member="serviceAccount:vocotrial-vertex@PROJECT_ID.iam.gserviceaccount.com" \
+     --role="roles/aiplatform.user"
+   gcloud beta services api-keys create --display-name="vocoTrial Vertex" \
+     --api-target=service=aiplatform.googleapis.com \
+     --service-account=vocotrial-vertex@PROJECT_ID.iam.gserviceaccount.com
+   ```
+
+   If that last command fails with
+   `FLOW_APIKEY_SERVICE_ACCOUNT_BINDING_FAILED_PRECONDITION`, an org policy is
+   blocking it — `constraints/iam.managed.disableServiceAccountApiKeyCreation`,
+   which Google enforces by default. Exempt the one project (needs
+   `roles/orgpolicy.policyAdmin`), and expect a few minutes before the API Keys
+   service notices:
+
+   ```bash
+   gcloud org-policies set-policy policy.yaml   # spec.rules[0].enforce: false
+   ```
+
+   Verify before pasting anything — free, because a rejected request is not
+   billed. `404` means the credential authenticated and only the fake model id
+   was refused; `401` means it is not a Vertex credential; `403` means it is
+   blocked by restriction or a disabled API:
+
+   ```bash
+   curl -s -o /dev/null -w '%{http_code}\n' -X POST \
+     -H "x-goog-api-key: KEY" -H 'Content-Type: application/json' \
+     -d '{"contents":[{"role":"user","parts":[{"text":"probe"}]}]}' \
+     'https://aiplatform.googleapis.com/v1/publishers/google/models/gemini-no-such-model-probe:generateContent'
+   ```
 
    They have to go in the dashboard: because `wrangler.toml` exists, Pages takes
    plain-text vars from that file and the dashboard will only accept Secrets.
@@ -154,11 +206,11 @@ npm run lint
 | Same-origin gate (`403` on a forged Origin) | working |
 | Password gate (`401` on every `/api/*` without a cookie, fetch and WebSocket alike) | working — verified against `wrangler pages dev`, including a tampered cookie and an unset `SITE_PASSWORD` |
 | `/api/session/openai` | mints ephemeral secrets correctly |
-| `/api/live/gemini` | relays the Live socket — **retest on Vertex**; the 12/12 `setupComplete` run below was against AI Studio |
-| `/api/live/models` | asks Vertex which publisher model ids the key can see, and probes each id in the picker |
-| `/api/image/generate` | OpenAI unchanged; Gemini **retest on Vertex** |
+| `/api/live/gemini` | **working on Vertex** — a socket through the relay reached `setupComplete` |
+| `/api/live/models` | probes candidate ids with `generateContent`, the only call this key may make |
+| `/api/image/generate` | **working on Vertex** — returned an image in ~16s on Flash |
 | OpenAI voice conversation | **working** — confirmed from a browser on `gpt-realtime` and `gpt-realtime-mini`, and untouched by the Vertex move |
-| Gemini handshake | 12/12 reached `setupComplete` **on AI Studio**; nothing yet on Vertex |
+| Gemini handshake | **working on Vertex**; the 12/12 run on AI Studio is history, not evidence |
 | Gemini audio in a browser | untested; needs a mic |
 
 ### Which model ids are actually confirmed
@@ -174,18 +226,31 @@ nothing either.
 Both OpenAI ids are confirmed by real browser calls, and the Vertex move does
 not touch them.
 
-**Every Gemini id is marked `unverified` again.** They were confirmed — the
-Live pair reached `setupComplete`, the Flash image model returned a picture —
-but against AI Studio, and that confirmation does not survive the move. Vertex
-publishes its models out of its own catalogue and names the Live ones
-differently, so an id that worked there may not exist here at all. Clearing a
-flag needs a call on the new surface, not the memory of one on the old.
+Every Gemini id was re-confirmed against Vertex after the move, and all of them
+changed or were removed in the process. **A model id belongs to a surface**: the
+two Live ids that had reached `setupComplete` twelve times out of twelve on AI
+Studio both `404` on Vertex.
 
-Do not guess a Gemini id. Two rounds of plausible-looking guesses were wrong on
-AI Studio, including `gemini-live-3.1-flash-preview`, whose word order looks
-right and is not — though that spelling is closer to how Vertex names its Live
-models, so it may yet be the right shape here. Ask `/api/live/models` instead;
-it now reports Vertex's catalogue and the HTTP status of every id in the picker.
+Nine Live spellings went to Vertex and exactly one came back:
+
+```
+400  gemini-live-2.5-flash-preview-native-audio-09-2025   ← the only one
+404  gemini-3.1-flash-live-preview            (our old id)
+404  gemini-2.5-flash-native-audio-latest     (our old id)
+404  gemini-live-3.1-flash-preview / gemini-live-3.1-flash
+404  gemini-live-2.5-flash / -preview / -preview-native-audio
+404  gemini-2.0-flash-live-preview-04-09
+```
+
+The date suffix is load-bearing, and **there is no 3.1 Flash Live on Vertex in
+`us-central1`** — which is why the picker now offers one Gemini model rather
+than two. Availability is regional, so re-run `/api/live/models` before
+concluding a 3.1 Live model exists nowhere.
+
+Do not guess a Gemini id — the two closest near-misses above differ from the
+real one only by a date. Ask `/api/live/models`, which probes candidates with
+`generateContent`: `404` is a wrong id, `400` is a real id that is bidi-only,
+and neither is billed.
 
 ### Why Gemini is proxied and OpenAI is not
 
