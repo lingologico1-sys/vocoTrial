@@ -6,7 +6,6 @@ import {
   DEFAULT_CADENCE,
   DEFAULT_HEAD_MOTION,
   HeadPerformer,
-  IDLE_MOTION,
   MOTION,
   OVERSCAN,
   PIVOT_X,
@@ -43,13 +42,26 @@ const BLINK_EVERY_MS = 4200;
 /**
  * How far a kit's brows travel at full volume, in head units.
  *
- * Less than half what the placeholder spends on its own drawn brows, because
+ * Still well under what the placeholder spends on its own drawn brows, because
  * the placeholder is a cartoon and a kit is usually not. On a portrait drawn
  * anywhere near naturalistically the cartoon amount does not read as emphasis,
  * it reads as alarm — the brows arrive somewhere no real brow goes, and stay
  * there for the length of a loud syllable.
+ *
+ * It was 1.8, which turned out to be under the floor rather than merely
+ * restrained: the live stage draws this 200-unit head at 160 pixels, so 1.8
+ * units is 1.4 pixels of travel, reached slowly through a phrase envelope and
+ * given back just as slowly. Nobody reported it as too small. It was reported
+ * as brows that do not appear to move, which is what a movement below the size
+ * of the thing drawing it looks like.
+ *
+ * 3 units is 2.4 pixels, and sits under the cap a default brow box imposes
+ * (a third of its height, 3.6 units) with enough room that the two figures do
+ * not have to be read together. Kits whose boxes are shallower are still cut
+ * back by that cap, which is the point of having it — this number is what the
+ * brows want, and the box is what the picture can afford.
  */
-const KIT_BROW_LIFT = 1.8;
+const KIT_BROW_LIFT = 3;
 
 /**
  * How far the brow patch fades out at its top and sides, in head units.
@@ -82,8 +94,8 @@ interface FaceProps {
   motion?: HeadMotion;
   /** On what schedule it moves, and the brows with it. See MOTION_CADENCES. */
   cadence?: MotionCadence;
-  /** Whether the head drifts when nobody is speaking. See IDLE_SWAY. */
-  idle?: boolean;
+  /** Whether some blinks carry a brow lift. See BROW_FLASH in headMotion.ts. */
+  browBlink?: boolean;
   /** Anchor for the speech bubble's tail. Marks the mouth, not the head. */
   mouthRef?: React.Ref<SVGCircleElement>;
 }
@@ -107,12 +119,20 @@ export default function Face({
   kit,
   motion = DEFAULT_HEAD_MOTION,
   cadence = DEFAULT_CADENCE,
-  idle = true,
+  browBlink = true,
   mouthRef,
 }: FaceProps) {
   const [blinking, setBlinking] = useState(false);
-  const [perf, setPerf] = useState<Performance>({ head: 0, brow: 0, sway: 0 });
+  const [perf, setPerf] = useState<Performance>({ head: 0, brow: 0 });
   const timers = useRef<number[]>([]);
+  /**
+   * Built once, and reachable from both effects below rather than owned by the
+   * loop that reads it — the blink schedule has to be able to tell it that an
+   * eye just closed, and the two live in separate effects because they are
+   * separate clocks.
+   */
+  const performer = useRef<HeadPerformer | null>(null);
+  if (!performer.current) performer.current = new HeadPerformer();
   // Two faces on one page must not share a mask id, and nothing here knows
   // whether it is the only one.
   const maskId = useId().replace(/:/g, '');
@@ -126,10 +146,10 @@ export default function Face({
    * face finding its feet cannot be used for the one thing it exists for, which
    * is flipping between two schedules on the same sentence.
    */
-  const latest = useRef({ level, cadence, idle });
+  const latest = useRef({ level, cadence, browBlink });
   useEffect(() => {
-    latest.current = { level, cadence, idle };
-  }, [level, cadence, idle]);
+    latest.current = { level, cadence, browBlink };
+  }, [level, cadence, browBlink]);
 
   useEffect(() => {
     const schedule = () => {
@@ -139,6 +159,10 @@ export default function Face({
       timers.current.push(
         window.setTimeout(() => {
           setBlinking(true);
+          // Told at the moment the lids start to close, not when they open
+          // again: the brow and the blink are meant to read as one movement,
+          // and the brow's own attack is already the slower of the two.
+          if (latest.current.browBlink) performer.current?.blinked();
           timers.current.push(
             window.setTimeout(() => {
               setBlinking(false);
@@ -162,15 +186,17 @@ export default function Face({
    *
    * It lives here rather than in SpeakingFace's loop for two reasons, and the
    * second is the load-bearing one. A schedule has to keep running when nothing
-   * is being said — a lockout has to expire, an idle sway has to carry on — and
-   * SpeakingFace's loop stops entirely between calls. And MotionPreview drives
+   * is being said — a lockout has to expire, a brow lifted by a blink has to
+   * come back down — and SpeakingFace's loop stops entirely between calls. That
+   * second clause is no longer hypothetical: the brow flash is fired by the
+   * blink, which never stops, so this loop now has work to do on a face that
+   * has not been spoken to in minutes. And MotionPreview drives
    * this component with a loudness it invents, with no analyser anywhere near
    * it; a performance computed upstream would leave that preview showing
    * something the live page does not do, which is the one thing that preview
    * promises never to do.
    */
   useEffect(() => {
-    const performer = new HeadPerformer();
     let frame = 0;
     let last = performance.now();
 
@@ -180,20 +206,18 @@ export default function Face({
       // and snap the envelope to its target.
       const dt = Math.min(0.1, (time - last) / 1000);
       last = time;
-      const next = performer.read(dt, latest.current.level, latest.current.cadence, latest.current.idle);
+      const next = performer.current!.read(dt, latest.current.level, latest.current.cadence);
       // Returning the identical object when nothing has moved is what keeps a
-      // silent face cheap: with the sway off, this loop then costs one callback
-      // a frame and no renders at all, rather than re-rendering a whole portrait
-      // sixty times a second to draw the same transform.
+      // silent face cheap: between flashes this loop costs one callback a frame
+      // and no renders at all, rather than re-rendering a whole portrait sixty
+      // times a second to draw the same transform.
       //
-      // Every field the transform reads has to be tested here. A field left out
-      // is not a missed optimisation, it is a channel that silently stops
-      // animating whenever the others are still — which is precisely the state
-      // the sway exists to fill.
+      // Every field the performance carries has to be tested here. A field left
+      // out is not a missed optimisation, it is a channel that silently stops
+      // animating whenever the others are still — which, for the brows, is
+      // exactly when they now have something to do.
       setPerf((current) =>
-        Math.abs(current.head - next.head) < 1e-4 &&
-        Math.abs(current.brow - next.brow) < 1e-4 &&
-        Math.abs(current.sway - next.sway) < 1e-4
+        Math.abs(current.head - next.head) < 1e-4 && Math.abs(current.brow - next.brow) < 1e-4
           ? current
           : next,
       );
@@ -217,7 +241,6 @@ export default function Face({
   // Not destructured: `rise` would shadow the per-brow travel of the same name
   // a few dozen lines down, where the shadowing would be harmless and confusing.
   const travel = MOTION[motion];
-  const drift = IDLE_MOTION[motion];
   /**
    * The move, as one transform both branches share.
    *
@@ -227,18 +250,13 @@ export default function Face({
    * always an identity and the order cannot be observed; it is written down
    * anyway, because a mode that ever moves both at once would be reading its
    * feel off an order nobody chose.
-   *
-   * The performance and the idle sway are summed *per axis* rather than as one
-   * number, because they are scaled by different tables — that is the whole of
-   * the fix for a sway nobody could see. Summing them keeps the chosen mode
-   * pure either way: at `swing` both terms are rotation and the translate stays
-   * an identity, at `rise` the reverse. Idle does not quietly borrow the other
-   * mode's axis to be noticed.
    */
-  const move = `translate(0 ${-(perf.head * travel.rise + perf.sway * drift.rise)}) rotate(${
-    perf.head * travel.roll + perf.sway * drift.roll
-  } ${PIVOT_X} ${PIVOT_Y})`;
-  const browLift = perf.brow * 3.5;
+  const move = `translate(0 ${-perf.head * travel.rise}) rotate(${perf.head * travel.roll} ${PIVOT_X} ${PIVOT_Y})`;
+  // Bolder than a kit's, and for the cartoon's reason rather than in spite of
+  // it: these brows are two strokes on flat skin with nothing registered to
+  // them, so the only thing limiting the travel is what looks right. A drawing
+  // this simple has to overact slightly to say anything at all.
+  const browLift = perf.brow * 5;
   // Left on the raw loudness, alone among these. It is not a gesture — it is a
   // twelve percent narrowing that happens to the eyes of anyone raising their
   // voice, and putting it on a schedule would make the face blink-adjacent at

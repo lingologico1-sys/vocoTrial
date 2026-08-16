@@ -48,7 +48,7 @@ const BUBBLE_SENTENCES = 2;
  * without the bump, the only people still seeing the old value are the ones who
  * used the page enough to have an opinion. Bump it when a default moves.
  */
-const PREFS_KEY = 'vocotrial.live.v2';
+const PREFS_KEY = 'vocotrial.live.v3';
 
 interface Prefs {
   language: string;
@@ -57,7 +57,7 @@ interface Prefs {
   lookaheadMs: number;
   motion: HeadMotion;
   cadence: MotionCadence;
-  idle: boolean;
+  browBlink: boolean;
 }
 
 /**
@@ -135,8 +135,8 @@ export default function LiveTrial() {
   // so they are separate settings — every combination of the two is legal.
   const [cadence, setCadence] = useState<MotionCadence>(prefs.cadence ?? DEFAULT_CADENCE);
   // Defaulted on, and it is the one setting here that does something while
-  // nobody is speaking at all.
-  const [idle, setIdle] = useState<boolean>(prefs.idle ?? true);
+  // nobody is speaking at all — it rides on the blink, which never stops.
+  const [browBlink, setBrowBlink] = useState<boolean>(prefs.browBlink ?? true);
 
   const [status, setStatus] = useState<SessionStatus>('idle');
   const [detail, setDetail] = useState<string | null>(null);
@@ -189,13 +189,13 @@ export default function LiveTrial() {
           lookaheadMs,
           motion,
           cadence,
-          idle,
+          browBlink,
         } satisfies Prefs),
       );
     } catch {
       // Private browsing. Losing the pick is not worth an error.
     }
-  }, [language, presetKey, driver, lookaheadMs, motion, cadence, idle]);
+  }, [language, presetKey, driver, lookaheadMs, motion, cadence, browBlink]);
 
   useEffect(() => () => session.current?.stop(), []);
 
@@ -367,7 +367,7 @@ export default function LiveTrial() {
           kit={kit}
           motion={motion}
           cadence={cadence}
-          idle={idle}
+          browBlink={browBlink}
           speaking={speaking}
         />
 
@@ -477,16 +477,16 @@ export default function LiveTrial() {
           <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
             <span className="w-16 shrink-0 text-xs text-slate-500">Idle</span>
             <label
-              title="A slight sway on its own clock, running whether or not anyone is speaking. Untick it to see how still the face is between turns."
+              title="About half of all blinks carry a small brow lift, so the face keeps moving between turns without the head drifting. Untick it to see how still the face is with nobody speaking."
               className="flex cursor-help items-center gap-2 text-sm text-slate-300"
             >
               <input
                 type="checkbox"
-                checked={idle}
-                onChange={(event) => setIdle(event.target.checked)}
+                checked={browBlink}
+                onChange={(event) => setBrowBlink(event.target.checked)}
                 className="accent-sky-500"
               />
-              Sway between turns
+              Brows lift with blinks
             </label>
           </div>
 

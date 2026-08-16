@@ -35,8 +35,8 @@ interface SpeakingFaceProps {
   motion?: HeadMotion;
   /** On what schedule it moves. Switchable mid-call, and most worth doing so. */
   cadence?: MotionCadence;
-  /** Whether the head drifts between turns. */
-  idle?: boolean;
+  /** Whether some blinks carry a brow lift. */
+  browBlink?: boolean;
   mouthRef?: React.Ref<SVGCircleElement>;
 }
 
@@ -53,7 +53,7 @@ export default function SpeakingFace({
   kit,
   motion,
   cadence,
-  idle,
+  browBlink,
   mouthRef,
 }: SpeakingFaceProps) {
   const [mouth, setMouth] = useState(RESTING);
@@ -127,7 +127,7 @@ export default function SpeakingFace({
       kit={kit}
       motion={motion}
       cadence={cadence}
-      idle={idle}
+      browBlink={browBlink}
       mouthRef={mouthRef}
     />
   );

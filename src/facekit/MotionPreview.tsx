@@ -161,10 +161,13 @@ export default function MotionPreview({ kit, focus, note }: MotionPreviewProps) 
             kit={kit}
             motion={motion}
             cadence={cadence}
-            // Off here, unlike the live page. This panel is for judging a seam
-            // against a loudness you set, and a drift nobody asked for moves the
-            // very edge being stared at.
-            idle={false}
+            // Off here, unlike the live page, and it costs more to give up than
+            // the head sway this replaced: brow motion is what this panel is
+            // for. It goes anyway, because judging a seam means holding the
+            // brow at a height you chose and looking at it — and a lift
+            // arriving on the blink's clock moves the very edge being stared
+            // at, at a moment nothing on this page asked for.
+            browBlink={false}
           />
         </div>
       </div>

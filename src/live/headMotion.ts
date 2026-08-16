@@ -82,43 +82,27 @@ export const MOTION: Record<HeadMotion, { rise: number; roll: number }> = {
   rise: { rise: 4, roll: 0 },
 };
 
-/**
- * How far the idle sway goes — the same table again, at its own sizes.
+/*
+ * There was an idle head sway here — two detuned sines drifting the whole
+ * picture between turns, on the theory that a face which only ever moves when
+ * it speaks is a photograph the rest of the time. The theory still looks right.
+ * The head was the wrong part of the face to test it on.
  *
- * A separate table rather than a fraction of the one above, and the reason is
- * the bug that produced it: the sway used to be 0.18 of whatever the chosen
- * direction spends, which is a defensible-sounding rule that quietly makes the
- * effect invisible in one of the two modes. At `rise` that is 0.72 units, and
- * the live stage draws this 200-unit frame at 160 pixels — so the whole picture
- * drifted by 0.58 of a pixel at its rare peak and about a third of one the rest
- * of the time. The sway was running the entire time. There was nothing on
- * screen to see.
+ * It failed twice, and the second failure is the instructive one. First it was
+ * sized as a fraction of the speaking travel, which at `rise` worked out to
+ * half a pixel on a 160-pixel stage — running the whole time, invisible the
+ * whole time. Then it was given its own table and made plainly visible, and the
+ * verdict on seeing it was that a head drifting with nobody talking does not
+ * read as a person waiting. It reads as a picture that will not sit still.
  *
- * `swing` got away with it because a rotation does not move every pixel by the
- * same amount: the crown sits 166 units from the pivot against the face's 80,
- * so it travels twice as far as the middle of the picture and the difference
- * between them is itself a cue. A translate has no such gradient — it moves the
- * frame bodily, and a bodily move of half a pixel is nothing at all. Which is
- * why the two modes need different numbers to look like the same amount of
- * movement, and why one multiplier could never have supplied both.
- *
- * Sized so each mode's largest excursion lands around two pixels at the live
- * stage's 160: 0.9° carries the crown 2.6 units, and 3 units of translate
- * carries all of it 3. `rise` gets the larger share of its speaking travel on
- * purpose, to pay for the gradient it does not have.
- *
- * Both stay under their MOTION counterparts, and that is load-bearing rather
- * than tidy. The sway recedes as the performance grows (see `read` below), so
- * the total is `speak·h + idle·(1-h)` — monotonic in h while idle < speak, and
- * therefore still peaking at exactly the MOTION figure and nowhere else. Every
- * corner-clearance number measured against OVERSCAN survives unchanged. Raise
- * either of these past its neighbour above and that stops being true, and the
- * frame starts uncovering at rest rather than at full voice.
+ * The trouble is that a head has no reason to move on its own. It moves because
+ * a person is doing something, so movement with no cause behind it reads as
+ * drift rather than as life. The blink escapes this because a blink is its own
+ * cause — eyes need blinking whatever else is going on. So does a brow: brows
+ * fire with the lids, and a face that lifts them a little as it blinks is doing
+ * something people actually do. That is where the idle life went. See
+ * BROW_FLASH below, and `blinked` on HeadPerformer.
  */
-export const IDLE_MOTION: Record<HeadMotion, { rise: number; roll: number }> = {
-  swing: { rise: 0, roll: 0.9 },
-  rise: { rise: 3, roll: 0 },
-};
 
 /**
  * Where the picture turns.
@@ -231,18 +215,63 @@ export const MOTION_CADENCES: Array<{ id: MotionCadence; label: string; hint: st
 const PHRASE_ATTACK = 0.25;
 const PHRASE_RELEASE = 0.9;
 
+/** One movement's shape, in seconds: up, held, down. */
+interface Envelope {
+  attack: number;
+  hold: number;
+  release: number;
+}
+
+const total = (shape: Envelope) => shape.attack + shape.hold + shape.release;
+
 /**
- * The shape of one gesture, in seconds: up, held, down.
+ * The shape of one gesture.
  *
  * About two thirds of a second in total, which is roughly a nod. Its duration is
  * its own rather than the syllable's — this is the property the blink has and
  * the old motion did not, and it is most of why one reads as a decision and the
  * other as a reflex.
  */
-const GESTURE_ATTACK = 0.12;
-const GESTURE_HOLD = 0.18;
-const GESTURE_RELEASE = 0.35;
-const GESTURE_TOTAL = GESTURE_ATTACK + GESTURE_HOLD + GESTURE_RELEASE;
+const GESTURE: Envelope = { attack: 0.12, hold: 0.18, release: 0.35 };
+
+/**
+ * The shape of a brow lifting with a blink.
+ *
+ * The attack is set against the blink's own 120ms rather than against the
+ * gesture above: the brow arrives while the eyes are still shut, so the two
+ * land as one event instead of as a brow answering a blink. What follows is
+ * deliberately slower than the lids. A blink is over in a tenth of a second and
+ * a brow is not — half a second is what the movement takes on a real face, and
+ * a brow that snapped back on the blink's schedule would read as a twitch.
+ *
+ * The whole thing lasts a little longer than a gesture, which is the right way
+ * round: this is the smaller movement and the more frequent one, so it has to
+ * be the one that does not punctuate.
+ */
+const BROW_FLASH: Envelope = { attack: 0.09, hold: 0.14, release: 0.34 };
+
+/**
+ * How far a blink lifts the brows, as a share of a full speaking lift.
+ *
+ * Under a full lift because a blink is not an emphasis. It is the movement a
+ * face makes while waiting, and the moment it competes with the one the voice
+ * asks for, the voice has stopped being what drives the face.
+ */
+const BROW_FLASH_LIFT = 0.7;
+
+/**
+ * How many blinks carry one, as a probability.
+ *
+ * Not all of them. Blinks land every four seconds or so, and brows moving that
+ * often is the exact failure BROW_LOCKOUT exists to prevent — a face that lifts
+ * its brows every four seconds is not waiting, it is reacting to something you
+ * cannot see. At a half the flashes land about eight seconds apart, which is
+ * BROW_LOCKOUT's seven arrived at from the other direction.
+ *
+ * Rolled per blink rather than scheduled, so it inherits the blink's jitter for
+ * free and cannot fall into a rhythm of its own.
+ */
+const BROW_FLASH_CHANCE = 0.5;
 
 /**
  * What arms a gesture and what fires it, as shares of full volume.
@@ -274,25 +303,6 @@ const BROW_LOCKOUT = 7;
  */
 const LOCKOUT_JITTER = 0.4;
 
-/**
- * How slowly the idle sway wanders. How far is IDLE_MOTION's business.
- *
- * The point of it is that it is *never* off. Between turns the face is
- * otherwise a photograph that blinks, and the rarer the speaking gestures
- * become the more that shows. Two frequencies rather than one, at a ratio that
- * is not a whole number, so the pair drift against each other and the sway
- * never settles into a period you can predict. MotionPreview's loop is built
- * out of the same trick for the same reason.
- *
- * Worth knowing when reading the sizes in IDLE_MOTION: detuning them this way
- * means they are rarely in phase, so the stated excursion is a peak the sway
- * touches now and then rather than an amplitude it holds. Across ten minutes
- * the RMS is 0.51 of it — call the everyday movement half of whatever that
- * table says.
- */
-const IDLE_SLOW_HZ = 0.13;
-const IDLE_FAST_HZ = 0.31;
-
 /** Frame-rate independent approach, as in visemes.ts. */
 function ease(dt: number, tau: number): number {
   return 1 - Math.exp(-dt / tau);
@@ -304,51 +314,53 @@ function smooth(t: number): number {
   return clamped * clamped * (3 - 2 * clamped);
 }
 
-/** What the head and brows are doing this frame, as multipliers on the tables above. */
+/** What the head and brows are doing this frame, as multipliers on MOTION. */
 export interface Performance {
-  /** Multiplies MOTION. Never negative: this is the performance, and it leans one way. */
   head: number;
   /** Never negative: a brow at rest is already as low as that face's brow goes. */
   brow: number;
-  /**
-   * Multiplies IDLE_MOTION, and signed, unlike the other two.
-   *
-   * The sway goes both ways — a head that could only ever move one way from
-   * rest would sway by leaning and returning rather than by swaying. It rides
-   * on its own field rather than folded into `head` so that it can be scaled by
-   * its own table; adding it there is what made it invisible at `rise`.
-   */
-  sway: number;
 }
 
 /**
- * One gesture channel: an envelope that plays out, and a refusal to start again.
+ * One movement channel: an envelope that plays out, and a refusal to start again.
  *
  * Stateful for the reason MouthAnalyser is — a schedule is memory of what has
  * already happened, and it is the entire difference between this and reading a
  * number off the current frame.
+ *
+ * The lockout defaults to none, which is the brow flash's case rather than an
+ * omission: that channel is fired by the blink, and the blink's own jittered
+ * gap is already a lockout that nothing can hurry. Two would only argue.
  */
 class Channel {
-  /** Seconds since this gesture fired. Starts past the end, so nothing is playing. */
-  private since = GESTURE_TOTAL;
+  /** Seconds since this fired. Starts past the end, so nothing is playing. */
+  private since: number;
   /** Seconds still to wait. */
   private locked = 0;
+  private readonly span: number;
 
-  constructor(private readonly lockout: number) {}
+  constructor(
+    private readonly shape: Envelope,
+    private readonly lockout = 0,
+  ) {
+    this.span = total(shape);
+    this.since = this.span;
+  }
 
   advance(dt: number, trigger: boolean): number {
     this.since += dt;
     this.locked = Math.max(0, this.locked - dt);
 
-    if (trigger && this.locked === 0 && this.since >= GESTURE_TOTAL) {
+    if (trigger && this.locked === 0 && this.since >= this.span) {
       this.since = 0;
       this.locked = this.lockout * (1 - LOCKOUT_JITTER + Math.random() * 2 * LOCKOUT_JITTER);
     }
 
-    if (this.since >= GESTURE_TOTAL) return 0;
-    if (this.since < GESTURE_ATTACK) return smooth(this.since / GESTURE_ATTACK);
-    if (this.since < GESTURE_ATTACK + GESTURE_HOLD) return 1;
-    return 1 - smooth((this.since - GESTURE_ATTACK - GESTURE_HOLD) / GESTURE_RELEASE);
+    const { attack, hold, release } = this.shape;
+    if (this.since >= this.span) return 0;
+    if (this.since < attack) return smooth(this.since / attack);
+    if (this.since < attack + hold) return 1;
+    return 1 - smooth((this.since - attack - hold) / release);
   }
 }
 
@@ -366,16 +378,36 @@ class Channel {
 export class HeadPerformer {
   private phrase = 0;
   private armed = true;
-  private elapsed = 0;
-  private readonly headChannel = new Channel(HEAD_LOCKOUT);
-  private readonly browChannel = new Channel(BROW_LOCKOUT);
+  private readonly headChannel = new Channel(GESTURE, HEAD_LOCKOUT);
+  private readonly browChannel = new Channel(GESTURE, BROW_LOCKOUT);
+  private readonly flashChannel = new Channel(BROW_FLASH);
+  /** Set by `blinked`, spent by the next `read`. */
+  private flashPending = false;
+
+  /**
+   * A blink just started; the brows may care.
+   *
+   * An event pushed in rather than a schedule kept here, because the blink's
+   * clock belongs to the component that draws the lids and there must be
+   * exactly one of it. A second timer in here agreeing with that one most of
+   * the time would be worse than no coupling at all — the whole point is that
+   * the brow and the lids are one movement, and two clocks would put them a
+   * few tens of milliseconds apart at random, which is precisely how a face
+   * stops looking like it means it.
+   *
+   * The dice live here rather than at the call site so that everything
+   * deciding how brows behave is in one file. The caller's job is to report
+   * that an eye closed.
+   */
+  blinked(): void {
+    if (Math.random() < BROW_FLASH_CHANCE) this.flashPending = true;
+  }
 
   /**
    * @param dt Seconds since the previous frame.
    * @param level Smoothed loudness from the mouth analyser, 0 to 1.
    */
-  read(dt: number, level: number, cadence: MotionCadence, idle: boolean): Performance {
-    this.elapsed += dt;
+  read(dt: number, level: number, cadence: MotionCadence): Performance {
     this.phrase += (level - this.phrase) * ease(dt, level > this.phrase ? PHRASE_ATTACK : PHRASE_RELEASE);
 
     // Fired from the phrase envelope rather than from `level`, which is what
@@ -392,25 +424,24 @@ export class HeadPerformer {
     const headGesture = this.headChannel.advance(dt, fire);
     const browGesture = this.browChannel.advance(dt, fire);
 
+    // Advanced every frame like the two above, and spent whether or not it
+    // fires, so a blink cannot be banked while the envelope is already busy and
+    // cashed in a second later with nothing to explain it.
+    const flash = this.flashChannel.advance(dt, this.flashPending) * BROW_FLASH_LIFT;
+    this.flashPending = false;
+
     const head =
       cadence === 'syllable' ? level : cadence === 'phrase' ? this.phrase : headGesture;
-    const brow =
+    const spoken =
       cadence === 'syllable' ? level : cadence === 'phrase' ? this.phrase : browGesture;
 
-    // Receding rather than added: the sway is what the head does when nothing
-    // else is asking it to move, so it gets out of the way of anything that is.
-    // Holding it at full through a loud gesture would push the picture past the
-    // clearance the overscan was measured against — and, less obviously, would
-    // put a wobble on top of the one deliberate move `gesture` gets to make.
-    const sway = idle ? this.wander() * (1 - Math.min(1, head)) : 0;
+    // The louder of the two rather than their sum, and it matters most in the
+    // case that looks harmless: a blink landing mid-phrase. Summed, the brows go
+    // somewhere neither movement asked for and the lift reads as surprise; taken
+    // as a maximum, the flash is simply invisible whenever the voice is already
+    // asking for more, which is the correct thing for the smaller movement to do.
+    const brow = Math.max(spoken, flash);
 
-    return { head, brow, sway };
-  }
-
-  /** Two slow waves at an irrational-ish ratio, summing to at most 1. */
-  private wander(): number {
-    const slow = Math.sin(2 * Math.PI * IDLE_SLOW_HZ * this.elapsed);
-    const fast = Math.sin(2 * Math.PI * IDLE_FAST_HZ * this.elapsed + 1.7);
-    return 0.6 * slow + 0.4 * fast;
+    return { head, brow };
   }
 }

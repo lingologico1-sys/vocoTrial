@@ -66,8 +66,8 @@ interface StageProps {
   motion?: HeadMotion;
   /** On what schedule it moves. See MOTION_CADENCES in headMotion.ts. */
   cadence?: MotionCadence;
-  /** Whether the head drifts between turns. */
-  idle?: boolean;
+  /** Whether some blinks carry a brow lift. */
+  browBlink?: boolean;
   /** Dims the agent balloon once the words are no longer being said. */
   speaking: boolean;
 }
@@ -81,7 +81,7 @@ export default function Stage({
   kit,
   motion,
   cadence,
-  idle,
+  browBlink,
   speaking,
 }: StageProps) {
   const stage = useRef<HTMLDivElement>(null);
@@ -174,7 +174,7 @@ export default function Stage({
               kit={kit}
               motion={motion}
               cadence={cadence}
-              idle={idle}
+              browBlink={browBlink}
               mouthRef={mouth}
             />
           </div>
