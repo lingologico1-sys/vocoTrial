@@ -269,6 +269,30 @@ const MBP_COMPRESSES = [
   'slightly with the compression, but the mouth does not slide, tilt or grow.',
 ].join(' ');
 
+/**
+ * How teeth are drawn, on the two poses that show any.
+ *
+ * "A clean row of upper teeth as one simple white shape" was meant to say this
+ * and does not: a row of teeth *is* a row, so a generator drawing each tooth
+ * with its own outline and a scalloped edge between them has honoured every word
+ * of it. Nothing there constrains the lower edge, so the edge came back straight
+ * on some runs and jagged on others — and since the shapes are cut from separate
+ * generations, the two land in the same kit and the mouth grows and loses its
+ * teeth as it talks.
+ *
+ * So the band is described as the mark it is rather than as the anatomy it
+ * depicts, which is the same lesson the closed eye taught in eyesClosedPrompt.
+ * A single flat white shape is also simply what this art style would draw: the
+ * portrait has no line work fine enough to separate one tooth from the next, and
+ * at the size a mouth patch occupies there is no room for it.
+ */
+const TEETH_BAND = [
+  'Draw the teeth as one single unbroken white band with a flat, straight lower',
+  'edge: no individual teeth, no dividing lines, outlines or gaps between them,',
+  'and no scalloped, wavy, pointed or jagged edge anywhere along it.',
+  'The band is the same plain white across its whole width.',
+].join(' ');
+
 /** What holds still when the jaw holds still, which is most of the time. */
 const FACE_FIXED = 'Do not change the nose, chin, cheeks or jawline.';
 
@@ -297,7 +321,8 @@ const JAW_DROPS = [
 
 const MOUTH_NOTE = [CORNERS_FIXED, MOUTH_STYLE, FACE_FIXED].join(' ');
 const MBP_NOTE = [MBP_COMPRESSES, MOUTH_STYLE, FACE_FIXED].join(' ');
-const OPEN_NOTE = [CORNERS_FIXED, MOUTH_STYLE, JAW_DROPS].join(' ');
+const TEETH_NOTE = [CORNERS_FIXED, MOUTH_STYLE, TEETH_BAND, FACE_FIXED].join(' ');
+const OPEN_NOTE = [CORNERS_FIXED, MOUTH_STYLE, TEETH_BAND, JAW_DROPS].join(' ');
 
 const mouth =
   (shape: string, note: string = MOUTH_NOTE) =>
@@ -343,7 +368,8 @@ export const SLOTS: Slot[] = [
     label: 'Spread (EE)',
     region: 'mouth',
     prompt: mouth(
-      'Open the lips into a wide, shallow slot showing a clean row of upper teeth as one simple white shape. The jaw stays almost closed, so the opening is wide but not tall.',
+      'Open the lips into a wide, shallow slot showing the upper teeth as one simple white shape. The jaw stays almost closed, so the opening is wide but not tall.',
+      TEETH_NOTE,
     ),
   },
   {
@@ -359,7 +385,7 @@ export const SLOTS: Slot[] = [
     label: 'Open (AA)',
     region: 'mouth',
     prompt: mouth(
-      'Drop the jaw to open the mouth into a rounded oval about as tall as the closed mouth is wide, and no wider than the closed mouth. Show one simple row of upper teeth along the top and a plain dark interior below.',
+      'Drop the jaw to open the mouth into a rounded oval about as tall as the closed mouth is wide, and no wider than the closed mouth. Show the upper teeth as one simple white shape along the top, and a plain dark interior below.',
       OPEN_NOTE,
     ),
   },
