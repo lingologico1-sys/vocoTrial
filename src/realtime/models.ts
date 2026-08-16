@@ -32,21 +32,23 @@ export interface ModelChoice {
 // First entry per provider is that provider's default.
 export const MODELS: ModelChoice[] = [
   {
-    key: 'gemini-flash-31',
-    provider: 'gemini',
-    label: 'Gemini 3.1 Flash Live',
-    id: 'gemini-3.1-flash-live-preview',
-    // Confirmed against AI Studio, which is no longer the surface these run on.
-    // See the note below on what the move to Vertex did to both Gemini ids.
-    unverified: true,
-  },
-  {
     key: 'gemini-native-audio',
     provider: 'gemini',
     label: 'Gemini 2.5 Flash Native Audio',
-    id: 'gemini-2.5-flash-native-audio-latest',
+    id: 'gemini-live-2.5-flash-preview-native-audio-09-2025',
+    // The only Live model Vertex serves this key, out of nine spellings tried
+    // (POST /api/live/models). It answers generateContent with 400 rather than
+    // 404 — the id is real and bidi-only, which is exactly what a Live model
+    // should say. Still flagged until a socket reaches setupComplete, because
+    // existing and accepting a handshake are different claims.
     unverified: true,
   },
+  // There is no 3.1 Flash Live here. `gemini-3.1-flash-live-preview` was the
+  // confirmed AI Studio id and 404s on Vertex, as do gemini-live-3.1-flash,
+  // gemini-live-3.1-flash-preview, every 2.5 spelling but the one above, and
+  // gemini-2.0-flash-live-preview-04-09. Model availability is regional and
+  // this key resolves to us-central1, so re-run /api/live/models before
+  // concluding a 3.1 Live model does not exist anywhere.
   {
     key: 'openai-realtime',
     provider: 'openai',
@@ -69,14 +71,12 @@ export const MODELS: ModelChoice[] = [
  * Unchecked, not suspect. A model id can only be confirmed by a call that
  * actually connects, because nothing earlier in the chain looks at it:
  *
- * Both Gemini ids carry the flag again as of the move to Vertex AI. They were
- * confirmed — twelve connections reached `setupComplete` — but against AI
- * Studio, and that confirmation does not travel: Vertex publishes its Live
- * models under different ids, so `gemini-2.5-flash-native-audio-latest` may
- * simply not exist there. Do not clear the flags because the calls used to
- * work; run POST /api/live/models against the new surface, correct the ids to
- * whatever it reports, then clear them on a connection that reaches
- * `setupComplete`.
+ * The Gemini entry carries the flag as of the move to Vertex AI. The two ids
+ * that were here before had reached `setupComplete` twelve times out of twelve
+ * — against AI Studio, and that confirmation did not travel: both 404 on
+ * Vertex, which publishes its Live models under quite different names. The id
+ * here replaced them because Vertex answered for it and for nothing else.
+ * Clear the flag on a connection that reaches `setupComplete`, not before.
  *
  *
  *  - Neither provider validates the model when issuing a credential. Google's
@@ -91,13 +91,13 @@ export const MODELS: ModelChoice[] = [
  * placed a call and it connected. They are untouched by the Vertex move, which
  * is a Google-side change only.
  *
- * The Gemini ids came from Google's own catalogue rather than from guessing —
- * POST /api/live/models asks the live surface directly. Use it before inventing
- * an id: two rounds of plausible-looking guesses (gemini-live-3.1-flash-preview,
- * gemini-live-2.5-flash-preview) were both wrong on AI Studio, and the word
- * order is not what you would expect. Worth knowing now that Vertex is the
- * surface: those two rejected spellings are close to how Vertex *does* name its
- * Live models, so the id that is wrong here may well be right there.
+ * The Gemini id came from asking rather than guessing — POST /api/live/models
+ * probes candidate ids against the live surface. Use it before inventing one.
+ * Nine spellings went in and one came back, and it was not the one anybody
+ * would have written down: the two rejected AI Studio guesses
+ * (gemini-live-3.1-flash-preview, gemini-live-2.5-flash-preview) are *closer*
+ * to the winner than either id this project actually shipped, and still wrong.
+ * The date suffix is load-bearing.
  */
 
 export function findModel(key: string): ModelChoice | undefined {

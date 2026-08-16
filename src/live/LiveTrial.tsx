@@ -22,7 +22,7 @@ import { tailSentences } from './text';
  */
 
 /** The only model this page runs. It is the thing being tried out. */
-const MODEL_KEY = 'gemini-flash-31';
+const MODEL_KEY = 'gemini-native-audio';
 
 /** As App.tsx: audio bills per second of connection, so a forgotten tab costs. */
 const IDLE_TIMEOUT_MS = 90_000;

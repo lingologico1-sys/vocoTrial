@@ -59,12 +59,12 @@ export interface ImageModelChoice {
 /**
  * WHAT "UNVERIFIED" MEANS HERE
  *
- * Unchecked, not suspect — the same meaning realtime/models.ts gives it. Both
- * Gemini entries carry the flag: Pro because its id was moved to GA, Flash
- * because the move to Vertex AI invalidated the call that confirmed it. A model
- * id belongs to a surface, and "it returned an image on AI Studio" says nothing
- * about whether Vertex publishes that id at all. The two OpenAI entries are
- * untouched. Anything added later starts flagged, because an image endpoint
+ * Unchecked, not suspect — the same meaning realtime/models.ts gives it. Nothing
+ * here is flagged today: both Gemini ids were re-confirmed against Vertex after
+ * the move, and both OpenAI ids were never affected by it. A model id belongs to
+ * a surface, so a flag goes back on any entry whose surface changes — "it
+ * returned an image on AI Studio" says nothing about whether Vertex publishes
+ * that id. Anything added later starts flagged, because an image endpoint
  * rejects an unknown model only at generation time and there is no earlier check.
  *
  * Clear the flag on an entry once you have seen it generate. Do not clear it
@@ -143,13 +143,10 @@ export const IMAGE_MODELS: ImageModelChoice[] = [
     id: 'gemini-3-pro-image',
     masked: false,
     usdPerImage: 0.134,
-    unverified: true,
-    // Moved off `-preview` onto the GA id, untested here but generating daily in
-    // PanelForge next door — and now on PanelForge's surface and keys too, which
-    // is the strongest reason to expect this one to go through. The preview
-    // endpoint was the leading suspect for why Pro exhausted so much sooner than
-    // Flash: same model, thinner capacity. The flag is the honest state until a
-    // call comes back — clear it then.
+    // Confirmed on Vertex: /api/live/models probed generateContent and it
+    // generated. The preview endpoint was the leading suspect for why Pro
+    // exhausted so much sooner than Flash — same model, thinner capacity — so
+    // watch whether that survived the move to the GA id and GCP quota.
     //
     // What the preview id did, for comparison once this one has run: returned an
     // image in about forty-seven seconds, the slowest of the four and the most
@@ -163,12 +160,11 @@ export const IMAGE_MODELS: ImageModelChoice[] = [
     id: 'gemini-2.5-flash-image',
     masked: false,
     usdPerImage: 0.039,
-    unverified: true,
-    // Confirmed by a call that returned an image in about eleven seconds — on
-    // AI Studio, before the move. Vertex publishes a Flash image model too, but
-    // out of its own catalogue: if this 404s, the id is the thing to check
-    // first, and PanelForge's Flash entry names a different one
-    // (gemini-3.1-flash-image) against the very same project.
+    // Confirmed twice over: an image in about eleven seconds on AI Studio, and
+    // a generateContent probe on Vertex after the move. Worth knowing that
+    // PanelForge's own Flash entry names a different model on this same project
+    // (gemini-3.1-flash-image), which also exists here — a candidate to add if
+    // this rig ever wants a third Gemini image model to compare.
   },
 ];
 
