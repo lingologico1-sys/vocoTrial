@@ -30,11 +30,18 @@
  *
  *  - `swing` rotates and does not translate. The pivot sits low in the frame, so
  *    the foot of the picture stays where it is and the head arcs over it — which
- *    is, near enough, what a neck does.
- *  - `rise` translates and barely rotates. This is what the face did originally.
- *    Its failing is that a frame sliding bodily upward is what a *camera* does,
- *    not a person; it is kept because that is a matter of taste and the only
- *    honest way to settle it is to flip between them on the same sentence.
+ *    is, near enough, what a neck does. At the radius the face sits at, that arc
+ *    is side to side: a fraction of a unit of vertical drop against four of
+ *    lateral travel.
+ *  - `rise` translates and does not rotate. A frame sliding bodily upward is what
+ *    a *camera* does, not a person; it is kept because that is a matter of taste
+ *    and the only honest way to settle it is to flip between them on the same
+ *    sentence.
+ *
+ * They are deliberately kept pure and perpendicular — one purely vertical, one
+ * purely lateral. An earlier `rise` carried 0.8° of roll alongside its translate,
+ * which put a little of each mode into the other and left the switch feeling like
+ * two tunings of one setting rather than a choice between two.
  */
 export type HeadMotion = 'swing' | 'rise';
 
@@ -49,23 +56,30 @@ export const HEAD_MOTIONS: Array<{ id: HeadMotion; label: string; hint: string }
   {
     id: 'rise',
     label: 'Rise',
-    hint: 'Lifts the whole frame straight up with almost no rotation. The original behaviour, and the one that reads as a camera bump rather than a person.',
+    hint: 'Lifts the whole frame straight up and does not rotate at all. Reads as a camera bump rather than a person.',
   },
 ];
 
 /**
  * How far each mode goes at full volume: units of translate, degrees of rotate.
  *
- * The rise figure is unchanged from the version that shipped for months, so
- * choosing `rise` gets back exactly the old face rather than an approximation of
- * it. The swing figure is much larger than the 0.8° it replaces because rotation
- * is now carrying the whole performance instead of garnishing a translate — at
- * 0.8° it was, in practice, invisible, which is why every complaint about the
- * old motion was really a complaint about the translate.
+ * Exactly one number per mode is non-zero, which is the whole point of the pair.
+ *
+ * The 4 units of translate are unchanged from the version that shipped for
+ * months; what `rise` has lost since is the 0.8° of roll that used to ride along
+ * with it. Dropping it costs nothing visible — at that angle the face moves 1.4
+ * units laterally, under a third of the translate it was hiding behind, which is
+ * why every complaint about the old motion was really a complaint about the
+ * translate. It buys a switch whose two positions disagree about direction
+ * rather than about proportions.
+ *
+ * The swing figure is much larger than that 0.8° because rotation is now
+ * carrying the whole performance instead of garnishing a translate. Read it
+ * together with OVERSCAN below: the two are one setting wearing two names.
  */
 export const MOTION: Record<HeadMotion, { rise: number; roll: number }> = {
   swing: { rise: 0, roll: 2.5 },
-  rise: { rise: 4, roll: 0.8 },
+  rise: { rise: 4, roll: 0 },
 };
 
 /**

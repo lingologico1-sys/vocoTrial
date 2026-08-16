@@ -143,10 +143,11 @@ export default function Face({
    * The move, as one transform both branches share.
    *
    * SVG applies a transform list right to left, so this rotates about the pivot
-   * and then translates — the order the face has always used, which is what lets
-   * `rise` reproduce the old behaviour exactly rather than approximately. At
-   * these angles the other order differs by a fraction of a unit, which is
-   * precisely why it is worth pinning down rather than leaving to chance.
+   * and then translates — the order the face has always used. Every mode in
+   * MOTION currently leaves one of the two terms at zero, so one half of this is
+   * always an identity and the order cannot be observed; it is written down
+   * anyway, because a mode that ever moves both at once would be reading its
+   * feel off an order nobody chose.
    */
   const move = `translate(0 ${-level * travel.rise}) rotate(${level * travel.roll} ${PIVOT_X} ${PIVOT_Y})`;
   const browLift = level * 3.5;
