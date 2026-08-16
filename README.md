@@ -261,11 +261,16 @@ their replacement ships, and a replacement for the `-09-2025` one already exists
 on AI Studio. Note the near-misses differ from the real id by a single word or a
 date — do not guess.
 
-**Sunset watch: the 2.5 family retires 2026-10-16**, and Vertex currently
-publishes no Gemini 3 or 3.1 Live model to succeed it. Re-run
-`/api/live/models` before then rather than finding out on the day. It probes
-candidates with `generateContent`: `404` is a wrong id, `400` is a real id that
-is bidi-only, and neither is billed.
+**The 2026-10-16 retirement does not apply here.** That date covers
+`gemini-2.5-flash`, `-pro` and `-flash-lite` — the standard text models, none of
+which this app uses. `gemini-live-2.5-flash-native-audio` is GA with no
+published retirement date, and the Live audio models were left out of that
+sweep. Do not let "Gemini 2.5 retires in October" propagate onto this entry.
+
+Still worth a periodic check, because Vertex publishes no Gemini 3 or 3.1 Live
+model to migrate *to* if that ever changes. `/api/live/models` probes candidates
+with `generateContent`: `404` is a wrong id, `400` is a real id that is
+bidi-only, and neither is billed.
 
 ### Why Gemini is proxied and OpenAI is not
 

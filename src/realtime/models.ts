@@ -60,10 +60,14 @@ export const MODELS: ModelChoice[] = [
     // ships, and a replacement (native-audio-preview-12-2025) already exists on
     // AI Studio. The undated GA alias follows the 2.5 family lifecycle instead.
     //
-    // That lifecycle still ends: the 2.5 family retires 2026-10-16. Nothing
-    // succeeds it here yet — Vertex serves no Gemini 3 or 3.1 Live model under
-    // any spelling tried, so plan on re-probing before then rather than
-    // discovering it on the day.
+    // GA, and with no published retirement date. The 2026-10-16 retirement that
+    // gets quoted for "Gemini 2.5" is for gemini-2.5-flash / -pro / -flash-lite
+    // — the standard text models, none of which this app uses. Do not read that
+    // date onto this entry; the Live audio models were not in that sweep.
+    //
+    // Which is not the same as permanent. Vertex serves no Gemini 3 or 3.1 Live
+    // model under any spelling tried, so there is nothing here to migrate *to*
+    // if that changes — re-probe with /api/live/models rather than assume.
   },
   {
     key: 'gemini-flash-31',
