@@ -179,6 +179,16 @@ export const LASH_STYLES: { id: LashStyle; label: string; hint: string }[] = [
  * — the blink grew a pair of lashes the open eye did not have, so the eye
  * changed species every time it closed. Preserving what is there is the only
  * neutral answer; removing and reducing are choices, and choices get a control.
+ *
+ * Only "as drawn" is allowed to depend on what the input eye shows, because
+ * depending on it is the whole of what that option means. The other two name a
+ * mark absolutely, and "minimal" had to be rewritten to do so: "keep the lashes
+ * minimal" reduces whatever it happens to find, so an eye with the larger fan —
+ * or the one whose fan is cut through by the edge of its box, which is a fact
+ * about where a rectangle was dragged rather than about the face — keeps more of
+ * it, and the two eyes of one portrait came back differently from an identical
+ * prompt. Naming the stroke to draw is the same fix the arc and the teeth band
+ * each needed, for the same reason.
  */
 function lashClause(lashes: LashStyle): string {
   if (lashes === 'none') {
@@ -186,8 +196,10 @@ function lashClause(lashes: LashStyle): string {
   }
   if (lashes === 'minimal') {
     return [
-      'Keep the lashes on the closed eye minimal: a thin lash line only, with no long,',
-      'curled, fanned or separately drawn lashes.',
+      'Draw the closed eye with one thin lash line and nothing more: a single plain',
+      'tapered stroke following the arc, with nothing curving out from it along its',
+      'length or at the outer corner — no long, curled, fanned, clustered or separately',
+      'drawn lashes, whatever the open eye shows.',
     ].join(' ');
   }
   return [
