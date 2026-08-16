@@ -58,7 +58,7 @@ function toBytes(base64: string): Uint8Array {
 
 type Attempt =
   | { ok: true; image: string }
-  | { ok: false; status: number; detail: string; reason?: string };
+  | { ok: false; status: number; detail: string; reason?: string; retryAfterMs?: number };
 
 /**
  * The provider's own words for why it declined, and nothing else.
@@ -80,6 +80,46 @@ function trimmed(value: unknown): string | undefined {
   if (typeof value !== 'string' || !value.trim()) return undefined;
   const text = value.trim();
   return text.length > REASON_LIMIT ? `${text.slice(0, REASON_LIMIT)}…` : text;
+}
+
+/**
+ * When the provider says to come back, in milliseconds.
+ *
+ * Worth carrying through rather than guessing at, because the guess is the part
+ * of the retry that is hardest to get right: the client's quota schedule waits
+ * seventy seconds because that is the shortest window a provider is likely to
+ * meter against, not because anything told it so. A stated delay replaces an
+ * assumption with a fact, and usually a shorter one.
+ *
+ * Two sources, both optional and neither reliable. Google puts a RetryInfo in
+ * the error's `details` — a protobuf duration, so "27s" or "1.5s" rather than a
+ * number. Both providers may also send a Retry-After header. Whatever turns up
+ * first is used; when neither does, the caller keeps its own schedule.
+ */
+function durationMs(value: unknown): number | undefined {
+  if (typeof value !== 'string') return undefined;
+  const seconds = Number(value.endsWith('s') ? value.slice(0, -1) : value);
+  return Number.isFinite(seconds) && seconds >= 0 ? Math.round(seconds * 1000) : undefined;
+}
+
+function retryAfterHeader(response: Response): number | undefined {
+  const raw = response.headers.get('retry-after');
+  if (!raw) return undefined;
+  const seconds = Number(raw);
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.round(seconds * 1000);
+  // The header's other legal form is an HTTP date.
+  const at = Date.parse(raw);
+  return Number.isNaN(at) ? undefined : Math.max(0, at - Date.now());
+}
+
+function googleRetryDelayMs(body: unknown): number | undefined {
+  const error = (Array.isArray(body) ? body[0] : body) as
+    | { error?: { details?: { '@type'?: string; retryDelay?: string }[] } }
+    | undefined;
+  const info = error?.error?.details?.find((entry) =>
+    entry?.['@type']?.endsWith('google.rpc.RetryInfo'),
+  );
+  return durationMs(info?.retryDelay);
 }
 
 /**
@@ -114,7 +154,12 @@ async function generateOpenAi(
   });
 
   if (!upstream.ok) {
-    return { ok: false, status: upstream.status, detail: await upstream.text() };
+    return {
+      ok: false,
+      status: upstream.status,
+      detail: await upstream.text(),
+      retryAfterMs: retryAfterHeader(upstream),
+    };
   }
 
   const body = (await upstream.json()) as { data?: { b64_json?: string }[] };
@@ -168,6 +213,7 @@ async function generateGemini(
   if (!upstream.ok) {
     const detail = await upstream.text();
     let reason: string | undefined;
+    let stated: number | undefined;
     try {
       // Vertex sometimes wraps the error in a one-element array where AI Studio
       // returned a bare object. Unwrapping it is what keeps RESOURCE_EXHAUSTED
@@ -177,10 +223,17 @@ async function generateGemini(
         | { error?: { status?: string } }[];
       const first = Array.isArray(parsed) ? parsed[0] : parsed;
       reason = trimmed(first?.error?.status);
+      stated = googleRetryDelayMs(parsed);
     } catch {
       reason = undefined;
     }
-    return { ok: false, status: upstream.status, detail, reason };
+    return {
+      ok: false,
+      status: upstream.status,
+      detail,
+      reason,
+      retryAfterMs: stated ?? retryAfterHeader(upstream),
+    };
   }
 
   const body = (await upstream.json()) as {
@@ -300,6 +353,10 @@ export async function onRequestPost(
         code: 'upstream',
         status: attempt.status,
         reason: reason ?? null,
+        // Absent unless the provider actually said one. The client treats it as
+        // a replacement for its own schedule, so an invented figure here would
+        // be worse than none — see postWithRetry in facekit/generate.ts.
+        retryAfterMs: attempt.retryAfterMs ?? null,
       },
       502,
     );

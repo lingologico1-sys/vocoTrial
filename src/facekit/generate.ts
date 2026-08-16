@@ -50,6 +50,8 @@ export class GenerateError extends Error {
     readonly status: number,
     readonly code?: string,
     readonly reason?: string,
+    /** The provider's own stated wait, when it gave one. Milliseconds. */
+    readonly retryAfterMs?: number,
   ) {
     super(message);
     this.name = 'GenerateError';
@@ -95,6 +97,7 @@ async function post(body: unknown, signal?: AbortSignal): Promise<{ image: strin
     error?: string;
     code?: string;
     reason?: string;
+    retryAfterMs?: number | null;
   } | null;
 
   if (!response.ok || !payload?.image) {
@@ -103,6 +106,7 @@ async function post(body: unknown, signal?: AbortSignal): Promise<{ image: strin
       response.status,
       payload?.code,
       payload?.reason,
+      typeof payload?.retryAfterMs === 'number' ? payload.retryAfterMs : undefined,
     );
   }
 
@@ -129,6 +133,32 @@ const RETRY_DELAYS_MS = [6_000, 20_000, 45_000];
 
 /** Long enough that the first retry lands beyond any per-minute window. */
 const QUOTA_DELAYS_MS = [70_000, 150_000];
+
+/**
+ * How far a wait is spread either side of its scheduled length.
+ *
+ * Not decoration. Every slot has its own button, so a kit is often several
+ * generations fired within a second or two of each other, against a quota
+ * metered per minute across the whole project. When that pool is empty they all
+ * fail together — and on a fixed schedule they would then all wait exactly
+ * seventy seconds and arrive together again, which is the same burst that
+ * emptied it, retried. Spreading them is what lets the pool refill into
+ * requests arriving one at a time rather than in a wave.
+ */
+const JITTER = 0.3;
+
+function spread(ms: number): number {
+  return Math.round(ms * (1 - JITTER + Math.random() * 2 * JITTER));
+}
+
+/**
+ * A ceiling on a wait the provider asked for.
+ *
+ * The stated delay arrives from outside and is sanity-checked nowhere else. A
+ * quarter of an hour is not a wait, it is a hung button — better to fail and
+ * let the press be repeated deliberately.
+ */
+const MAX_STATED_MS = 300_000;
 
 function wait(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -169,9 +199,21 @@ async function postWithRetry(
       if (!failure?.retryable) throw error;
       if (attempt === 0 && failure.exhausted) schedule = QUOTA_DELAYS_MS;
 
-      const delay = schedule[attempt];
-      if (delay === undefined) throw error;
-      await wait(delay, signal);
+      // The schedule still decides how many attempts there are, even when the
+      // provider is dictating their spacing — otherwise a stated one-second
+      // delay would buy an unbounded number of tries.
+      const scheduled = schedule[attempt];
+      if (scheduled === undefined) throw error;
+
+      // A stated delay is a floor rather than an answer. "Retry-After" means do
+      // not come back before this, not that the pool refills exactly then — so
+      // it can lengthen a wait the schedule guessed too short, and never
+      // shorten one. Taking it literally would be worse than ignoring it: a
+      // Vertex 429 can name a few seconds while the quota it belongs to is
+      // metered over a minute, and obeying that spends both attempts inside the
+      // window that was already closed.
+      const stated = Math.min(failure.retryAfterMs ?? 0, MAX_STATED_MS);
+      await wait(spread(Math.max(scheduled, stated)), signal);
     }
   }
 }
