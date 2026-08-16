@@ -16,6 +16,13 @@
  * Deliberately in-memory only. It is a stethoscope, not a record: a reload is
  * the right way to clear it, and nothing here should outlive the session that
  * can still act on it.
+ *
+ * Not `diagnostics.ts`, which is what it was and what it wants to be called:
+ * DiagnosticsPanel.tsx sat beside it, and on a case-insensitive filesystem the
+ * two names are one name. TypeScript resolved the panel's import to this module,
+ * found no default export, and failed the whole project — a build error a long
+ * way from anything either file had done. Renaming both is what stops it coming
+ * back, so do not quietly restore either half.
  */
 
 /**

@@ -8,7 +8,7 @@ import {
   maskFor,
   normalise,
 } from './canvas';
-import { beginRun, type RunHandle } from './diagnostics';
+import { beginRun, type RunHandle } from './runLog';
 import { findImageModel } from './imageModels';
 import type { Box } from './kit';
 import { PREAMBLE } from './slots';

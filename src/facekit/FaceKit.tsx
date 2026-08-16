@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import BoxPicker from './BoxPicker';
-import Diagnostics from './Diagnostics';
+import DiagnosticsPanel from './DiagnosticsPanel';
 import Filmstrip from './Filmstrip';
 import MotionPreview from './MotionPreview';
 import { composite, dataUrlToBlob, fileToDataUrl, normalise, patchDivergence } from './canvas';
@@ -1282,7 +1282,7 @@ export default function FaceKit() {
           failed is most worth reading after the kit it belonged to has been
           closed, and the log outlives the kit either way.
         */}
-        <Diagnostics />
+        <DiagnosticsPanel />
       </div>
     </div>
   );

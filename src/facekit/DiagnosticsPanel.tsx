@@ -6,7 +6,7 @@ import {
   snapshot,
   subscribe,
   type Run,
-} from './diagnostics';
+} from './runLog';
 
 /**
  * The generation log, as a drawer at the foot of the page.
@@ -45,7 +45,7 @@ function tone(run: Run): string {
   return run.outcome === 'ok' ? 'text-emerald-400' : 'text-rose-400';
 }
 
-export default function Diagnostics() {
+export default function DiagnosticsPanel() {
   const runs = useSyncExternalStore(subscribe, snapshot);
   const [open, setOpen] = useState(false);
   const [now, setNow] = useState(() => Date.now());
