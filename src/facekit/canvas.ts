@@ -72,6 +72,108 @@ export async function fileToDataUrl(file: File): Promise<string> {
 }
 
 /**
+ * The whole square, as a box.
+ *
+ * So that the one operation that works on a full frame rather than a slot can
+ * use the same clipping code as everything else instead of a near-copy of it.
+ */
+export const FULL_FRAME: Box = { x: 0, y: 0, width: CANVAS_EDGE, height: CANVAS_EDGE };
+
+/**
+ * Whether an image has anything less than fully opaque in it.
+ *
+ * The gate on both of the cut-out compensations below. A portrait with a real
+ * photographed background is the ordinary case and must cost nothing extra —
+ * in particular it must not be re-encoded through a canvas for a correction
+ * that would change no pixel.
+ */
+async function hasAlpha(src: string, box?: Box): Promise<boolean> {
+  const image = await loadImage(src);
+  const region = box ?? { x: 0, y: 0, width: CANVAS_EDGE, height: CANVAS_EDGE };
+  const ctx = context(region.width, region.height);
+  ctx.drawImage(
+    image,
+    region.x,
+    region.y,
+    region.width,
+    region.height,
+    0,
+    0,
+    region.width,
+    region.height,
+  );
+  const { data } = ctx.getImageData(0, 0, region.width, region.height);
+  for (let i = 3; i < data.length; i += 4) if (data[i] < 255) return true;
+  return false;
+}
+
+/**
+ * Puts an opaque backdrop behind a cut-out portrait, for sending only.
+ *
+ * A portrait with no background is a shape these models handle badly. Nothing
+ * in either provider's contract says what happens to the alpha channel of an
+ * input image, and what they do with it in practice is decide: the frame comes
+ * back opaque either way, so somewhere in there the transparency was resolved
+ * against a colour nobody chose. Resolved against black — which is the common
+ * choice — the model is looking at a face lit from nothing, and it returns a
+ * mouth shaded for that scene. The patch is then dark at the edges in a way
+ * tone matching has to spend its whole budget undoing.
+ *
+ * White because it is the background these models have seen most portraits on,
+ * and the goal is to hand them something ordinary rather than something clever.
+ * It never reaches the kit: `clipToBase` puts the hole back afterwards, so the
+ * backdrop exists only for the length of one request.
+ */
+export async function flattenBackground(src: string, colour = '#ffffff'): Promise<string> {
+  if (!(await hasAlpha(src))) return src;
+  const image = await loadImage(src);
+  const ctx = context(CANVAS_EDGE, CANVAS_EDGE);
+  ctx.fillStyle = colour;
+  ctx.fillRect(0, 0, CANVAS_EDGE, CANVAS_EDGE);
+  ctx.drawImage(image, 0, 0, CANVAS_EDGE, CANVAS_EDGE);
+  return ctx.canvas.toDataURL('image/png');
+}
+
+/**
+ * Cuts a result back to the base's own silhouette.
+ *
+ * The failure this exists for is the one a cut-out portrait produces and a
+ * full-bleed one never can. Every generator returns an opaque frame: asked to
+ * edit a head floating on nothing, it invents something to put behind the head.
+ * Crop a box out of that and the parts of the box that lie *outside* the jaw —
+ * which on a tight mouth box is most of its lower corners — come back as solid
+ * invented background. Composited onto a base that is transparent there, the
+ * result is a pale rectangle hanging off the chin, and it appears and vanishes
+ * as the mouth changes shape. On a page with a coloured backdrop behind the
+ * face it is the most visible artefact this pipeline can produce.
+ *
+ * The correction is to multiply the result's alpha by the base's, so a pixel
+ * the portrait did not cover cannot be painted no matter what came back. That
+ * is `destination-in`, which is doing real work rather than thresholding: an
+ * anti-aliased silhouette edge is half-transparent for a pixel or two, and
+ * multiplying keeps that softness instead of trading it for a staircase.
+ *
+ * Applied before tone matching, so the seam ring is measured on pixels that
+ * will actually survive, and well before feathering, so the two alphas compose
+ * rather than fight.
+ */
+export async function clipToBase(patch: string, base: string, box: Box): Promise<string> {
+  if (!(await hasAlpha(base, box))) return patch;
+
+  const [patchImage, baseImage] = await Promise.all([loadImage(patch), loadImage(base)]);
+
+  const stencil = context(box.width, box.height);
+  stencil.drawImage(baseImage, box.x, box.y, box.width, box.height, 0, 0, box.width, box.height);
+
+  const ctx = context(box.width, box.height);
+  ctx.drawImage(patchImage, 0, 0, box.width, box.height);
+  ctx.globalCompositeOperation = 'destination-in';
+  ctx.drawImage(stencil.canvas, 0, 0);
+  ctx.globalCompositeOperation = 'source-over';
+  return ctx.canvas.toDataURL('image/png');
+}
+
+/**
  * The mask OpenAI's edit endpoint wants: transparent where it may paint.
  *
  * Inverted from the intuition most people bring to it — the hole is the

@@ -1,4 +1,13 @@
-import { cropToBox, featherPatch, matchTone, maskFor, normalise } from './canvas';
+import {
+  FULL_FRAME,
+  clipToBase,
+  cropToBox,
+  featherPatch,
+  flattenBackground,
+  matchTone,
+  maskFor,
+  normalise,
+} from './canvas';
 import { findImageModel } from './imageModels';
 import type { Box } from './kit';
 import { PREAMBLE } from './slots';
@@ -182,7 +191,10 @@ export async function generatePatch({
     {
       model: modelKey,
       prompt: `${PREAMBLE} ${instruction}`,
-      image: base,
+      // Sent with a backdrop behind it when the portrait has none, and a
+      // no-op otherwise. The kit keeps the cut-out either way — see the clip
+      // below, which is what actually holds that promise.
+      image: await flattenBackground(base),
       // Sent only where it means something. A provider steered by prompt alone
       // is not handicapped by its absence, because the crop is what actually
       // protects the rest of the face either way.
@@ -192,11 +204,14 @@ export async function generatePatch({
     onAttempt,
   );
 
-  // Crop, then match the seam, then fade it. The order matters: matching before
-  // fading measures the real border pixels rather than ones already blended
-  // toward transparency, and fading last means the alpha survives into the kit.
+  // Crop, clip, match the seam, then fade it. The order matters throughout:
+  // clipping before matching keeps the seam ring off invented background,
+  // matching before fading measures the real border pixels rather than ones
+  // already blended toward transparency, and fading last means the alpha
+  // survives into the kit.
   const cropped = await cropToBox(image, box);
-  const matched = await matchTone(cropped, base, box);
+  const clipped = await clipToBase(cropped, base, box);
+  const matched = await matchTone(clipped, base, box);
   return { patch: await featherPatch(matched, box), full: await normalise(image), usd };
 }
 
@@ -222,12 +237,18 @@ export async function generateBase(
     {
       model: modelKey,
       prompt: `${PREAMBLE} ${instruction}`,
-      image: base,
+      image: await flattenBackground(base),
       mask: model.masked ? maskFor(box) : undefined,
     },
     signal,
     onAttempt,
   );
 
-  return { base: await normalise(image), usd };
+  // The silhouette is the one thing this pass may not change. It is allowed to
+  // redraw the whole frame, but a cut-out portrait that comes back with an
+  // invented background is no longer the picture that was uploaded — and since
+  // every later patch is clipped to *this* base's alpha, a base that lost its
+  // hole would take the whole kit with it.
+  const normalised = await normalise(image);
+  return { base: await clipToBase(normalised, base, FULL_FRAME), usd };
 }
