@@ -75,15 +75,41 @@ const SAME_MOUTH = 0.04;
 /** Identifies one thumbnail on the page: a slot's accepted patch, or its nth candidate. */
 const twinKey = (id: SlotId, index: number | 'kept') => `${id}:${index}`;
 
-/** "same as Rest", or "same as Rest and Neutral open (UH)". */
-function sameAs(ids: SlotId[]): string {
-  const labels = ids.map((id) => slot(id).label);
+/** How far one thumbnail sits from one accepted mouth, as patchDivergence measures it. */
+type Distance = { id: SlotId; share: number };
+
+/**
+ * A share as a percentage, finer near zero.
+ *
+ * The digit matters only at the bottom of the range, which is the whole reason
+ * the number is on screen: 0.2% and 3.8% are a returned input and a real but
+ * small change, and rounding both to "0%" and "4%" would hide the distinction
+ * being looked for. Nothing above ten percent is a close call, so a decimal
+ * there is noise in a caption with no room for it.
+ */
+const percent = (share: number) => `${(share * 100).toFixed(share < 0.1 ? 1 : 0)}%`;
+
+/** "same as Rest (0.2%)", or "same as Rest (0.2%) and Neutral open (UH) (1.1%)". */
+function sameAs(twins: Distance[]): string {
+  const labels = twins.map(({ id, share }) => `${slot(id).label} (${percent(share)})`);
   const listed =
     labels.length < 2
       ? labels.join('')
       : `${labels.slice(0, -1).join(', ')} and ${labels[labels.length - 1]}`;
   return `same as ${listed}`;
 }
+
+/**
+ * The whole row of measurements behind the verdict, for the tooltip.
+ *
+ * The caption can only say which pairs fell under the threshold, and that is
+ * the half of the picture that is useless when the threshold itself is what you
+ * doubt — a pose flagged at 3.8% and one flagged at 0.2% read identically, and
+ * so do a pose that cleared at 4.1% and one that cleared at 40%. Hovering gives
+ * the distances themselves, nearest first, so the number can be argued with.
+ */
+const distanceNote = (near: Distance[]) =>
+  near.map(({ id, share }) => `${slot(id).label} ${percent(share)}`).join(' · ');
 
 /**
  * The eye tabs say which side of the *picture*, not which of her eyes, because
@@ -168,17 +194,26 @@ export default function FaceKit() {
   const [modelB, setModelB] = useState(DEFAULT_B);
   const [assembled, setAssembled] = useState<string | null>(null);
   /**
-   * Which mouths have come back as copies of one already in the kit.
+   * How far every mouth on the page sits from every mouth in the kit.
    *
-   * Keyed by `twinKey`, valued with the slots the artwork duplicates. It exists
-   * because this is the one defect the page could not show you: a duplicate
-   * looks *correct* in the contact sheet — a perfectly good closed mouth, drawn
-   * in the right style, on the right face — and only announces itself in the
-   * filmstrip, as a mouth that stops moving for a beat. Two closed poses
-   * generated from an already-closed base collide almost by default, so without
-   * this the failure ships quietly, which is exactly what it did.
+   * Keyed by `twinKey`, valued with one distance per other accepted slot,
+   * nearest first. It exists because this is the one defect the page could not
+   * show you: a duplicate looks *correct* in the contact sheet — a perfectly
+   * good closed mouth, drawn in the right style, on the right face — and only
+   * announces itself in the filmstrip, as a mouth that stops moving for a beat.
+   * Two closed poses generated from an already-closed base collide almost by
+   * default, so without this the failure ships quietly, which is exactly what
+   * it did.
+   *
+   * Every distance is kept rather than only the ones under SAME_MOUTH, because
+   * the verdict alone cannot be checked. Rest and M/B/P are the closest two
+   * poses in the set that are *supposed* to differ, and they differ in the one
+   * way this measure is least able to see — a lip line moving a few pixels on a
+   * face whose lips are nearly the colour of the skin around them. Whether a
+   * flag there is a real duplicate or the threshold reaching too far is a
+   * question about a number, so the number is what gets stored.
    */
-  const [twins, setTwins] = useState<Record<string, SlotId[]>>({});
+  const [distances, setDistances] = useState<Record<string, Distance[]>>({});
   /**
    * Whether the kit holds work that has not reached the store.
    *
@@ -264,7 +299,7 @@ export default function FaceKit() {
     const box = kit?.boxes.mouth;
     const patches = kit?.patches;
     if (!box || !patches) {
-      setTwins({});
+      setDistances({});
       return;
     }
 
@@ -283,26 +318,24 @@ export default function FaceKit() {
         );
       }
 
-      const found: Record<string, SlotId[]> = {};
+      const found: Record<string, Distance[]> = {};
       for (const item of pending) {
-        const matches: SlotId[] = [];
+        const measured: Distance[] = [];
         for (const other of kept) {
           if (other.id === item.id) continue;
           // The cheap answer first: accepting one candidate into two slots
           // makes them the same string, and there is nothing to measure.
-          if (other.patch === item.patch) {
-            matches.push(other.id);
-            continue;
-          }
-          if ((await patchDivergence(item.patch, other.patch, box)) < SAME_MOUTH) {
-            matches.push(other.id);
-          }
+          const share =
+            other.patch === item.patch ? 0 : await patchDivergence(item.patch, other.patch, box);
+          measured.push({ id: other.id, share });
         }
         if (!live) return;
-        if (matches.length) found[item.key] = matches;
+        if (measured.length) {
+          found[item.key] = measured.sort((a, b) => a.share - b.share);
+        }
       }
 
-      if (live) setTwins(found);
+      if (live) setDistances(found);
     })().catch(() => undefined);
 
     return () => {
@@ -1064,6 +1097,10 @@ export default function FaceKit() {
               {SLOTS.map((entry) => {
                 const options = candidates[entry.id] ?? [];
                 const current = kit.patches[entry.id];
+                /** Every measured distance for one thumbnail, and the subset that counts as a copy. */
+                const near = (index: number | 'kept') => distances[twinKey(entry.id, index)] ?? [];
+                const copies = (index: number | 'kept') =>
+                  near(index).filter((other) => other.share < SAME_MOUTH);
 
                 return (
                   <div
@@ -1103,6 +1140,7 @@ export default function FaceKit() {
                           <img
                             src={current}
                             alt=""
+                            title={distanceNote(near('kept'))}
                             className="h-20 rounded-md border-2 border-emerald-500 bg-slate-900"
                           />
                           {/*
@@ -1120,9 +1158,9 @@ export default function FaceKit() {
                               return from ? ` · ${from.short}` : '';
                             })()}
                           </figcaption>
-                          {twins[twinKey(entry.id, 'kept')] && (
+                          {copies('kept').length > 0 && (
                             <figcaption className="max-w-[7rem] text-[10px] text-amber-400">
-                              {sameAs(twins[twinKey(entry.id, 'kept')])}
+                              {sameAs(copies('kept'))}
                             </figcaption>
                           )}
                         </figure>
@@ -1143,7 +1181,15 @@ export default function FaceKit() {
                           .slice(0, index)
                           .filter((earlier) => earlier.modelKey === candidate.modelKey).length;
                         const name = from?.short ?? candidate.modelKey;
-                        const duplicate = twins[twinKey(entry.id, index)];
+                        const duplicate = copies(index);
+                        /*
+                          The measured row goes on every candidate, not just the
+                          flagged ones. A pose that cleared the threshold by a
+                          hair is the same worry as one that failed it by a hair,
+                          and only the tooltip can tell you which you are looking
+                          at.
+                        */
+                        const measured = distanceNote(near(index));
 
                         return (
                           <figure key={`${candidate.modelKey}-${index}`} className="space-y-1">
@@ -1151,9 +1197,11 @@ export default function FaceKit() {
                               type="button"
                               onClick={() => accept(entry.id, candidate)}
                               title={
-                                duplicate
+                                duplicate.length
                                   ? `${sameAs(duplicate)} — accepting it would put the same drawing in two slots`
-                                  : `Use this one — ${from?.label ?? candidate.modelKey}, attempt ${seen + 1}`
+                                  : `Use this one — ${from?.label ?? candidate.modelKey}, attempt ${seen + 1}${
+                                      measured ? `\n${measured}` : ''
+                                    }`
                               }
                             >
                               <img
@@ -1162,7 +1210,7 @@ export default function FaceKit() {
                                 className={`h-20 rounded-md border bg-slate-900 ${
                                   candidate.patch === current
                                     ? 'border-emerald-500'
-                                    : duplicate
+                                    : duplicate.length
                                       ? 'border-amber-500/70 hover:border-amber-400'
                                       : 'border-slate-700 hover:border-slate-400'
                                 }`}
@@ -1171,7 +1219,7 @@ export default function FaceKit() {
                             <figcaption className="text-[10px] text-slate-500">
                               {seen > 0 ? `${name} ${seen + 1}` : name}
                             </figcaption>
-                            {duplicate && (
+                            {duplicate.length > 0 && (
                               <figcaption className="max-w-[7rem] text-[10px] text-amber-400">
                                 {sameAs(duplicate)}
                               </figcaption>
