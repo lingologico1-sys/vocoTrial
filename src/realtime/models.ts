@@ -35,17 +35,25 @@ export const MODELS: ModelChoice[] = [
     key: 'gemini-native-audio',
     provider: 'gemini',
     label: 'Gemini 2.5 Flash Native Audio',
-    id: 'gemini-live-2.5-flash-preview-native-audio-09-2025',
-    // The only Live model Vertex serves this key, out of nine spellings tried
-    // (POST /api/live/models), and confirmed the way a Live id can only be
-    // confirmed: a socket through the relay reached setupComplete.
+    id: 'gemini-live-2.5-flash-native-audio',
+    // The GA id, not the dated preview. Both work — this and
+    // gemini-live-2.5-flash-preview-native-audio-09-2025 each reach
+    // setupComplete — but a dated preview retires 45 days after its replacement
+    // ships, and a replacement (native-audio-preview-12-2025) already exists on
+    // AI Studio. The undated GA alias follows the 2.5 family lifecycle instead.
+    //
+    // That lifecycle still ends: the 2.5 family retires 2026-10-16. Nothing
+    // succeeds it here yet — Vertex serves no Gemini 3 or 3.1 Live model under
+    // any spelling tried, so plan on re-probing before then rather than
+    // discovering it on the day.
   },
-  // There is no 3.1 Flash Live here. `gemini-3.1-flash-live-preview` was the
-  // confirmed AI Studio id and 404s on Vertex, as do gemini-live-3.1-flash,
-  // gemini-live-3.1-flash-preview, every 2.5 spelling but the one above, and
-  // gemini-2.0-flash-live-preview-04-09. Model availability is regional and
-  // this key resolves to us-central1, so re-run /api/live/models before
-  // concluding a 3.1 Live model does not exist anywhere.
+  // There is no 3.1 Flash Live here, and not because of the id or the region:
+  // gemini-3.1-flash-live-preview is published on AI Studio only, with no
+  // Vertex build in any region (Google's own forum answer, May 2026). Sixteen
+  // spellings across four regions all closed 1008. It is a real model — this
+  // project reached setupComplete on it twelve times out of twelve — just not
+  // one this surface carries. If it is wanted back, the honest route is a
+  // per-model surface choice, not a better guess at the id.
   {
     key: 'openai-realtime',
     provider: 'openai',
