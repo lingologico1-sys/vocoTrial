@@ -33,30 +33,40 @@
  *    is, near enough, what a neck does. At the radius the face sits at, that arc
  *    is side to side: a fraction of a unit of vertical drop against four of
  *    lateral travel.
- *  - `rise` translates and does not rotate. A frame sliding bodily upward is what
- *    a *camera* does, not a person; it is kept because that is a matter of taste
- *    and the only honest way to settle it is to flip between them on the same
- *    sentence.
+ *  - `rise` translates and does not rotate.
  *
  * They are deliberately kept pure and perpendicular — one purely vertical, one
  * purely lateral. An earlier `rise` carried 0.8° of roll alongside its translate,
  * which put a little of each mode into the other and left the switch feeling like
  * two tunings of one setting rather than a choice between two.
+ *
+ * It was a matter of taste for a long time, and it is not any more. `rise` wins,
+ * and the argument that settles it is not about either movement — it is about
+ * what drives them. Both are handed the same number, an amplitude envelope, and
+ * amplitude means *emphasis*. Emphasis on a real face is vertical: a head lifts
+ * or drops on a stressed word. A lateral lean is not an emphasis at all, so a
+ * head fed loudness sideways spends the whole sentence weighing what is being
+ * said, and reads as a metronome rather than as a person.
+ *
+ * `swing` is kept, because the objection above is to its *trigger* and not to
+ * its geometry — and the geometry turned out to be worth keeping. It moved
+ * house rather than being deleted: see TILT_TRIGGERS, which is this rotation
+ * fired by a question or a pause instead of by a loud syllable.
  */
 export type HeadMotion = 'swing' | 'rise';
 
-export const DEFAULT_HEAD_MOTION: HeadMotion = 'swing';
+export const DEFAULT_HEAD_MOTION: HeadMotion = 'rise';
 
 export const HEAD_MOTIONS: Array<{ id: HeadMotion; label: string; hint: string }> = [
   {
-    id: 'swing',
-    label: 'Swing',
-    hint: 'Rotates about a point low in the frame and does not translate, so the foot of the picture holds still and the head arcs over it.',
-  },
-  {
     id: 'rise',
     label: 'Rise',
-    hint: 'Lifts the whole frame straight up and does not rotate at all. Reads as a camera bump rather than a person.',
+    hint: 'Lifts the whole frame straight up and does not rotate at all. Vertical is what emphasis looks like on a real face, which is what the loudness driving this actually measures.',
+  },
+  {
+    id: 'swing',
+    label: 'Swing',
+    hint: 'Rotates about a point low in the frame and does not translate, so the foot of the picture holds still and the head arcs over it. Kept to compare against: a sideways lean per stressed syllable reads as weighing every word. The same rotation on a signal that warrants it is under Tilt.',
   },
 ];
 
@@ -82,6 +92,124 @@ export const MOTION: Record<HeadMotion, { rise: number; roll: number }> = {
   rise: { rise: 4, roll: 0 },
 };
 
+/**
+ * The tilt: the same rotation as `swing`, fired by something other than loudness.
+ *
+ * The switch above asks which way the head should go when the voice gets louder,
+ * and `rise` wins that on the only argument that matters — loudness means
+ * *emphasis*, and emphasis on a real face is vertical. The head lifts or drops
+ * on a stressed word. It does not lean sideways, and a head that leans sideways
+ * once per phrase is weighing everything the speaker says.
+ *
+ * But a lateral tilt is not therefore wrong. It is a real thing faces do, driven
+ * by a signal the amplitude envelope cannot see. Roll in conversation marks
+ * uncertainty, a question, sympathy, a concession, the moment a speaker hands
+ * the floor back — every one of them a matter of *stance*, and every one of them
+ * attached to a boundary rather than to a peak. So the tilt keeps swing's
+ * geometry and throws away its trigger. See TILT_TRIGGERS.
+ *
+ * This is also the second answer to the question the dead idle sway asked and
+ * failed. That comment's conclusion was that a head has no reason to move on its
+ * own, so movement with no cause reads as drift. A tilt has a cause: a question
+ * was asked, the speaker stopped, the turn ended. It is the head's version of
+ * what the brow flash found on the blink — motion that something in the world
+ * accounts for.
+ */
+
+/**
+ * Which events are allowed to fire one, offered as a set rather than a choice.
+ *
+ * Every other switch in this file is a radio because its options are rival
+ * answers to one question. These are not rivals: a face could plausibly tilt at
+ * all three moments, at none, or at any pair, and the thing actually in doubt is
+ * *how many of them at once* stops reading as a person and starts reading as a
+ * face that cannot keep still. That question cannot be asked one option at a
+ * time, so the control is three boxes.
+ *
+ *  - `question` is the strongest of them and the cheapest. It is not measured off
+ *    the audio at all — it reads the agent's own transcript, held back by
+ *    RevealQueue until the words are audible, and fires when a sentence that
+ *    ends in a question mark is heard. Precise, because it is the literal
+ *    linguistic feature the gesture encodes, and rare, because questions are.
+ *  - `hesitation` fires on a gap *inside* a turn: the voice goes quiet for
+ *    PAUSE_HOLD while the audio is still playing. This is the thinking tilt.
+ *  - `listening` fires when the agent's audio ends and the floor goes back to
+ *    the user. It is the only one that does anything during the long stretches
+ *    when the face is not talking, which is most of a conversation.
+ *
+ * `hesitation` and `listening` are kept apart by `speaking` rather than by their
+ * timers, and they would otherwise be the same trigger firing twice: a turn
+ * ending is also a silence. Gating the first on audio still playing makes the
+ * pair disjoint, so turning both on is a real question about frequency and not
+ * an accident of which clock won.
+ */
+export type TiltTrigger = 'question' | 'hesitation' | 'listening';
+
+/**
+ * Questions only, to start with.
+ *
+ * The rarest and most defensible of the three, and the one whose signal is not
+ * an inference. Shipping the feature switched off entirely would be the same as
+ * not shipping it — nobody forms an opinion about a box they have to find and
+ * tick — and shipping all three at once would answer the frequency question in
+ * advance, in the direction this whole change exists to argue against.
+ */
+export const DEFAULT_TILT_TRIGGERS: readonly TiltTrigger[] = ['question'];
+
+export const TILT_TRIGGERS: Array<{ id: TiltTrigger; label: string; hint: string }> = [
+  {
+    id: 'question',
+    label: 'Questions',
+    hint: 'Fires when a sentence ending in a question mark becomes audible, read off the tutor’s own transcript rather than measured from the sound. The tilt lands as the question finishes and is held through the silence after it, which is the posture a person actually waits in.',
+  },
+  {
+    id: 'hesitation',
+    label: 'Hesitations',
+    hint: 'Fires when the voice goes quiet for about half a second in the middle of a turn — a gap the speaker has not finished talking through. The thinking tilt.',
+  },
+  {
+    id: 'listening',
+    label: 'Listening',
+    hint: 'Fires when the tutor stops and the floor goes back to you. The only one that does anything while the face is not speaking, which is most of a conversation.',
+  },
+];
+
+/**
+ * An event on its way to the face, for the two triggers that are not measurable.
+ *
+ * `hesitation` is absent from `kind` on purpose, and the absence is the point:
+ * that one is a property of the sound and HeadPerformer can see it for itself.
+ * These two cannot be found in the audio at any price — one lives in the
+ * transcript, the other in whether the transport has more audio queued — so they
+ * come down from the page as events.
+ *
+ * A React prop rather than a method call because the face owns the performer and
+ * the page does not. `seq` is what makes two cues of the same kind different
+ * objects, which is what the effect watching this actually keys on; it is spelled
+ * out rather than left to `{}` identity so that the contract is legible instead
+ * of incidental.
+ */
+export interface TiltCue {
+  kind: Extract<TiltTrigger, 'question' | 'listening'>;
+  seq: number;
+}
+
+/**
+ * How far a tilt leans, in degrees, and why it is not much larger than a swing.
+ *
+ * A real conversational tilt is ten degrees and more. This is 3.5, and the gap is
+ * not timidity — it is the same compression the rest of this file works in. A
+ * 2.5° swing already reads as a definite head movement on a 200-unit head shown
+ * at 160 pixels, so the scale here is set by what reads rather than by what a
+ * protractor would find on a real neck.
+ *
+ * What buys the extra over the swing is that a tilt is *held*. A transient has to
+ * be big to be caught; a pose is looked at, so it can be smaller and still land.
+ * Going much past this is not a matter of taste but of arithmetic — see
+ * TILT_OVERSCAN, which this number sets.
+ */
+export const TILT_ROLL = 3.5;
+
 /*
  * There was an idle head sway here — two detuned sines drifting the whole
  * picture between turns, on the theory that a face which only ever moves when
@@ -102,6 +230,12 @@ export const MOTION: Record<HeadMotion, { rise: number; roll: number }> = {
  * fire with the lids, and a face that lifts them a little as it blinks is doing
  * something people actually do. That is where the idle life went. See
  * BROW_FLASH below, and `blinked` on HeadPerformer.
+ *
+ * The head got a second chance on the same terms, and it is worth reading the
+ * two together: TILT_TRIGGERS moves the whole picture between turns, which is
+ * exactly what failed here. What is different is not the movement, it is that
+ * something asked for it — a question was heard, the voice stopped, the turn
+ * ended. Cause was the missing ingredient, not size.
  */
 
 /**
@@ -140,6 +274,90 @@ export const PIVOT_Y = 180;
  * only the base would slide every patch off the face it belongs to.
  */
 export const OVERSCAN = 1.1;
+
+/**
+ * The measurement above, as arithmetic rather than as a remembered figure.
+ *
+ * Written out because the tilt needs the same answer for angles nobody has stood
+ * in front of a screen with a ruler for, and a second set of hand-measured
+ * numbers in a comment is a second set of numbers that can go quietly stale. It
+ * reproduces the ones already recorded up there exactly — 2.5° wants 1.0776, so
+ * 2.2 units spare at 1.1; 3° wants 1.0928, so 0.7; and it crosses 1.1 at 3.2°,
+ * which is where the comment says it stops clearing.
+ *
+ * Undoes `move` on each corner of the frame and asks how far outside the
+ * unscaled artwork the corner lands, expressed as the scale that would just
+ * reach it. The largest of the four is what the picture has to be drawn at.
+ *
+ * One sign of roll is enough: the frame's corners are mirror-symmetric about the
+ * pivot's own x, the translate is purely vertical, and the answer is taken as a
+ * distance from the centre — so leaning the other way lands on the mirrored
+ * corner with the identical figure.
+ */
+function requiredOverscan(roll: number, rise: number): number {
+  const theta = (roll * Math.PI) / 180;
+  const cos = Math.cos(theta);
+  const sin = Math.sin(theta);
+  let needed = 1;
+
+  for (const cornerX of [0, 200]) {
+    for (const cornerY of [0, 200]) {
+      // The translate first, then the rotation — `move` applies them the other
+      // way round, and this is undoing it.
+      const dx = cornerX - PIVOT_X;
+      const dy = cornerY + rise - PIVOT_Y;
+      const x = PIVOT_X + cos * dx + sin * dy;
+      const y = PIVOT_Y - sin * dx + cos * dy;
+      needed = Math.max(needed, Math.abs(x - 100) / 100, Math.abs(y - 100) / 100);
+    }
+  }
+
+  return needed;
+}
+
+/**
+ * How much clearance to leave past the corner that only just makes it.
+ *
+ * The same 2-odd units the shipping overscan happens to leave at 2.5°, kept
+ * rather than shaved because the corner it protects is a hard-edged triangle of
+ * background appearing on a beat, which is the single most visible way any of
+ * this can fail.
+ */
+const OVERSCAN_MARGIN = 0.02;
+
+/**
+ * What the picture has to be drawn at once a tilt can land on top of the motion.
+ *
+ * Works out at 1.21 against the shipping 1.1, and the cost is real and worth
+ * stating plainly: the frame crops a tenth further into every portrait, so a
+ * kit sits slightly larger and slightly tighter the moment any tilt trigger is
+ * ticked. There is no way to avoid that and keep the tilt at an angle that
+ * reads — the two are the one setting wearing two names, exactly as the comment
+ * above says of the swing.
+ *
+ * It is deliberately not sensitive to which HeadMotion is selected, even though
+ * `rise` alone would need only 1.11. A direction switch that also changed the
+ * framing would be a switch nobody could use, because half of what changed on
+ * screen would be the zoom. The seam is put where it belongs instead: the
+ * framing steps once, when the feature is turned on, and holds still across
+ * every comparison the feature exists to support.
+ *
+ * The maximum runs over MOTION rather than assuming the swing is the worst case.
+ * It is today — a rotation about a pivot 180 units off the top edge has a much
+ * longer lever arm than 4 units of translate — but that is a fact about the
+ * current numbers, not a rule, and this way changing them cannot silently
+ * uncover a corner.
+ */
+export const TILT_OVERSCAN =
+  Math.ceil(
+    (Math.max(
+      ...Object.values(MOTION).map((travel) =>
+        requiredOverscan(travel.roll + TILT_ROLL, travel.rise),
+      ),
+    ) +
+      OVERSCAN_MARGIN) *
+      100,
+  ) / 100;
 
 /**
  * *When* the head and brows move, as against which way the head goes.
@@ -274,6 +492,59 @@ const BROW_FLASH_LIFT = 0.7;
 const BROW_FLASH_CHANCE = 0.5;
 
 /**
+ * The shape of a tilt, and the one envelope here that is a pose rather than a beat.
+ *
+ * Read against GESTURE, which it is deliberately unlike in all three terms. The
+ * attack is more than twice as slow because a tilt settles into place — a head
+ * that snaps sideways in 120ms has been startled, not made thoughtful. The hold
+ * is nearly six times as long, which is the whole of what makes it a pose: it is
+ * meant to still be there while the silence it was fired by plays out. And the
+ * release is slower again than the attack, because a tilt unwinding faster than
+ * it arrived reads as the head being let go of.
+ *
+ * Two seconds all told. That is long enough to be caught leaving as well as
+ * arriving, and short enough that the face cannot be found frozen at an angle
+ * thirty seconds into somebody else's turn — which is the failure mode of the
+ * obvious alternative, holding it until the agent speaks again.
+ */
+const TILT: Envelope = { attack: 0.28, hold: 1, release: 0.8 };
+
+/**
+ * How long the tilt refuses to fire again, in seconds.
+ *
+ * Between the head's 2.5 and the brows' 7, and nearer the brows on purpose: this
+ * is a bigger, slower and more meaningful movement than a nod, and the whole
+ * argument for it is that it is rare. It also has to absorb the case where two
+ * triggers are ticked and both have something to say about the same moment —
+ * the end of a question is a silence too — so that turning on a second trigger
+ * costs at most a different tilt rather than a second one.
+ */
+const TILT_LOCKOUT = 5;
+
+/**
+ * What counts as the voice having stopped, and for how long, in share and seconds.
+ *
+ * The threshold sits just under the mouth's own SILENCE of 0.12, so the lips are
+ * already closed by the time the head is willing to call it a gap — a head that
+ * leaned on a sound the mouth was still shaping would be reacting to a
+ * measurement rather than to a pause.
+ *
+ * The hold is what separates a pause from a plosive. Ordinary speech is full of
+ * gaps a hundred milliseconds wide and every stop consonant is one of them, so
+ * anything under about a third of a second is not hesitation, it is language.
+ * At 0.45 the trigger wants a gap roughly four times the width of the longest
+ * of those.
+ *
+ * Deliberately read off the raw level rather than off the phrase envelope, which
+ * is the near-miss worth writing down: `phrase` releases with a 0.9s time
+ * constant, so it takes about 800ms to fall from speaking to ARM_LOW whatever
+ * the sound does. Timed off that, every pause would be found at the same
+ * apparent length, and a breath would be indistinguishable from a thought.
+ */
+const PAUSE_SILENCE = 0.1;
+const PAUSE_HOLD = 0.45;
+
+/**
  * What arms a gesture and what fires it, as shares of full volume.
  *
  * Two thresholds rather than one, for the reason the viseme classifier keeps its
@@ -319,6 +590,30 @@ export interface Performance {
   head: number;
   /** Never negative: a brow at rest is already as low as that face's brow goes. */
   brow: number;
+  /**
+   * The tilt, as a share of TILT_ROLL — and signed, alone among these.
+   *
+   * The other two channels have a direction built into the number they scale.
+   * This one does not, because a tilt that always went the same way would be the
+   * single most mechanical thing this face does: nobody watching would be able
+   * to say what was wrong, and everybody would notice.
+   */
+  tilt: number;
+}
+
+/** What the caller knows about the tilt that the loudness cannot tell it. */
+export interface TiltInput {
+  /** Which events may fire one. Empty is the feature switched off. */
+  triggers: readonly TiltTrigger[];
+  /**
+   * True while the agent's audio is playing, gaps inside it included.
+   *
+   * The one thing separating a hesitation from a handover, and the reason it is
+   * a prop rather than something inferred here: from inside this file a pause
+   * mid-sentence and the end of a turn are the same silence, and only the
+   * transport knows whether more audio is queued behind it.
+   */
+  speaking: boolean;
 }
 
 /**
@@ -338,6 +633,7 @@ class Channel {
   /** Seconds still to wait. */
   private locked = 0;
   private readonly span: number;
+  private justStarted = false;
 
   constructor(
     private readonly shape: Envelope,
@@ -347,12 +643,28 @@ class Channel {
     this.since = this.span;
   }
 
+  /**
+   * Whether the last `advance` was the frame this took the trigger.
+   *
+   * Asking is not the same as watching the value leave zero, which is the
+   * tempting cheaper version: a movement that has just fired is at zero for that
+   * frame — the envelope is read after `since` is reset, and smooth(0) is 0 — so
+   * the two differ by a frame. That gap does not matter for anything reading the
+   * height, and matters entirely for the tilt, which has to choose a side before
+   * there is any height to give a side to.
+   */
+  get started(): boolean {
+    return this.justStarted;
+  }
+
   advance(dt: number, trigger: boolean): number {
     this.since += dt;
     this.locked = Math.max(0, this.locked - dt);
+    this.justStarted = false;
 
     if (trigger && this.locked === 0 && this.since >= this.span) {
       this.since = 0;
+      this.justStarted = true;
       this.locked = this.lockout * (1 - LOCKOUT_JITTER + Math.random() * 2 * LOCKOUT_JITTER);
     }
 
@@ -381,8 +693,37 @@ export class HeadPerformer {
   private readonly headChannel = new Channel(GESTURE, HEAD_LOCKOUT);
   private readonly browChannel = new Channel(GESTURE, BROW_LOCKOUT);
   private readonly flashChannel = new Channel(BROW_FLASH);
+  private readonly tiltChannel = new Channel(TILT, TILT_LOCKOUT);
   /** Set by `blinked`, spent by the next `read`. */
   private flashPending = false;
+  /** Set by `heardQuestion` and `yielded`, spent by the next `read`. */
+  private questionPending = false;
+  private yieldPending = false;
+  /**
+   * Which way the next tilt goes.
+   *
+   * Strictly alternating, and randomly seeded so that neither the first tilt of
+   * a session nor two faces sharing a page can be relied on to lean the same
+   * way. Strict rather than diced because the thing being avoided is a run of
+   * tilts to one side, and at one every five seconds and up there is no rhythm
+   * for the alternation itself to fall into — a viewer would have to hold two
+   * gestures half a minute apart in their head to notice it was regular.
+   */
+  private tiltSide = Math.random() < 0.5 ? 1 : -1;
+  /** Seconds the voice has been under PAUSE_SILENCE. */
+  private quietFor = 0;
+  /**
+   * Whether this turn has actually made a sound yet.
+   *
+   * Without it the pause detector fires on the wrong edge. `speaking` goes true
+   * the moment audio is queued, which is a fraction before there is anything in
+   * it to hear, so the run of quiet that a turn *begins* with is longer than
+   * PAUSE_HOLD — and the face would lean into every sentence just as it started
+   * rather than where it faltered.
+   */
+  private heardThisTurn = false;
+  /** Spent once per gap, so one pause cannot fire on every frame it lasts. */
+  private pauseSpent = false;
 
   /**
    * A blink just started; the brows may care.
@@ -404,10 +745,34 @@ export class HeadPerformer {
   }
 
   /**
+   * A sentence ending in a question mark has just become audible.
+   *
+   * Pushed in for the blink's reason and one more of its own. The blink's: the
+   * clock belongs to whoever owns it, and a second copy in here would drift.
+   * This one's: the signal is not in the audio at all. It is in the transcript,
+   * which arrives on the socket seconds ahead of the sound that carries it and
+   * is held back to match — so the only place that knows when a question was
+   * *heard* is the thing doing the holding. Nothing measurable from this side
+   * would distinguish the end of a question from the end of any other sentence.
+   *
+   * No dice here, unlike `blinked`. A question is already rare, and thinning it
+   * further would leave the most defensible of the three triggers firing least
+   * often — which is the wrong way round for the one the feature ships on.
+   */
+  heardQuestion(): void {
+    this.questionPending = true;
+  }
+
+  /** The agent's audio has ended and the floor is back with the user. */
+  yielded(): void {
+    this.yieldPending = true;
+  }
+
+  /**
    * @param dt Seconds since the previous frame.
    * @param level Smoothed loudness from the mouth analyser, 0 to 1.
    */
-  read(dt: number, level: number, cadence: MotionCadence): Performance {
+  read(dt: number, level: number, cadence: MotionCadence, tilt: TiltInput): Performance {
     this.phrase += (level - this.phrase) * ease(dt, level > this.phrase ? PHRASE_ATTACK : PHRASE_RELEASE);
 
     // Fired from the phrase envelope rather than from `level`, which is what
@@ -430,6 +795,39 @@ export class HeadPerformer {
     const flash = this.flashChannel.advance(dt, this.flashPending) * BROW_FLASH_LIFT;
     this.flashPending = false;
 
+    // The gap detector. Runs whether or not `hesitation` is ticked, so that
+    // ticking it mid-call does not inherit a pause that started a minute ago —
+    // the same promise the lockouts above make about switching cadence.
+    if (!tilt.speaking) {
+      this.heardThisTurn = false;
+      this.quietFor = 0;
+      this.pauseSpent = false;
+    } else if (level >= PAUSE_SILENCE) {
+      this.heardThisTurn = true;
+      this.quietFor = 0;
+      this.pauseSpent = false;
+    } else {
+      this.quietFor += dt;
+    }
+
+    const inPause = this.heardThisTurn && !this.pauseSpent && this.quietFor >= PAUSE_HOLD;
+    if (inPause) this.pauseSpent = true;
+
+    // Each trigger asked twice: once whether it happened, once whether it is
+    // wanted. Both events are cleared either way, for the flash's reason —
+    // banked and cashed in later, a question would tilt the head at a moment
+    // with nothing in the conversation to account for it.
+    const wanted = (id: TiltTrigger) => tilt.triggers.includes(id);
+    const fireTilt =
+      (this.questionPending && wanted('question')) ||
+      (this.yieldPending && wanted('listening')) ||
+      (inPause && wanted('hesitation'));
+    this.questionPending = false;
+    this.yieldPending = false;
+
+    const leaning = this.tiltChannel.advance(dt, fireTilt);
+    if (this.tiltChannel.started) this.tiltSide = -this.tiltSide;
+
     const head =
       cadence === 'syllable' ? level : cadence === 'phrase' ? this.phrase : headGesture;
     const spoken =
@@ -442,6 +840,6 @@ export class HeadPerformer {
     // asking for more, which is the correct thing for the smaller movement to do.
     const brow = Math.max(spoken, flash);
 
-    return { head, brow };
+    return { head, brow, tilt: leaning * this.tiltSide };
   }
 }

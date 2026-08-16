@@ -5,14 +5,19 @@ import { BROW_BOXES } from '../facekit/slots';
 import {
   DEFAULT_CADENCE,
   DEFAULT_HEAD_MOTION,
+  DEFAULT_TILT_TRIGGERS,
   HeadPerformer,
   MOTION,
   OVERSCAN,
   PIVOT_X,
   PIVOT_Y,
+  TILT_OVERSCAN,
+  TILT_ROLL,
   type HeadMotion,
   type MotionCadence,
   type Performance,
+  type TiltCue,
+  type TiltTrigger,
 } from './headMotion';
 import { MOUTH_BOX, lipPath, type LipShape, type Viseme } from './visemes';
 
@@ -96,6 +101,23 @@ interface FaceProps {
   cadence?: MotionCadence;
   /** Whether some blinks carry a brow lift. See BROW_FLASH in headMotion.ts. */
   browBlink?: boolean;
+  /** Which events may lean the head sideways. See TILT_TRIGGERS. Empty is off. */
+  tilt?: readonly TiltTrigger[];
+  /**
+   * The latest question or handover, or null if there has not been one.
+   *
+   * A fresh object per event and never rebuilt on an ordinary render, because
+   * the effect below fires on its identity — see TiltCue.
+   */
+  tiltCue?: TiltCue | null;
+  /**
+   * Whether the agent's audio is playing, gaps inside it included.
+   *
+   * Only the tilt reads it, and only to tell a pause mid-turn from the end of
+   * one. Defaulting to false is what keeps a face with no call behind it — the
+   * kit page's preview — from finding a hesitation in its own silence.
+   */
+  speaking?: boolean;
   /** Anchor for the speech bubble's tail. Marks the mouth, not the head. */
   mouthRef?: React.Ref<SVGCircleElement>;
 }
@@ -120,10 +142,13 @@ export default function Face({
   motion = DEFAULT_HEAD_MOTION,
   cadence = DEFAULT_CADENCE,
   browBlink = true,
+  tilt = DEFAULT_TILT_TRIGGERS,
+  tiltCue,
+  speaking = false,
   mouthRef,
 }: FaceProps) {
   const [blinking, setBlinking] = useState(false);
-  const [perf, setPerf] = useState<Performance>({ head: 0, brow: 0 });
+  const [perf, setPerf] = useState<Performance>({ head: 0, brow: 0, tilt: 0 });
   const timers = useRef<number[]>([]);
   /**
    * Built once, and reachable from both effects below rather than owned by the
@@ -146,10 +171,23 @@ export default function Face({
    * face finding its feet cannot be used for the one thing it exists for, which
    * is flipping between two schedules on the same sentence.
    */
-  const latest = useRef({ level, cadence, browBlink });
+  const latest = useRef({ level, cadence, browBlink, tilt, speaking });
   useEffect(() => {
-    latest.current = { level, cadence, browBlink };
-  }, [level, cadence, browBlink]);
+    latest.current = { level, cadence, browBlink, tilt, speaking };
+  }, [level, cadence, browBlink, tilt, speaking]);
+
+  /**
+   * Questions and handovers, handed to the performer as they arrive.
+   *
+   * Keyed on the cue object rather than on anything inside it, which is the
+   * whole reason the page keeps it in state: rebuilt inline on every render this
+   * would fire on each transcript delta, and the face would lean at every word.
+   */
+  useEffect(() => {
+    if (!tiltCue) return;
+    if (tiltCue.kind === 'question') performer.current?.heardQuestion();
+    else performer.current?.yielded();
+  }, [tiltCue]);
 
   useEffect(() => {
     const schedule = () => {
@@ -206,7 +244,10 @@ export default function Face({
       // and snap the envelope to its target.
       const dt = Math.min(0.1, (time - last) / 1000);
       last = time;
-      const next = performer.current!.read(dt, latest.current.level, latest.current.cadence);
+      const next = performer.current!.read(dt, latest.current.level, latest.current.cadence, {
+        triggers: latest.current.tilt,
+        speaking: latest.current.speaking,
+      });
       // Returning the identical object when nothing has moved is what keeps a
       // silent face cheap: between flashes this loop costs one callback a frame
       // and no renders at all, rather than re-rendering a whole portrait sixty
@@ -217,7 +258,9 @@ export default function Face({
       // animating whenever the others are still — which, for the brows, is
       // exactly when they now have something to do.
       setPerf((current) =>
-        Math.abs(current.head - next.head) < 1e-4 && Math.abs(current.brow - next.brow) < 1e-4
+        Math.abs(current.head - next.head) < 1e-4 &&
+        Math.abs(current.brow - next.brow) < 1e-4 &&
+        Math.abs(current.tilt - next.tilt) < 1e-4
           ? current
           : next,
       );
@@ -245,13 +288,22 @@ export default function Face({
    * The move, as one transform both branches share.
    *
    * SVG applies a transform list right to left, so this rotates about the pivot
-   * and then translates — the order the face has always used. Every mode in
-   * MOTION currently leaves one of the two terms at zero, so one half of this is
-   * always an identity and the order cannot be observed; it is written down
-   * anyway, because a mode that ever moves both at once would be reading its
-   * feel off an order nobody chose.
+   * and then translates — the order the face has always used. It used to be
+   * unobservable, because every mode in MOTION leaves one of the two terms at
+   * zero and one half of this was always an identity. The tilt ends that: under
+   * `rise` a lean and a lift are now live at the same moment, and the order
+   * above is what decides that the picture lifts along the frame's vertical
+   * rather than along its own tilted one. That is the right way round — the
+   * lift is a camera-ish move on the frame, the lean is the head turning inside
+   * it — but it is now a choice rather than a spare comment.
+   *
+   * Both rotations go about the same pivot, which is not a detail. A tilt hinged
+   * anywhere else would read as a different joint from the swing, and with both
+   * able to run at once the discrepancy would be on screen rather than
+   * theoretical.
    */
-  const move = `translate(0 ${-perf.head * travel.rise}) rotate(${perf.head * travel.roll} ${PIVOT_X} ${PIVOT_Y})`;
+  const roll = perf.head * travel.roll + perf.tilt * TILT_ROLL;
+  const move = `translate(0 ${-perf.head * travel.rise}) rotate(${roll} ${PIVOT_X} ${PIVOT_Y})`;
   // Bolder than a kit's, and for the cartoon's reason rather than in spite of
   // it: these brows are two strokes on flat skin with nothing registered to
   // them, so the only thing limiting the travel is what looks right. A drawing
@@ -295,7 +347,14 @@ export default function Face({
      * pivot sitting 20 units off the bottom edge pushes that edge out barely at
      * all, and the bottom corners are exactly where the rotation uncovers.
      */
-    const grow = `translate(100 100) scale(${OVERSCAN}) translate(-100 -100)`;
+    /*
+      Chosen by whether a tilt can happen at all, and never by how far one has
+      got: a scale recomputed per frame would swell the head on every lean,
+      which is a zoom rather than a movement and reads as the face lurching at
+      the camera. It steps once, when the feature is switched on. See
+      TILT_OVERSCAN on why it does not also follow the direction switch.
+    */
+    const grow = `translate(100 100) scale(${tilt.length > 0 ? TILT_OVERSCAN : OVERSCAN}) translate(-100 -100)`;
     // Both lids are drawn from the same flag. A kit holding only one of them
     // still blinks, with one eye — visibly wrong, and better than silently
     // doing nothing while the artwork looks complete in the picker.

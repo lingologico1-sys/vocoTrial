@@ -7,6 +7,8 @@ import {
   MOTION_CADENCES,
   type HeadMotion,
   type MotionCadence,
+  type TiltCue,
+  type TiltTrigger,
 } from '../live/headMotion';
 import { VISEMES } from '../live/visemes';
 import { CANVAS_EDGE } from './imageModels';
@@ -59,6 +61,41 @@ const PHRASES_PER_SECOND = 0.23;
  * relative to the face it is on.
  */
 const ZOOM = 2.4;
+
+/**
+ * How often the tilt demonstration fires, in milliseconds.
+ *
+ * Well under what a conversation would produce, because this panel is not
+ * showing you a conversation. It is showing you the far end of the movement so
+ * you can decide whether the frame still holds a picture there, and waiting the
+ * live page's five-plus seconds between looks at it would make the check tedious
+ * enough to skip. The channel's own lockout still applies, so the true rate is
+ * whichever of the two is slower.
+ */
+const TILT_DEMO_MS = 2600;
+
+/**
+ * The set that turns the tilt on here, and it is a lie of convenience.
+ *
+ * The kit page has no transcript and no call, so none of the three real triggers
+ * can happen: no question can be heard, no turn can end, and `speaking` is false
+ * so there is no turn for a hesitation to sit inside. What the button below does
+ * instead is push question cues in on a timer. `question` is named here because
+ * a cue is only honoured if its trigger is ticked, and it is the one the live
+ * page ships with.
+ */
+const TILT_DEMO: readonly TiltTrigger[] = ['question'];
+
+/**
+ * And the empty set, hoisted rather than written inline at the call site.
+ *
+ * A fresh `[]` per render would be a new prop identity sixty times a second, on
+ * a panel that re-renders sixty times a second because it is animating a
+ * loudness. Nothing downstream breaks — the effect it retriggers only assigns a
+ * ref — but it is a needless piece of churn in the one component here that runs
+ * every frame by design.
+ */
+const TILT_OFF: readonly TiltTrigger[] = [];
 
 interface MotionPreviewProps {
   kit: FaceKit;
@@ -133,6 +170,36 @@ export default function MotionPreview({ kit, focus, note }: MotionPreviewProps) 
    * syllable left it rather than from rest.
    */
   const [browBlink, setBrowBlink] = useState(false);
+  /**
+   * Off, and here for a reason unlike everything else on this panel.
+   *
+   * The others are about the artwork: whether a seam reads, whether a brow box
+   * has room above it. This one is about the *frame*. Turning any tilt trigger
+   * on at the live page draws the picture at TILT_OVERSCAN rather than OVERSCAN
+   * — a tenth further in on every portrait, to pay for the corner the extra
+   * rotation would otherwise uncover — and this is the only place a kit is
+   * looked at closely enough to notice what that crop took off the edges.
+   *
+   * So it answers two questions at once, and both of them are about this kit
+   * rather than about the motion: does the portrait still sit in the frame at
+   * the tighter crop, and does a hard-edged wedge of panel appear in a corner at
+   * the far end of the lean.
+   */
+  const [tilting, setTilting] = useState(false);
+  const [tiltCue, setTiltCue] = useState<TiltCue | null>(null);
+
+  useEffect(() => {
+    if (!tilting) {
+      setTiltCue(null);
+      return;
+    }
+    let seq = 0;
+    const timer = window.setInterval(() => {
+      seq += 1;
+      setTiltCue({ kind: 'question', seq });
+    }, TILT_DEMO_MS);
+    return () => window.clearInterval(timer);
+  }, [tilting]);
 
   useEffect(() => {
     if (!loop) return;
@@ -182,6 +249,8 @@ export default function MotionPreview({ kit, focus, note }: MotionPreviewProps) 
             motion={motion}
             cadence={cadence}
             browBlink={browBlink}
+            tilt={tilting ? TILT_DEMO : TILT_OFF}
+            tiltCue={tiltCue}
           />
         </div>
       </div>
@@ -311,6 +380,40 @@ export default function MotionPreview({ kit, focus, note }: MotionPreviewProps) 
               onClick={() => setBrowBlink(value)}
               className={`px-2.5 py-1 ${
                 browBlink === value
+                  ? 'bg-slate-800 text-slate-100'
+                  : 'text-slate-500 hover:text-slate-300'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        <span className="w-12 shrink-0 text-slate-500">Tilt</span>
+        <div className="flex overflow-hidden rounded-lg border border-slate-700">
+          {(
+            [
+              [
+                false,
+                'Upright',
+                'The head never leans sideways, and the picture is drawn at the smaller overscan that only the speaking motion has to pay for.',
+              ],
+              [
+                true,
+                'Leaning',
+                'Fires the lean the live page gives a question, every couple of seconds. Watch the corners for a wedge of panel, and the edges of the portrait for what the deeper crop this needs has taken off them.',
+              ],
+            ] as const
+          ).map(([value, label, hint]) => (
+            <button
+              key={label}
+              type="button"
+              title={hint}
+              onClick={() => setTilting(value)}
+              className={`px-2.5 py-1 ${
+                tilting === value
                   ? 'bg-slate-800 text-slate-100'
                   : 'text-slate-500 hover:text-slate-300'
               }`}

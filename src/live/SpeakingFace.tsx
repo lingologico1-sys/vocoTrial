@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { AudioTap } from '../realtime/audio';
 import type { FaceKit } from '../facekit/kit';
 import Face from './Face';
-import type { HeadMotion, MotionCadence } from './headMotion';
+import type { HeadMotion, MotionCadence, TiltCue, TiltTrigger } from './headMotion';
 import {
   MouthAnalyser,
   VISEMES,
@@ -37,6 +37,12 @@ interface SpeakingFaceProps {
   cadence?: MotionCadence;
   /** Whether some blinks carry a brow lift. */
   browBlink?: boolean;
+  /** Which events may lean the head sideways. See TILT_TRIGGERS. */
+  tilt?: readonly TiltTrigger[];
+  /** The latest question or handover. See TiltCue. */
+  tiltCue?: TiltCue | null;
+  /** Whether the agent's audio is playing. Only the tilt reads it. */
+  speaking?: boolean;
   mouthRef?: React.Ref<SVGCircleElement>;
 }
 
@@ -54,6 +60,9 @@ export default function SpeakingFace({
   motion,
   cadence,
   browBlink,
+  tilt,
+  tiltCue,
+  speaking,
   mouthRef,
 }: SpeakingFaceProps) {
   const [mouth, setMouth] = useState(RESTING);
@@ -128,6 +137,9 @@ export default function SpeakingFace({
       motion={motion}
       cadence={cadence}
       browBlink={browBlink}
+      tilt={tilt}
+      tiltCue={tiltCue}
+      speaking={speaking}
       mouthRef={mouthRef}
     />
   );

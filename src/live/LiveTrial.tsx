@@ -12,10 +12,14 @@ import { RevealQueue } from './reveal';
 import {
   DEFAULT_CADENCE,
   DEFAULT_HEAD_MOTION,
+  DEFAULT_TILT_TRIGGERS,
   HEAD_MOTIONS,
   MOTION_CADENCES,
+  TILT_TRIGGERS,
   type HeadMotion,
   type MotionCadence,
+  type TiltCue,
+  type TiltTrigger,
 } from './headMotion';
 import type { MouthDriver } from './visemes';
 import { tailSentences } from './text';
@@ -48,7 +52,7 @@ const BUBBLE_SENTENCES = 2;
  * without the bump, the only people still seeing the old value are the ones who
  * used the page enough to have an opinion. Bump it when a default moves.
  */
-const PREFS_KEY = 'vocotrial.live.v3';
+const PREFS_KEY = 'vocotrial.live.v4';
 
 interface Prefs {
   language: string;
@@ -58,7 +62,20 @@ interface Prefs {
   motion: HeadMotion;
   cadence: MotionCadence;
   browBlink: boolean;
+  tilt: TiltTrigger[];
 }
+
+/**
+ * Whether a chunk of speech that just became audible ended in a question.
+ *
+ * Deliberately looser than "the last character is a question mark". The
+ * transcript arrives in fragments split wherever the model felt like splitting
+ * them, so the mark is very often followed by the opening of the next sentence
+ * in the same delta — and it is the mark being *heard* that matters, not where
+ * the chunk happens to stop. A mark anywhere in newly audible text means the
+ * question has just landed.
+ */
+const ASKS = /\?/;
 
 /**
  * The two ways of driving the mouth, side by side.
@@ -128,8 +145,9 @@ export default function LiveTrial() {
   // it as the thing to compare against rather than the thing to start from.
   const [driver, setDriver] = useState<MouthDriver>(prefs.driver ?? 'scheduled');
   const [lookaheadMs, setLookaheadMs] = useState(prefs.lookaheadMs ?? DEFAULT_LOOKAHEAD_MS);
-  // Swing by default for the same reason scheduled is: it is the better motion,
-  // and rise is kept beside it as the thing to compare against.
+  // Rise by default for the same reason scheduled is: it is the better motion,
+  // and swing is kept beside it as the thing to compare against. See HeadMotion
+  // on why that stopped being a matter of taste.
   const [motion, setMotion] = useState<HeadMotion>(prefs.motion ?? DEFAULT_HEAD_MOTION);
   // Which way the head goes and how often it goes there are separate questions,
   // so they are separate settings — every combination of the two is legal.
@@ -137,6 +155,9 @@ export default function LiveTrial() {
   // Defaulted on, and it is the one setting here that does something while
   // nobody is speaking at all — it rides on the blink, which never stops.
   const [browBlink, setBrowBlink] = useState<boolean>(prefs.browBlink ?? true);
+  // A set rather than a pick: the open question is how many of these at once
+  // stops reading as a person, which cannot be asked one at a time.
+  const [tilt, setTilt] = useState<TiltTrigger[]>(prefs.tilt ?? [...DEFAULT_TILT_TRIGGERS]);
 
   const [status, setStatus] = useState<SessionStatus>('idle');
   const [detail, setDetail] = useState<string | null>(null);
@@ -160,6 +181,21 @@ export default function LiveTrial() {
    * deleted — leaves the drawn placeholder in place rather than an empty head.
    */
   const [kit, setKit] = useState<FaceKit | null>(null);
+
+  /**
+   * The last thing that happened worth leaning at.
+   *
+   * State rather than a ref because the face has to be told, and told by a
+   * change of identity — which is also why it is never rebuilt inline. Its
+   * counter is a ref: two questions in a row have to be two distinct objects,
+   * and nothing on screen depends on how many there have been.
+   */
+  const [tiltCue, setTiltCue] = useState<TiltCue | null>(null);
+  const cueCount = useRef(0);
+  const cue = useCallback((kind: TiltCue['kind']) => {
+    cueCount.current += 1;
+    setTiltCue({ kind, seq: cueCount.current });
+  }, []);
 
   useEffect(() => {
     let live = true;
@@ -190,12 +226,13 @@ export default function LiveTrial() {
           motion,
           cadence,
           browBlink,
+          tilt,
         } satisfies Prefs),
       );
     } catch {
       // Private browsing. Losing the pick is not worth an error.
     }
-  }, [language, presetKey, driver, lookaheadMs, motion, cadence, browBlink]);
+  }, [language, presetKey, driver, lookaheadMs, motion, cadence, browBlink, tilt]);
 
   useEffect(() => () => session.current?.stop(), []);
 
@@ -236,8 +273,15 @@ export default function LiveTrial() {
     (now: number) => {
       const due = queue.current.take(now);
       for (const item of due) append('agent', item.text, item.done);
+      // The right side of the queue to read a question off, and the only one.
+      // Deltas arrive here seconds before the voice reaches them and anything
+      // still waiting is thrown away on barge-in — so a mark seen on the way in
+      // would tilt the head at a question that was either not yet asked or, if
+      // the user cut in, never asked at all. Everything in `due` has just been
+      // heard, which is the moment the gesture belongs to.
+      if (due.some((item) => ASKS.test(item.text))) cue('question');
     },
-    [append],
+    [append, cue],
   );
 
   useEffect(() => {
@@ -295,6 +339,11 @@ export default function LiveTrial() {
       onSpeaking: (next: boolean) => {
         lastActivity.current = Date.now();
         setSpeaking(next);
+        // Every false, barge-in included, and no attempt to tell them apart:
+        // both are the agent's audio ending and the floor going back to the
+        // user, which is the whole of what a listening tilt responds to. The
+        // channel's own lockout takes care of a provider that says it twice.
+        if (!next) cue('listening');
       },
       // Barge-in. The audio for anything still queued was thrown away unplayed,
       // so showing those words would put sentences on screen that were cut off
@@ -368,6 +417,8 @@ export default function LiveTrial() {
           motion={motion}
           cadence={cadence}
           browBlink={browBlink}
+          tilt={tilt}
+          tiltCue={tiltCue}
           speaking={speaking}
         />
 
@@ -474,6 +525,38 @@ export default function LiveTrial() {
             ))}
           </div>
 
+          {/*
+            Checkboxes among radios, which is the row saying what it is: the two
+            above are picks between rival answers, and this is a set. The label
+            is "Tilt" rather than "Swing" only because Direction already owns
+            that word one row up — it is the same rotation, waiting on a signal
+            instead of on the volume.
+          */}
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+            <span className="w-16 shrink-0 text-xs text-slate-500">Tilt</span>
+            {TILT_TRIGGERS.map((option) => (
+              <label
+                key={option.id}
+                title={option.hint}
+                className="flex cursor-help items-center gap-2 text-sm text-slate-300"
+              >
+                <input
+                  type="checkbox"
+                  checked={tilt.includes(option.id)}
+                  onChange={(event) =>
+                    setTilt((current) =>
+                      event.target.checked
+                        ? [...current, option.id]
+                        : current.filter((id) => id !== option.id),
+                    )
+                  }
+                  className="accent-sky-500"
+                />
+                {option.label}
+              </label>
+            ))}
+          </div>
+
           <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
             <span className="w-16 shrink-0 text-xs text-slate-500">Idle</span>
             <label
@@ -499,6 +582,36 @@ export default function LiveTrial() {
           <p className="text-xs leading-relaxed text-slate-500">
             {MOTION_CADENCES.find((option) => option.id === cadence)?.hint}
           </p>
+
+          {/*
+            Spelled out for the cadence's reason and one sharper than it. These
+            triggers cannot be told apart by looking at the face — every one of
+            them produces the identical lean, and the only thing separating them
+            is which moment it lands on. Watching without knowing what is ticked
+            tells you nothing at all.
+          */}
+          <div className="space-y-1 text-xs leading-relaxed text-slate-500">
+            {tilt.length === 0 ? (
+              <p>
+                No tilt. The head moves only with the loudness of the voice, which is what shipped.
+              </p>
+            ) : (
+              <>
+                {TILT_TRIGGERS.filter((option) => tilt.includes(option.id)).map((option) => (
+                  <p key={option.id}>
+                    <span className="text-slate-400">{option.label}:</span> {option.hint}
+                  </p>
+                ))}
+                {tilt.length > 1 && (
+                  <p>
+                    All of them share one lockout of about five seconds, so ticking a second does
+                    not lean the head twice as often — it changes which moments get the lean, and
+                    which get swallowed by one that has just happened.
+                  </p>
+                )}
+              </>
+            )}
+          </div>
         </fieldset>
 
         <div className="flex items-center gap-3 rounded-lg border border-slate-800 px-4 py-2.5">

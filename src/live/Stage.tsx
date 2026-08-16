@@ -1,7 +1,7 @@
 import { useLayoutEffect, useRef, useState } from 'react';
 import type { AudioTap } from '../realtime/audio';
 import type { FaceKit } from '../facekit/kit';
-import type { HeadMotion, MotionCadence } from './headMotion';
+import type { HeadMotion, MotionCadence, TiltCue, TiltTrigger } from './headMotion';
 import SpeakingFace from './SpeakingFace';
 import type { MouthDriver } from './visemes';
 import Bubble, { BUBBLE_FILL } from './Bubble';
@@ -68,7 +68,17 @@ interface StageProps {
   cadence?: MotionCadence;
   /** Whether some blinks carry a brow lift. */
   browBlink?: boolean;
-  /** Dims the agent balloon once the words are no longer being said. */
+  /** Which events may lean the head sideways. See TILT_TRIGGERS in headMotion.ts. */
+  tilt?: readonly TiltTrigger[];
+  /** The latest question or handover. See TiltCue in headMotion.ts. */
+  tiltCue?: TiltCue | null;
+  /**
+   * Whether the agent is still saying the words in the balloon.
+   *
+   * Two consumers now, and they want it for unrelated reasons: the balloon dims
+   * when it goes false, and the tilt uses it to tell a pause inside a turn from
+   * the end of one.
+   */
   speaking: boolean;
 }
 
@@ -82,6 +92,8 @@ export default function Stage({
   motion,
   cadence,
   browBlink,
+  tilt,
+  tiltCue,
   speaking,
 }: StageProps) {
   const stage = useRef<HTMLDivElement>(null);
@@ -175,6 +187,9 @@ export default function Stage({
               motion={motion}
               cadence={cadence}
               browBlink={browBlink}
+              tilt={tilt}
+              tiltCue={tiltCue}
+              speaking={speaking}
               mouthRef={mouth}
             />
           </div>
