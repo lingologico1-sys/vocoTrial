@@ -83,6 +83,44 @@ export const MOTION: Record<HeadMotion, { rise: number; roll: number }> = {
 };
 
 /**
+ * How far the idle sway goes — the same table again, at its own sizes.
+ *
+ * A separate table rather than a fraction of the one above, and the reason is
+ * the bug that produced it: the sway used to be 0.18 of whatever the chosen
+ * direction spends, which is a defensible-sounding rule that quietly makes the
+ * effect invisible in one of the two modes. At `rise` that is 0.72 units, and
+ * the live stage draws this 200-unit frame at 160 pixels — so the whole picture
+ * drifted by 0.58 of a pixel at its rare peak and about a third of one the rest
+ * of the time. The sway was running the entire time. There was nothing on
+ * screen to see.
+ *
+ * `swing` got away with it because a rotation does not move every pixel by the
+ * same amount: the crown sits 166 units from the pivot against the face's 80,
+ * so it travels twice as far as the middle of the picture and the difference
+ * between them is itself a cue. A translate has no such gradient — it moves the
+ * frame bodily, and a bodily move of half a pixel is nothing at all. Which is
+ * why the two modes need different numbers to look like the same amount of
+ * movement, and why one multiplier could never have supplied both.
+ *
+ * Sized so each mode's largest excursion lands around two pixels at the live
+ * stage's 160: 0.9° carries the crown 2.6 units, and 3 units of translate
+ * carries all of it 3. `rise` gets the larger share of its speaking travel on
+ * purpose, to pay for the gradient it does not have.
+ *
+ * Both stay under their MOTION counterparts, and that is load-bearing rather
+ * than tidy. The sway recedes as the performance grows (see `read` below), so
+ * the total is `speak·h + idle·(1-h)` — monotonic in h while idle < speak, and
+ * therefore still peaking at exactly the MOTION figure and nowhere else. Every
+ * corner-clearance number measured against OVERSCAN survives unchanged. Raise
+ * either of these past its neighbour above and that stops being true, and the
+ * frame starts uncovering at rest rather than at full voice.
+ */
+export const IDLE_MOTION: Record<HeadMotion, { rise: number; roll: number }> = {
+  swing: { rise: 0, roll: 0.9 },
+  rise: { rise: 3, roll: 0 },
+};
+
+/**
  * Where the picture turns.
  *
  * Low and centred — down at the base of the neck, which is where a real head is
@@ -237,17 +275,21 @@ const BROW_LOCKOUT = 7;
 const LOCKOUT_JITTER = 0.4;
 
 /**
- * The idle sway: how far, and how slowly.
+ * How slowly the idle sway wanders. How far is IDLE_MOTION's business.
  *
- * Small enough to be deniable — at the shipping swing angle this is 0.45° — and
- * the point is that it is *never* off. Between turns the face is otherwise a
- * photograph that blinks, and the rarer the speaking gestures become the more
- * that shows. Two frequencies rather than one, at a ratio that is not a whole
- * number, so the pair drift against each other and the sway never settles into a
- * period you can predict. MotionPreview's loop is built out of the same trick
- * for the same reason.
+ * The point of it is that it is *never* off. Between turns the face is
+ * otherwise a photograph that blinks, and the rarer the speaking gestures
+ * become the more that shows. Two frequencies rather than one, at a ratio that
+ * is not a whole number, so the pair drift against each other and the sway
+ * never settles into a period you can predict. MotionPreview's loop is built
+ * out of the same trick for the same reason.
+ *
+ * Worth knowing when reading the sizes in IDLE_MOTION: detuning them this way
+ * means they are rarely in phase, so the stated excursion is a peak the sway
+ * touches now and then rather than an amplitude it holds. Across ten minutes
+ * the RMS is 0.51 of it — call the everyday movement half of whatever that
+ * table says.
  */
-const IDLE_SWAY = 0.18;
 const IDLE_SLOW_HZ = 0.13;
 const IDLE_FAST_HZ = 0.31;
 
@@ -262,19 +304,21 @@ function smooth(t: number): number {
   return clamped * clamped * (3 - 2 * clamped);
 }
 
-/** What the head and brows are doing this frame, as multipliers on MOTION. */
+/** What the head and brows are doing this frame, as multipliers on the tables above. */
 export interface Performance {
-  /**
-   * Signed, unlike everything it replaced.
-   *
-   * The idle sway goes both ways, and a head that could only ever move one way
-   * from rest would sway by leaning and returning rather than by swaying. The
-   * negative excursion is small — under a fifth of full — so it stays a long way
-   * inside the corner clearance measured against OVERSCAN above.
-   */
+  /** Multiplies MOTION. Never negative: this is the performance, and it leans one way. */
   head: number;
   /** Never negative: a brow at rest is already as low as that face's brow goes. */
   brow: number;
+  /**
+   * Multiplies IDLE_MOTION, and signed, unlike the other two.
+   *
+   * The sway goes both ways — a head that could only ever move one way from
+   * rest would sway by leaning and returning rather than by swaying. It rides
+   * on its own field rather than folded into `head` so that it can be scaled by
+   * its own table; adding it there is what made it invisible at `rise`.
+   */
+  sway: number;
 }
 
 /**
@@ -355,17 +399,18 @@ export class HeadPerformer {
 
     // Receding rather than added: the sway is what the head does when nothing
     // else is asking it to move, so it gets out of the way of anything that is.
-    // Adding the two outright would push a loud gesture past the clearance the
-    // overscan was measured against.
-    const sway = idle ? this.sway() * (1 - Math.min(1, head)) : 0;
+    // Holding it at full through a loud gesture would push the picture past the
+    // clearance the overscan was measured against — and, less obviously, would
+    // put a wobble on top of the one deliberate move `gesture` gets to make.
+    const sway = idle ? this.wander() * (1 - Math.min(1, head)) : 0;
 
-    return { head: head + sway, brow };
+    return { head, brow, sway };
   }
 
-  /** Two slow waves at an irrational-ish ratio, summing to at most IDLE_SWAY. */
-  private sway(): number {
+  /** Two slow waves at an irrational-ish ratio, summing to at most 1. */
+  private wander(): number {
     const slow = Math.sin(2 * Math.PI * IDLE_SLOW_HZ * this.elapsed);
     const fast = Math.sin(2 * Math.PI * IDLE_FAST_HZ * this.elapsed + 1.7);
-    return IDLE_SWAY * (0.6 * slow + 0.4 * fast);
+    return 0.6 * slow + 0.4 * fast;
   }
 }

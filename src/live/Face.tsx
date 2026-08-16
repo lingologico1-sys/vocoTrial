@@ -6,6 +6,7 @@ import {
   DEFAULT_CADENCE,
   DEFAULT_HEAD_MOTION,
   HeadPerformer,
+  IDLE_MOTION,
   MOTION,
   OVERSCAN,
   PIVOT_X,
@@ -110,7 +111,7 @@ export default function Face({
   mouthRef,
 }: FaceProps) {
   const [blinking, setBlinking] = useState(false);
-  const [perf, setPerf] = useState<Performance>({ head: 0, brow: 0 });
+  const [perf, setPerf] = useState<Performance>({ head: 0, brow: 0, sway: 0 });
   const timers = useRef<number[]>([]);
   // Two faces on one page must not share a mask id, and nothing here knows
   // whether it is the only one.
@@ -184,8 +185,15 @@ export default function Face({
       // silent face cheap: with the sway off, this loop then costs one callback
       // a frame and no renders at all, rather than re-rendering a whole portrait
       // sixty times a second to draw the same transform.
+      //
+      // Every field the transform reads has to be tested here. A field left out
+      // is not a missed optimisation, it is a channel that silently stops
+      // animating whenever the others are still — which is precisely the state
+      // the sway exists to fill.
       setPerf((current) =>
-        Math.abs(current.head - next.head) < 1e-4 && Math.abs(current.brow - next.brow) < 1e-4
+        Math.abs(current.head - next.head) < 1e-4 &&
+        Math.abs(current.brow - next.brow) < 1e-4 &&
+        Math.abs(current.sway - next.sway) < 1e-4
           ? current
           : next,
       );
@@ -209,6 +217,7 @@ export default function Face({
   // Not destructured: `rise` would shadow the per-brow travel of the same name
   // a few dozen lines down, where the shadowing would be harmless and confusing.
   const travel = MOTION[motion];
+  const drift = IDLE_MOTION[motion];
   /**
    * The move, as one transform both branches share.
    *
@@ -218,8 +227,17 @@ export default function Face({
    * always an identity and the order cannot be observed; it is written down
    * anyway, because a mode that ever moves both at once would be reading its
    * feel off an order nobody chose.
+   *
+   * The performance and the idle sway are summed *per axis* rather than as one
+   * number, because they are scaled by different tables — that is the whole of
+   * the fix for a sway nobody could see. Summing them keeps the chosen mode
+   * pure either way: at `swing` both terms are rotation and the translate stays
+   * an identity, at `rise` the reverse. Idle does not quietly borrow the other
+   * mode's axis to be noticed.
    */
-  const move = `translate(0 ${-perf.head * travel.rise}) rotate(${perf.head * travel.roll} ${PIVOT_X} ${PIVOT_Y})`;
+  const move = `translate(0 ${-(perf.head * travel.rise + perf.sway * drift.rise)}) rotate(${
+    perf.head * travel.roll + perf.sway * drift.roll
+  } ${PIVOT_X} ${PIVOT_Y})`;
   const browLift = perf.brow * 3.5;
   // Left on the raw loudness, alone among these. It is not a gesture — it is a
   // twelve percent narrowing that happens to the eyes of anyone raising their
