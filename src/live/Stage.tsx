@@ -70,6 +70,8 @@ interface StageProps {
   browBlink?: boolean;
   /** Which events may lean the head sideways. See TILT_TRIGGERS in headMotion.ts. */
   tilt?: readonly TiltTrigger[];
+  /** How far it leans, in degrees. See DEFAULT_TILT_ROLL in headMotion.ts. */
+  tiltRoll?: number;
   /** The latest question or handover. See TiltCue in headMotion.ts. */
   tiltCue?: TiltCue | null;
   /**
@@ -93,6 +95,7 @@ export default function Stage({
   cadence,
   browBlink,
   tilt,
+  tiltRoll,
   tiltCue,
   speaking,
 }: StageProps) {
@@ -188,6 +191,7 @@ export default function Stage({
               cadence={cadence}
               browBlink={browBlink}
               tilt={tilt}
+              tiltRoll={tiltRoll}
               tiltCue={tiltCue}
               speaking={speaking}
               mouthRef={mouth}

@@ -195,20 +195,38 @@ export interface TiltCue {
 }
 
 /**
- * How far a tilt leans, in degrees, and why it is not much larger than a swing.
+ * How far a tilt leans, in degrees — a range, because it turned out to be taste.
  *
- * A real conversational tilt is ten degrees and more. This is 3.5, and the gap is
- * not timidity — it is the same compression the rest of this file works in. A
- * 2.5° swing already reads as a definite head movement on a 200-unit head shown
- * at 160 pixels, so the scale here is set by what reads rather than by what a
- * protractor would find on a real neck.
+ * It shipped as a fixed 3.5, on the argument that a real conversational tilt is
+ * ten degrees and more and that a pose, being looked at rather than glimpsed, can
+ * afford to be larger than a transient. Both halves of that are true and the
+ * conclusion was still wrong: at 3.5 the movement reads as pronounced and odd
+ * rather than as a lean, and the first thing said about it on a real call was
+ * that it wanted to be far more subtle.
  *
- * What buys the extra over the swing is that a tilt is *held*. A transient has to
- * be big to be caught; a pose is looked at, so it can be smaller and still land.
- * Going much past this is not a matter of taste but of arithmetic — see
- * TILT_OVERSCAN, which this number sets.
+ * The reason is in the pivot rather than in the angle, which is worth knowing
+ * before reaching for the slider. Rotating the whole picture about a point 100
+ * units below the face means most of what the eye actually sees is not rotation
+ * at all — at 3.5° the face slides 6.1 units sideways and tips three and a half
+ * degrees, so a big tilt reads as the head being moved rather than turning. Small
+ * angles keep the slide beneath notice and leave the roll doing the talking,
+ * which is why the useful part of this range is the bottom of it.
+ *
+ * For scale, in the units that decide it: the live stage draws this 200-unit head
+ * at 160 pixels, so a degree is about 1.4 pixels of lateral travel at the face.
+ *
+ *   3.5°  6.1u  4.9px   what shipped, and too much
+ *   2.5°  4.4u  3.5px   the same lateral travel as a full emphatic swing
+ *   1.2°  2.1u  1.7px   the default below
+ *
+ * The ceiling is the emphatic swing's own 2.5° and is a real limit rather than a
+ * round number: the tilt is a background posture and the swing is a foreground
+ * beat, and a posture that travels further than the emphasis it sits under has
+ * the two the wrong way round.
  */
-export const TILT_ROLL = 3.5;
+export const DEFAULT_TILT_ROLL = 1.2;
+export const TILT_ROLL_MIN = 0.2;
+export const TILT_ROLL_MAX = MOTION.swing.roll;
 
 /*
  * There was an idle head sway here — two detuned sines drifting the whole
@@ -328,19 +346,23 @@ const OVERSCAN_MARGIN = 0.02;
 /**
  * What the picture has to be drawn at once a tilt can land on top of the motion.
  *
- * Works out at 1.21 against the shipping 1.1, and the cost is real and worth
- * stating plainly: the frame crops a tenth further into every portrait, so a
+ * Works out at 1.18 against the shipping 1.1, and the cost is real and worth
+ * stating plainly: the frame crops a further twelfth into every portrait, so a
  * kit sits slightly larger and slightly tighter the moment any tilt trigger is
- * ticked. There is no way to avoid that and keep the tilt at an angle that
- * reads — the two are the one setting wearing two names, exactly as the comment
- * above says of the swing.
+ * ticked.
  *
- * It is deliberately not sensitive to which HeadMotion is selected, even though
- * `rise` alone would need only 1.11. A direction switch that also changed the
+ * Sized from TILT_ROLL_MAX and never from the angle actually selected, which is
+ * the load-bearing part now that the angle is a slider. A scale that followed the
+ * setting would zoom the head while the slider was being dragged — and the thing
+ * being judged is how far the head leans, which is not a question anyone can
+ * answer while the head is also growing. So the whole range is paid for up front
+ * and the framing holds still across every position of it.
+ *
+ * It is deliberately not sensitive to which HeadMotion is selected either, for
+ * the same reason one step further out: a direction switch that also changed the
  * framing would be a switch nobody could use, because half of what changed on
- * screen would be the zoom. The seam is put where it belongs instead: the
- * framing steps once, when the feature is turned on, and holds still across
- * every comparison the feature exists to support.
+ * screen would be the zoom. The one seam left is turning the feature on, which is
+ * a moment the picture is expected to change anyway.
  *
  * The maximum runs over MOTION rather than assuming the swing is the worst case.
  * It is today — a rotation about a pivot 180 units off the top edge has a much
@@ -352,7 +374,7 @@ export const TILT_OVERSCAN =
   Math.ceil(
     (Math.max(
       ...Object.values(MOTION).map((travel) =>
-        requiredOverscan(travel.roll + TILT_ROLL, travel.rise),
+        requiredOverscan(travel.roll + TILT_ROLL_MAX, travel.rise),
       ),
     ) +
       OVERSCAN_MARGIN) *
@@ -591,7 +613,8 @@ export interface Performance {
   /** Never negative: a brow at rest is already as low as that face's brow goes. */
   brow: number;
   /**
-   * The tilt, as a share of TILT_ROLL — and signed, alone among these.
+   * The tilt, as a share of whatever angle the face is set to — and signed,
+   * alone among these.
    *
    * The other two channels have a direction built into the number they scale.
    * This one does not, because a tilt that always went the same way would be the

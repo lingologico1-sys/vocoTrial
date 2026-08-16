@@ -5,6 +5,7 @@ import { BROW_BOXES } from '../facekit/slots';
 import {
   DEFAULT_CADENCE,
   DEFAULT_HEAD_MOTION,
+  DEFAULT_TILT_ROLL,
   DEFAULT_TILT_TRIGGERS,
   HeadPerformer,
   MOTION,
@@ -12,7 +13,6 @@ import {
   PIVOT_X,
   PIVOT_Y,
   TILT_OVERSCAN,
-  TILT_ROLL,
   type HeadMotion,
   type MotionCadence,
   type Performance,
@@ -104,6 +104,14 @@ interface FaceProps {
   /** Which events may lean the head sideways. See TILT_TRIGGERS. Empty is off. */
   tilt?: readonly TiltTrigger[];
   /**
+   * How far it leans when one lands, in degrees. See DEFAULT_TILT_ROLL.
+   *
+   * Does not affect how much the picture is overscanned, on purpose — the whole
+   * slider's range is paid for whatever this says, so that dragging it moves the
+   * head without also resizing it.
+   */
+  tiltRoll?: number;
+  /**
    * The latest question or handover, or null if there has not been one.
    *
    * A fresh object per event and never rebuilt on an ordinary render, because
@@ -143,6 +151,7 @@ export default function Face({
   cadence = DEFAULT_CADENCE,
   browBlink = true,
   tilt = DEFAULT_TILT_TRIGGERS,
+  tiltRoll = DEFAULT_TILT_ROLL,
   tiltCue,
   speaking = false,
   mouthRef,
@@ -302,7 +311,7 @@ export default function Face({
    * able to run at once the discrepancy would be on screen rather than
    * theoretical.
    */
-  const roll = perf.head * travel.roll + perf.tilt * TILT_ROLL;
+  const roll = perf.head * travel.roll + perf.tilt * tiltRoll;
   const move = `translate(0 ${-perf.head * travel.rise}) rotate(${roll} ${PIVOT_X} ${PIVOT_Y})`;
   // Bolder than a kit's, and for the cartoon's reason rather than in spite of
   // it: these brows are two strokes on flat skin with nothing registered to

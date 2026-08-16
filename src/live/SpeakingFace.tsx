@@ -39,6 +39,8 @@ interface SpeakingFaceProps {
   browBlink?: boolean;
   /** Which events may lean the head sideways. See TILT_TRIGGERS. */
   tilt?: readonly TiltTrigger[];
+  /** How far it leans, in degrees. Switchable mid-call, like the lookahead. */
+  tiltRoll?: number;
   /** The latest question or handover. See TiltCue. */
   tiltCue?: TiltCue | null;
   /** Whether the agent's audio is playing. Only the tilt reads it. */
@@ -61,6 +63,7 @@ export default function SpeakingFace({
   cadence,
   browBlink,
   tilt,
+  tiltRoll,
   tiltCue,
   speaking,
   mouthRef,
@@ -138,6 +141,7 @@ export default function SpeakingFace({
       cadence={cadence}
       browBlink={browBlink}
       tilt={tilt}
+      tiltRoll={tiltRoll}
       tiltCue={tiltCue}
       speaking={speaking}
       mouthRef={mouthRef}

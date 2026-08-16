@@ -7,6 +7,7 @@ import {
   MOTION_CADENCES,
   type HeadMotion,
   type MotionCadence,
+  TILT_ROLL_MAX,
   type TiltCue,
   type TiltTrigger,
 } from '../live/headMotion';
@@ -250,6 +251,12 @@ export default function MotionPreview({ kit, focus, note }: MotionPreviewProps) 
             cadence={cadence}
             browBlink={browBlink}
             tilt={tilting ? TILT_DEMO : TILT_OFF}
+            // Leaned as far as the live page's slider goes, never at its default.
+            // The panel's own rule, applied to a second movement: the extreme is
+            // the frame that fails, and a portrait that survives 1.2 degrees
+            // tells you nothing about the one setting somebody will actually
+            // drag it to.
+            tiltRoll={TILT_ROLL_MAX}
             tiltCue={tiltCue}
           />
         </div>
@@ -403,7 +410,7 @@ export default function MotionPreview({ kit, focus, note }: MotionPreviewProps) 
               [
                 true,
                 'Leaning',
-                'Fires the lean the live page gives a question, every couple of seconds. Watch the corners for a wedge of panel, and the edges of the portrait for what the deeper crop this needs has taken off them.',
+                'Leans every couple of seconds, and as far as the live page will ever lean — not as far as it does by default. Watch the corners for a wedge of panel, and the edges of the portrait for what the deeper crop this needs has taken off them.',
               ],
             ] as const
           ).map(([value, label, hint]) => (

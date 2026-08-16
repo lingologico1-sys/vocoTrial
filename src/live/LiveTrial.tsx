@@ -12,9 +12,12 @@ import { RevealQueue } from './reveal';
 import {
   DEFAULT_CADENCE,
   DEFAULT_HEAD_MOTION,
+  DEFAULT_TILT_ROLL,
   DEFAULT_TILT_TRIGGERS,
   HEAD_MOTIONS,
   MOTION_CADENCES,
+  TILT_ROLL_MAX,
+  TILT_ROLL_MIN,
   TILT_TRIGGERS,
   type HeadMotion,
   type MotionCadence,
@@ -63,6 +66,7 @@ interface Prefs {
   cadence: MotionCadence;
   browBlink: boolean;
   tilt: TiltTrigger[];
+  tiltRoll: number;
 }
 
 /**
@@ -158,6 +162,11 @@ export default function LiveTrial() {
   // A set rather than a pick: the open question is how many of these at once
   // stops reading as a person, which cannot be asked one at a time.
   const [tilt, setTilt] = useState<TiltTrigger[]>(prefs.tilt ?? [...DEFAULT_TILT_TRIGGERS]);
+  // How far it leans is taste rather than a pick, so it is a slider — and live
+  // while the call runs, for the lookahead's reason: an angle is judged against
+  // the sentence it lands on, and a value you have to reconnect to try is a
+  // value you are comparing against a memory.
+  const [tiltRoll, setTiltRoll] = useState<number>(prefs.tiltRoll ?? DEFAULT_TILT_ROLL);
 
   const [status, setStatus] = useState<SessionStatus>('idle');
   const [detail, setDetail] = useState<string | null>(null);
@@ -227,12 +236,13 @@ export default function LiveTrial() {
           cadence,
           browBlink,
           tilt,
+          tiltRoll,
         } satisfies Prefs),
       );
     } catch {
       // Private browsing. Losing the pick is not worth an error.
     }
-  }, [language, presetKey, driver, lookaheadMs, motion, cadence, browBlink, tilt]);
+  }, [language, presetKey, driver, lookaheadMs, motion, cadence, browBlink, tilt, tiltRoll]);
 
   useEffect(() => () => session.current?.stop(), []);
 
@@ -418,6 +428,7 @@ export default function LiveTrial() {
           cadence={cadence}
           browBlink={browBlink}
           tilt={tilt}
+          tiltRoll={tiltRoll}
           tiltCue={tiltCue}
           speaking={speaking}
         />
@@ -555,6 +566,34 @@ export default function LiveTrial() {
                 {option.label}
               </label>
             ))}
+
+            {/*
+              Beside the boxes rather than on a row of its own, because it is not
+              a fourth trigger — it is how far the ones that are ticked go. Shown
+              only when something can fire, for the lookahead's reason one panel
+              up: a control over a movement that cannot happen is a control that
+              teaches you nothing when you drag it.
+            */}
+            {tilt.length > 0 && (
+              <label
+                title="How far the head leans when one of these lands. Small is the useful end: the picture turns about a point well below the face, so a large angle slides the head sideways more than it tips it — which is what reads as odd rather than as a lean."
+                className="flex min-w-[11rem] flex-1 cursor-help items-center gap-2 text-xs text-slate-500"
+              >
+                Lean
+                <input
+                  type="range"
+                  min={TILT_ROLL_MIN}
+                  max={TILT_ROLL_MAX}
+                  step={0.1}
+                  value={tiltRoll}
+                  onChange={(event) => setTiltRoll(Number(event.target.value))}
+                  className="flex-1 accent-sky-500"
+                />
+                <span className="w-10 text-right font-mono text-slate-300">
+                  {tiltRoll.toFixed(1)}°
+                </span>
+              </label>
+            )}
           </div>
 
           <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
