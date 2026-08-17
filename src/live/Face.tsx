@@ -468,8 +468,10 @@ export default function Face({
               diagonally, so it is nearer to nothing at one end.
     
               So the gap is filled by taking the box's own bottom row and
-              stretching it upward. It is the nearest skin there is, which makes
-              it the right colour by construction. Filling from the *top* of the
+              stretching it — painted behind the crop rather than fitted into the
+              gap beside it, for the reason written out below. It is the nearest
+              skin there is, which makes it the right colour by construction.
+              Filling from the *top* of the
               box instead was the first attempt and looked wrong immediately: the
               forehead is a good deal paler than the shaded skin just under a
               brow, so every raise flashed a bright rectangle. Uniform across the
@@ -520,12 +522,41 @@ export default function Face({
                     />
                   </mask>
     
-                  {/* The bottom row of the box, stretched over the gap. */}
+                  {/*
+                    The bottom row of the box, stretched behind the whole of it.
+
+                    Behind everything rather than into the gap alone, which is the
+                    fix for a hairline of original brow that used to show along the
+                    bottom of the lift. Sized to the gap, this strip's top edge and
+                    the crop's bottom edge landed on the same y, and two abutting
+                    nested <svg> viewports do not add up: each clips and
+                    antialiases its own boundary independently, so the shared row
+                    composites to 1 - (1 - a)(1 - b) and never reaches full
+                    opacity. Whatever is behind the group shows through the
+                    difference — and what is behind is the base image, still
+                    holding the brow at the height it was drawn at. A thin dark
+                    line, in the one place the eye is already looking.
+
+                    It was there from the first version and invisible until now,
+                    which is worth knowing before trusting any of this. At the 2.4
+                    pixels the lift used to reach, that seam sat below the brow in
+                    clear skin and leaked skin. The seam did not move; the brow
+                    did, and a bigger lift walked the junction up into it.
+
+                    So there is no junction any more. The strip covers the mask's
+                    whole rect, the crop is painted over it, and the only thing
+                    still visible of the strip is the gap the crop does not reach —
+                    which is the same gap, filled with the same pixels, with
+                    nothing left to seam against. Free, too: every unit of it under
+                    the crop is hidden by an opaque draw, and the fade at the edges
+                    applies to the composited group rather than between its
+                    children.
+                  */}
                   <svg
                     x={brow.x}
-                    y={brow.y + brow.height - brow.rise}
+                    y={top}
                     width={brow.width}
-                    height={brow.rise}
+                    height={brow.height + brow.rise}
                     viewBox={`${brow.x} ${brow.y + brow.height - row} ${brow.width} ${row}`}
                     preserveAspectRatio="none"
                   >
