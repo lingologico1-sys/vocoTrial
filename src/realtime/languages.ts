@@ -10,48 +10,49 @@
  */
 
 export interface LanguageChoice {
-  /** ISO-639-1. What OpenAI's input transcription takes as `language`. */
+  /** ISO-639-1. The key the client sends; also what the prompt is built from. */
   code: string;
   /** English name, for the picker and for the agent's instructions. */
   label: string;
   /** The language's own name for itself, which is what the picker shows. */
   endonym: string;
   /**
-   * A sample of well-formed text in the language, handed to whisper-1 as
-   * `prompt`.
+   * A sample of well-formed text in the language.
    *
-   * Whisper conditions on that field as though it were the transcript leading
-   * up to the audio, so it is a style hint rather than a vocabulary list: a
-   * sentence carrying the language's accents, punctuation and conventions pulls
-   * the output towards them. Without it Whisper drifts to flat unaccented ASCII
-   * on exactly the short, hesitant utterances a learner produces most.
+   * NOTHING READS THIS TODAY. It was handed to whisper-1 as `prompt`, which
+   * conditions on that field as though it were the transcript leading up to the
+   * audio — a style hint rather than a vocabulary list, pulling the output
+   * towards the language's accents and punctuation instead of the flat
+   * unaccented ASCII Whisper drifts to on hesitant speech.
+   *
+   * Kept rather than deleted when OpenAI Realtime was removed, because it is
+   * the expensive half of an entry to write and Gemini has no equivalent field
+   * to move it to: its input transcription takes no hint at all. Anything that
+   * transcribes here later wants exactly this. Do not treat it as live data —
+   * a wrong sample would go unnoticed until then.
    */
   sample: string;
 }
 
 /**
- * WHY THIS LIST AND NOT THE PROVIDERS' FULL ONES
+ * WHY THIS LIST AND NOT A LONGER ONE
  *
- * Neither provider exposes a languages endpoint, so unlike the model ids in
- * models.ts there is nothing to ask. Both lists are documentation only, and
- * they are not even the same kind of list:
+ * Google exposes no languages endpoint, so unlike the model ids in models.ts
+ * there is nothing to ask. Gemini's native-audio models take no language code
+ * at all — see the setup handling in functions/api/live/gemini.ts — and the
+ * language is carried entirely by the system instruction, so there is no field
+ * to enumerate against and no upstream list to mirror.
  *
- *  - OpenAI's whisper-1 takes an explicit `language` code. 98 exist in the
- *    tokenizer; OpenAI documents ~57 as performing well.
- *  - Gemini's native-audio models take no language code at all — see the setup
- *    handling in functions/api/live/gemini.ts. Language is carried entirely by
- *    the system instruction, so there is no field to enumerate against.
+ * What decided these entries was the tier that models handle well and that
+ * people actually study, chosen when the app also ran whisper-1 and its ~57
+ * well-performing languages were the binding constraint. The tail is still not
+ * worth offering a learner: a confident wrong transcript teaches someone they
+ * said a thing they did not say, which is worse than the language being absent.
  *
- * These entries are the tier that is strong on both and that people actually
- * study. The tail of Whisper's 98 is not worth offering to a learner: word
- * error rates there run past 50%, and a confident wrong transcript teaches
- * someone they said a thing they did not say. That failure is worse than the
- * language being absent, and no amount of `sample` conditioning rescues a
- * language the model is simply weak at.
- *
- * To add one: check it is in Whisper's well-performing set, give it an
- * ISO-639-1 code whisper-1 accepts, and write a real sample — see the field
- * docs above for what makes one work.
+ * That constraint left with OpenAI, so the list is now shorter than it strictly
+ * has to be. Adding one is cheap — an ISO-639-1 code, a label, an endonym — but
+ * check the model actually speaks it well before offering it, because nothing
+ * in the chain will refuse a language it is bad at.
  */
 
 // First entry is the default.

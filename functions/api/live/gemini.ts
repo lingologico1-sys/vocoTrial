@@ -1,7 +1,7 @@
-import { geminiSetup } from '../session/_providerConfig';
+import { geminiSetup } from './_setup';
 import { VERTEX_KEY_NAMES, VERTEX_LIVE_URL, vertexKey, vertexModel } from '../_vertex';
 import { AISTUDIO_KEY_NAME, AISTUDIO_LIVE_URL, aiStudioKey, aiStudioModel } from '../_aistudio';
-import { resolveInstructions, resolveSettings } from '../session/_resolve';
+import { resolveInstructions, resolveSettings } from './_resolve';
 import { findModel } from '../../../src/realtime/models';
 import { defaultLanguageCode, findLanguage } from '../../../src/realtime/languages';
 import { type GateEnv, json } from '../_middleware';
@@ -17,8 +17,9 @@ import { type GateEnv, json } from '../_middleware';
  *
  * The cost is real and worth stating: audio now hops through Cloudflare instead
  * of going browser-to-Google, which adds a leg of latency and bills Worker
- * time for the length of every call. The OpenAI path still goes direct over
- * WebRTC and is unaffected.
+ * time for the length of every call. It is the only voice path the app has —
+ * the OpenAI Realtime one, which went direct over WebRTC and paid neither, was
+ * removed — so nothing here is a fallback for anything.
  *
  * What survives from the old design is the part that mattered: the key stays
  * server-side, and the agent's configuration is not the browser's to choose —
@@ -73,11 +74,11 @@ export async function onRequest(
     return json({ error: 'Expected a WebSocket upgrade', code: 'not_websocket' }, 426);
   }
 
-  // Same allowlist the session routes use: a key, never a raw model id.
+  // The allowlist in models.ts: a key, never a raw model id.
   const params = new URL(request.url).searchParams;
   const modelKey = params.get('model') ?? '';
   const choice = findModel(modelKey);
-  if (!choice || choice.provider !== 'gemini') {
+  if (!choice) {
     return json({ error: `Unknown Gemini model "${modelKey}"`, code: 'bad_model' }, 400);
   }
 
@@ -180,8 +181,8 @@ export async function onRequest(
    *
    * The language is carried by the system instruction alone — see the note in
    * settings.ts on why no speechConfig.languageCode is sent. Gemini's input
-   * transcription takes no language hint either way, so unlike the OpenAI path
-   * the choice steers what the agent *speaks*, not how the user is transcribed.
+   * transcription takes no language hint either way, so the choice steers what
+   * the agent *speaks* rather than how the user is transcribed.
    */
   let setupSent = false;
 

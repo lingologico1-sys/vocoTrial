@@ -1,21 +1,26 @@
 /**
- * The provider knobs this rig lets you turn, and the only ones it will.
+ * The Gemini Live knobs this rig lets you turn, and the only ones it will.
  *
  * vocoTrial exists to compare realtime models as language tutors, so the
  * settings worth exposing are the ones that change how a *conversation* goes:
- * which voice, how long it waits before deciding you have finished a sentence,
- * how it transcribes a hesitant learner. Knobs that belong to some other use of
- * these APIs — image resolution, video framerate, tool wiring — are omitted on
- * purpose rather than forgotten.
+ * which voice, and how long it waits before deciding you have finished a
+ * sentence. Knobs that belong to some other use of the API — image resolution,
+ * video framerate, tool wiring — are omitted on purpose rather than forgotten.
  *
- * The two providers are not symmetric and neither are their models, so every
- * field carries an `applies` predicate keyed on the model rather than just the
- * provider. Sending a field a model does not accept is not harmless: the
- * upstream rejects the whole setup, and the call fails at connect time.
+ * Google's two Live models are not symmetric, so every field carries an
+ * `applies` predicate keyed on the model. Sending a field a model does not
+ * accept is not harmless: the upstream rejects the whole setup, and the call
+ * fails at connect time.
+ *
+ * This table used to be twice the size, because it also carried OpenAI
+ * Realtime's knobs — speaking rate, the two VAD detectors and their sub-fields,
+ * the input transcription model and its language hint, noise reduction. That
+ * provider is gone and so are they. What survives is either shared by both
+ * Gemini models or gated to native audio.
  *
  * One schema drives three things — the panel in the browser, the validation in
- * the Worker, and the translation into each provider's payload — so they cannot
- * drift apart. Same reasoning as models.ts and languages.ts.
+ * the Worker, and the translation into the setup frame — so they cannot drift
+ * apart. Same reasoning as models.ts and languages.ts.
  *
  * Deliberately free of DOM imports: functions/ compiles against workers-types.
  */
@@ -31,46 +36,24 @@ import { type ModelChoice } from './models';
  * upstream, where it can change without this file lying about it.
  */
 export interface SessionSettings {
-  /** Prebuilt voice name. The vocabularies are per-provider — see VOICES. */
+  /** Prebuilt voice name. See VOICES. */
   voice?: string;
-  /** Gemini only. OpenAI's GA realtime session object dropped temperature. */
   temperature?: number;
   maxOutputTokens?: number;
 
   // --- Turn taking. The setting that matters most to a learner, because the
   // --- provider defaults are tuned for fluent speakers who do not pause to
   // --- assemble a clause, and they cut in mid-sentence.
-  /** OpenAI: which detector. Semantic waits for a *complete-sounding* turn. */
-  vadMode?: 'server_vad' | 'semantic_vad';
-  /** OpenAI server_vad: loudness that counts as speech, 0–1. */
-  vadThreshold?: number;
-  /**
-   * OpenAI semantic_vad: how ready it is to answer. `low` waits longer.
-   *
-   * An enum, not a number. OpenAI's own two pages disagree — the API reference
-   * describes a 0–1 float, the VAD guide quotes literal JSON with these four
-   * strings — and the guide is the one showing an actual request body.
-   */
-  vadEagerness?: 'auto' | 'low' | 'medium' | 'high';
-  /** Both: audio kept from before speech was detected. */
+  /** Audio kept from before speech was detected. */
   prefixPaddingMs?: number;
-  /** Both: silence before the turn is closed. The one to raise for a learner. */
+  /** Silence before the turn is closed. The one to raise for a learner. */
   silenceDurationMs?: number;
-  /** Gemini: how readily silence *starts* a turn. */
+  /** How readily silence *starts* a turn. */
   startSensitivity?: 'START_SENSITIVITY_HIGH' | 'START_SENSITIVITY_LOW';
-  /** Gemini: how readily silence *ends* one. LOW is the patient setting. */
+  /** How readily silence *ends* one. LOW is the patient setting. */
   endSensitivity?: 'END_SENSITIVITY_HIGH' | 'END_SENSITIVITY_LOW';
 
-  // --- OpenAI only.
-  /** Playback rate for the agent's own voice. Slower is easier to follow. */
-  speed?: number;
-  /** Input transcription model. See the note in the field list before changing. */
-  transcriptionModel?: string;
-  /** Whether to send the language hint and sample to the transcriber. */
-  transcriptionHint?: boolean;
-  noiseReduction?: 'near_field' | 'far_field';
-
-  // --- Gemini native-audio only.
+  // --- Native-audio only.
   /** Model adapts its tone to the speaker's. */
   affectiveDialog?: boolean;
   /** Model may decide a given utterance does not deserve an answer. */
@@ -89,22 +72,20 @@ interface FieldBase {
   hint?: string;
   /** Which models accept the field. A false here means never send it. */
   applies: (model: ModelChoice) => boolean;
-  /** Extra condition on the other settings, e.g. a VAD mode's own sub-fields. */
-  requires?: (settings: SessionSettings) => boolean;
 }
 
 export type SettingField = FieldBase &
   (
-    | {
-        kind: 'select';
-        options: SettingOption[] | ((model: ModelChoice) => SettingOption[]);
-      }
+    /**
+     * The options used to be resolvable from the model, because the voice
+     * vocabularies were per-provider and nothing else could express that. One
+     * provider, one vocabulary — so a plain list says everything it needs to.
+     */
+    | { kind: 'select'; options: SettingOption[] }
     | { kind: 'number'; min: number; max: number; step: number; unit?: string }
     | { kind: 'toggle' }
   );
 
-const isGemini = (model: ModelChoice) => model.provider === 'gemini';
-const isOpenAi = (model: ModelChoice) => model.provider === 'openai';
 /**
  * Native audio is its own dialect of Gemini Live: it gains affective dialog and
  * proactivity, and it is the reason no languageCode is sent (see below).
@@ -129,19 +110,21 @@ const isNativeAudio = (model: ModelChoice) => model.key === 'gemini-native-audio
  * against Google's supported list. Worth doing; not worth guessing.
  */
 
-const VOICES: Record<string, SettingOption[]> = {
-  // OpenAI's realtime voices. marin and cedar are the two newest and the ones
-  // OpenAI recommends for realtime; marin is this app's long-standing default.
-  openai: ['marin', 'cedar', 'alloy', 'ash', 'ballad', 'coral', 'echo', 'sage', 'shimmer', 'verse'].map(
-    (name) => ({ value: name, label: name }),
-  ),
-  // Gemini's prebuilt Live voices. The full catalogue is longer for the
-  // half-cascade model, but these eight are the set both models share.
-  gemini: ['Puck', 'Charon', 'Kore', 'Fenrir', 'Aoede', 'Leda', 'Orus', 'Zephyr'].map((name) => ({
-    value: name,
-    label: name,
-  })),
-};
+/**
+ * Gemini's prebuilt Live voices. The full catalogue is longer for the
+ * half-cascade model, but these eight are the set both models share — and a
+ * voice one model does not carry fails the setup rather than falling back.
+ */
+const VOICES: SettingOption[] = [
+  'Puck',
+  'Charon',
+  'Kore',
+  'Fenrir',
+  'Aoede',
+  'Leda',
+  'Orus',
+  'Zephyr',
+].map((name) => ({ value: name, label: name }));
 
 export const SETTING_FIELDS: SettingField[] = [
   {
@@ -149,17 +132,7 @@ export const SETTING_FIELDS: SettingField[] = [
     label: 'Voice',
     kind: 'select',
     applies: () => true,
-    options: (model) => VOICES[model.provider] ?? [],
-  },
-  {
-    key: 'speed',
-    label: 'Speaking rate',
-    hint: 'Slowing the agent down is the cheapest comprehension aid there is.',
-    kind: 'number',
-    min: 0.6,
-    max: 1.4,
-    step: 0.05,
-    applies: isOpenAi,
+    options: VOICES,
   },
   {
     key: 'silenceDurationMs',
@@ -171,9 +144,6 @@ export const SETTING_FIELDS: SettingField[] = [
     step: 100,
     unit: 'ms',
     applies: () => true,
-    // OpenAI's semantic detector takes neither this nor the padding below — it
-    // decides on meaning, not on a clock — so both vanish when it is selected.
-    requires: (settings) => settings.vadMode !== 'semantic_vad',
   },
   {
     key: 'prefixPaddingMs',
@@ -185,49 +155,12 @@ export const SETTING_FIELDS: SettingField[] = [
     step: 50,
     unit: 'ms',
     applies: () => true,
-    requires: (settings) => settings.vadMode !== 'semantic_vad',
-  },
-  {
-    key: 'vadMode',
-    label: 'Turn detection',
-    hint: 'Semantic waits for a turn that sounds finished, not merely quiet.',
-    kind: 'select',
-    applies: isOpenAi,
-    options: [
-      { value: 'server_vad', label: 'Server VAD (silence)' },
-      { value: 'semantic_vad', label: 'Semantic VAD (meaning)' },
-    ],
-  },
-  {
-    key: 'vadThreshold',
-    label: 'Speech threshold',
-    hint: 'Higher ignores more background noise, at the cost of a quiet talker.',
-    kind: 'number',
-    min: 0,
-    max: 1,
-    step: 0.05,
-    applies: isOpenAi,
-    requires: (settings) => settings.vadMode !== 'semantic_vad',
-  },
-  {
-    key: 'vadEagerness',
-    label: 'Eagerness',
-    hint: 'Low gives the learner longer to finish the thought.',
-    kind: 'select',
-    applies: isOpenAi,
-    requires: (settings) => settings.vadMode === 'semantic_vad',
-    options: [
-      { value: 'auto', label: 'Auto' },
-      { value: 'low', label: 'Low — waits longest' },
-      { value: 'medium', label: 'Medium' },
-      { value: 'high', label: 'High — answers soonest' },
-    ],
   },
   {
     key: 'startSensitivity',
     label: 'Start-of-speech sensitivity',
     kind: 'select',
-    applies: isGemini,
+    applies: () => true,
     options: [
       { value: 'START_SENSITIVITY_HIGH', label: 'High — starts a turn readily' },
       { value: 'START_SENSITIVITY_LOW', label: 'Low — needs clearer speech' },
@@ -238,58 +171,21 @@ export const SETTING_FIELDS: SettingField[] = [
     label: 'End-of-speech sensitivity',
     hint: 'Low is the patient setting, and the one to try first for a learner.',
     kind: 'select',
-    applies: isGemini,
+    applies: () => true,
     options: [
       { value: 'END_SENSITIVITY_HIGH', label: 'High — ends a turn readily' },
       { value: 'END_SENSITIVITY_LOW', label: 'Low — waits longer' },
     ],
   },
   {
-    key: 'transcriptionModel',
-    label: 'Input transcription',
-    /**
-     * whisper-1 is the default for a reason documented at length in
-     * functions/api/session/openai.ts: it transcribes the whole utterance, so
-     * the end of a sentence can disambiguate its start, which is exactly where
-     * a learner's speech is hardest to read. The streaming models put words on
-     * screen sooner and commit to each guess before hearing what follows.
-     * The knob exists so that trade can be measured, not so it can be assumed.
-     */
-    hint: 'whisper-1 waits for the whole utterance and is the most accurate on hesitant speech.',
-    kind: 'select',
-    applies: isOpenAi,
-    options: [
-      { value: 'whisper-1', label: 'whisper-1 (batch, most accurate)' },
-      { value: 'gpt-4o-transcribe', label: 'gpt-4o-transcribe (streaming)' },
-      { value: 'gpt-4o-mini-transcribe', label: 'gpt-4o-mini-transcribe (streaming)' },
-    ],
-  },
-  {
-    key: 'transcriptionHint',
-    label: 'Send the language hint',
-    hint: 'Stops the transcriber hedging between languages. Turn off to see it guess.',
-    kind: 'toggle',
-    applies: isOpenAi,
-  },
-  {
-    key: 'noiseReduction',
-    label: 'Noise reduction',
-    kind: 'select',
-    applies: isOpenAi,
-    options: [
-      { value: 'near_field', label: 'Near field (headset)' },
-      { value: 'far_field', label: 'Far field (laptop mic)' },
-    ],
-  },
-  {
     key: 'temperature',
     label: 'Temperature',
-    hint: "Gemini only — OpenAI's GA realtime session object no longer takes one.",
+    hint: 'Lower keeps the tutor on the prompt; higher lets it improvise.',
     kind: 'number',
     min: 0,
     max: 2,
     step: 0.1,
-    applies: isGemini,
+    applies: () => true,
   },
   {
     key: 'maxOutputTokens',
@@ -322,9 +218,8 @@ export function fieldsFor(model: ModelChoice): SettingField[] {
   return SETTING_FIELDS.filter((field) => field.applies(model));
 }
 
-export function optionsFor(field: SettingField, model: ModelChoice): SettingOption[] {
-  if (field.kind !== 'select') return [];
-  return typeof field.options === 'function' ? field.options(model) : field.options;
+export function optionsFor(field: SettingField): SettingOption[] {
+  return field.kind === 'select' ? field.options : [];
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -349,7 +244,7 @@ export function sanitizeSettings(raw: unknown, model: ModelChoice): SessionSetti
     if (!field.applies(model)) continue;
 
     const value = input[field.key];
-    // Absent, or the panel's "provider default" — leave the field unsent.
+    // Absent, or the panel's "Google default" — leave the field unsent.
     if (value === undefined || value === null || value === '') continue;
 
     if (field.kind === 'toggle') {
@@ -367,17 +262,10 @@ export function sanitizeSettings(raw: unknown, model: ModelChoice): SessionSetti
     }
 
     if (typeof value !== 'string') continue;
-    if (optionsFor(field, model).some((option) => option.value === value)) {
+    if (optionsFor(field).some((option) => option.value === value)) {
       out[field.key] = value;
     }
   }
 
-  // Second pass: a sub-field is only meaningful once the field it hangs off has
-  // been resolved, so `requires` is checked against the sanitised result.
-  const settings = out as SessionSettings;
-  for (const field of SETTING_FIELDS) {
-    if (field.requires && !field.requires(settings)) delete out[field.key];
-  }
-
-  return settings;
+  return out as SessionSettings;
 }

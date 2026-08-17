@@ -1,17 +1,17 @@
 /**
- * What a call cost, from what the providers actually reported.
+ * What a call cost, from what Google actually reported.
  *
- * This is not a wall-clock guess. Both providers send real token counts during
- * the session — OpenAI on every `response.done`, Gemini in `usageMetadata` —
- * and both were already arriving at the browser and being dropped on the floor.
- * The session files now collect them; this file prices them.
+ * This is not a wall-clock guess. Gemini sends real token counts during the
+ * session, in `usageMetadata`, and they were already arriving at the browser
+ * and being dropped on the floor. src/realtime/gemini.ts now collects them;
+ * this file prices them.
  *
  * Two things it deliberately does not do:
  *
- *  - It does not bill the Gemini path's Cloudflare Worker time. That leg exists
- *    because Google's ephemeral tokens are refused on this account (see
- *    functions/api/live/gemini.ts) and it is metered per call, so the Gemini
- *    number here is a floor by construction.
+ *  - It does not bill the Cloudflare Worker time the relay spends. That leg
+ *    exists because Google's ephemeral tokens are refused on this account (see
+ *    functions/api/live/gemini.ts) and it is metered per call, so every number
+ *    here is a floor by construction.
  *  - It does not survive a socket that dies mid-call. Usage is whatever was
  *    reported before the connection went away, so an errored call under-reports.
  *
@@ -22,9 +22,10 @@
 /**
  * Token counts split into buckets that price differently.
  *
- * The buckets are disjoint on purpose: a provider that reports cached tokens as
- * a *subset* of its input tokens (OpenAI does) gets un-nested on the way in, so
- * every token here is counted exactly once and multiplying by a rate is valid.
+ * The buckets are disjoint on purpose. Nothing on this path reports cached
+ * tokens as a *subset* of its input counts today — OpenAI Realtime did, and was
+ * un-nested on the way in — but the shape is kept because the invariant is what
+ * makes multiplying by a rate valid: every token is counted exactly once.
  */
 export interface UsageTotals {
   textInput: number;
@@ -46,39 +47,24 @@ export interface ModelRates {
 }
 
 /**
- * Published list prices, USD per 1M tokens, read off each provider's own pages
- * on the date below. They are a snapshot, not a contract: rates change, and
- * discounts, free tiers and committed-use pricing are not modelled here.
+ * Published list prices, USD per 1M tokens, read off Google's own pages on the
+ * date below. They are a snapshot, not a contract: rates change, and discounts,
+ * free tiers and committed-use pricing are not modelled here.
  *
- * Verified 2026-08-05 against:
- *  - developers.openai.com/api/docs/models/gpt-realtime
- *  - developers.openai.com/api/docs/models/gpt-realtime-mini
- *  - ai.google.dev/gemini-api/docs/pricing
+ * Verified 2026-08-05 against ai.google.dev/gemini-api/docs/pricing.
  *
- * Keyed by the provider's model id (ModelChoice.id), not our key, because that
- * is what the provider prices.
+ * KEYED BY ModelChoice.id, NOT BY OUR KEY, and that is the part to be careful
+ * with: a mismatch does not fail, it silently prices nothing. The native-audio
+ * row spent time keyed to `gemini-2.5-flash-native-audio-latest` — the AI
+ * Studio spelling — after models.ts moved that model to the Vertex GA alias,
+ * and every call on it reported "no rates in the table" instead of a cost.
+ * Renaming a model id means renaming it here too.
  */
 export const RATES_VERIFIED_ON = '2026-08-05';
 
+// Gemini Live bills no separate cached rate on this path — we use no context
+// caching — so the cached buckets carry the uncached rate and stay at zero.
 const RATES: Record<string, ModelRates> = {
-  'gpt-realtime': {
-    textInput: 4,
-    cachedTextInput: 0.4,
-    audioInput: 32,
-    cachedAudioInput: 0.4,
-    textOutput: 16,
-    audioOutput: 64,
-  },
-  'gpt-realtime-mini': {
-    textInput: 0.6,
-    cachedTextInput: 0.06,
-    audioInput: 10,
-    cachedAudioInput: 0.3,
-    textOutput: 2.4,
-    audioOutput: 20,
-  },
-  // Gemini Live bills no separate cached rate on this path — we use no context
-  // caching — so the cached buckets carry the uncached rate and stay at zero.
   'gemini-3.1-flash-live-preview': {
     textInput: 0.75,
     cachedTextInput: 0.75,
@@ -87,7 +73,7 @@ const RATES: Record<string, ModelRates> = {
     textOutput: 4.5,
     audioOutput: 12,
   },
-  'gemini-2.5-flash-native-audio-latest': {
+  'gemini-live-2.5-flash-native-audio': {
     textInput: 0.5,
     cachedTextInput: 0.5,
     audioInput: 3,
@@ -100,26 +86,25 @@ const RATES: Record<string, ModelRates> = {
 /**
  * How much audio one token stands for, tokens per second.
  *
- * Neither provider bills speech by the word: audio is cut into fixed slices and
+ * Google does not bill speech by the word: audio is cut into fixed slices and
  * each slice is a token, so a token count divided by these numbers is a length
  * of speech. That is the only clock we have on the *content* of a call — the
  * wall clock knows how long the connection was open, not who was talking.
  *
- * Input and output differ on OpenAI (one token per 100 ms of the user, one per
- * 50 ms of the assistant) and are the same on Gemini.
+ * Input and output are the same rate on Gemini. They were not on OpenAI, which
+ * billed one token per 100 ms of the user and one per 50 ms of the assistant;
+ * the two fields survive that provider because the shape is right either way.
  *
- * Verified 2026-08-06 against:
- *  - OpenAI Realtime pricing notes: 1 min of user speech = 600 tokens, 1 min of
- *    assistant speech = 1,200 tokens
- *  - ai.google.dev/gemini-api/docs/tokens: "Audio: 32 tokens per second"
+ * Keyed by ModelChoice.id, with the same trap the RATES table above documents.
+ *
+ * Verified 2026-08-06 against ai.google.dev/gemini-api/docs/tokens:
+ * "Audio: 32 tokens per second".
  */
 export const AUDIO_RATES_VERIFIED_ON = '2026-08-06';
 
 const AUDIO_TOKENS_PER_SECOND: Record<string, { input: number; output: number }> = {
-  'gpt-realtime': { input: 10, output: 20 },
-  'gpt-realtime-mini': { input: 10, output: 20 },
   'gemini-3.1-flash-live-preview': { input: 32, output: 32 },
-  'gemini-2.5-flash-native-audio-latest': { input: 32, output: 32 },
+  'gemini-live-2.5-flash-native-audio': { input: 32, output: 32 },
 };
 
 export interface SpeakingTime {
@@ -137,14 +122,13 @@ export interface SpeakingTime {
  * The agent's side is trustworthy: output audio is generated once and billed
  * once, so those tokens are exactly the speech the user heard.
  *
- * The user's side is not, always. Both APIs re-send the conversation so far as
- * input on every turn, which means the same second of the user's speech can be
- * charged for many times over — on the Gemini path, where nothing is cached, it
- * is charged on every subsequent turn. Dividing that by 32 measures how often
- * the model re-read the call, not how long anyone spoke. OpenAI splits the
- * re-read out as cached tokens, which is why only the uncached bucket is used
- * here; where even that exceeds the length of the call, the figure is withheld
- * rather than shown as a number that cannot be true.
+ * The user's side is not. The API re-sends the conversation so far as input on
+ * every turn, which means the same second of the user's speech is charged for
+ * again on every subsequent turn — nothing is cached on this path, so nothing
+ * separates the re-read out. Dividing that by 32 measures how often the model
+ * re-read the call, not how long anyone spoke. So the figure is checked against
+ * the wall clock and withheld where it exceeds it, rather than shown as a
+ * number that cannot be true; on a call of any length, expect it withheld.
  */
 export function speakingTime(
   modelId: string,
@@ -211,8 +195,8 @@ function scaleUsage(usage: UsageTotals, inputFactor: number, outputFactor: numbe
  *    and stays linear.
  *
  * Reality sits between them. The square is only reached if nothing intervenes,
- * and something usually does — caching discounts the re-read prefix, and both
- * providers slide or compress the context window once a call runs long.
+ * and something usually does — Google slides or compresses the context window
+ * once a call runs long.
  */
 export function projectHour(
   modelId: string,

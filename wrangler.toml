@@ -17,16 +17,20 @@ pages_build_output_dir = "dist"
 #
 # Locally, put the keys in .dev.vars (gitignored) and run `npm run dev:api`.
 #
-# The keys stay server-side by construction: functions/api/session/* exchange
-# them for a short-lived credential and only that reaches the browser. Neither
-# key is ever readable from the client, so a leaked page cannot spend the
-# account.
-[vars]
-# The model ids used to live here. They moved to src/realtime/models.ts once
-# the UI grew a picker: the browser and the Worker have to agree on the list,
-# and a var can only carry one value. The Worker still owns the mapping — the
-# client sends a key like "gemini-flash", never a raw model id.
+# The keys stay server-side by construction: the Live socket is relayed with the
+# key attached in the Worker (functions/api/live/gemini.ts) and image requests
+# are made from the Worker too. No key is ever readable from the client, so a
+# leaked page cannot spend the account.
 #
-# Voice for the OpenAI session. Gemini's voice is set in the setup message
-# the browser sends (src/realtime/gemini.ts).
-OPENAI_REALTIME_VOICE = "marin"
+# There is nothing under [vars] today. The table stays because this file's
+# existence is what makes Pages read plain-text vars from here and take only
+# Secrets from the dashboard — the split described above depends on it.
+#
+# Model ids used to live here. They moved to src/realtime/models.ts once the UI
+# grew a picker: the browser and the Worker have to agree on the list, and a var
+# can only carry one value. The Worker still owns the mapping — the client sends
+# a key like "gemini-flash-31", never a raw model id.
+#
+# OPENAI_REALTIME_VOICE was the last entry, and went with OpenAI Realtime.
+# Gemini's voice is picked in the settings panel and set in the setup frame.
+[vars]

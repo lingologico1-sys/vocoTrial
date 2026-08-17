@@ -1,8 +1,8 @@
 /**
  * The raw-PCM plumbing the Gemini Live socket needs in both directions.
  *
- * OpenAI's WebRTC transport does all of this inside the browser, which is why
- * only the Gemini path imports this file.
+ * A WebRTC transport would do all of this inside the browser for free — which
+ * is the trade the relay makes, and why this file exists at all.
  */
 
 import { Fft } from './fft';

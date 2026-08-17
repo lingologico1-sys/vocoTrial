@@ -1,5 +1,11 @@
 /**
- * The prompts the agent can be run with.
+ * The prompts written into the app, and the one the server falls back to.
+ *
+ * NOT THE WHOLE LIST any more. Prompts you save yourself live in
+ * src/realtime/presets.ts, which merges them with these and is what the pickers
+ * actually render from. The split is forced: that file reads localStorage, and
+ * this one is imported by functions/. Add a built-in here; nothing about a
+ * saved one belongs in this file.
  *
  * This used to live server-side and be the *only* prompt the app would send —
  * a visitor who could write the instructions could turn a metered key into
@@ -224,10 +230,6 @@ export const INSTRUCTION_PRESETS: InstructionPreset[] = [
     render: beginner,
   },
 ];
-
-export function findPreset(key: string): InstructionPreset | undefined {
-  return INSTRUCTION_PRESETS.find((preset) => preset.key === key);
-}
 
 export function defaultPresetKey(): string {
   return INSTRUCTION_PRESETS[0].key;

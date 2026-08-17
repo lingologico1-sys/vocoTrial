@@ -6,6 +6,9 @@
 # you: the gate fails closed on purpose, so an unset secret is never "open".
 SITE_PASSWORD=...
 
+# Face-kit image generation only. The voice path was Gemini-only as of the
+# OpenAI Realtime removal, so leaving this unset costs you the OpenAI image
+# models on /facekit and nothing else.
 OPENAI_API_KEY=sk-...
 
 # Google runs on Vertex AI (GCP billing), not AI Studio — the same keys

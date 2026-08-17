@@ -3,7 +3,7 @@ import { Mic, MicOff, PhoneOff, Radio, SlidersHorizontal } from 'lucide-react';
 import { startGeminiSession } from '../realtime/gemini';
 import { findModel } from '../realtime/models';
 import { LANGUAGES, defaultLanguageCode, findLanguage } from '../realtime/languages';
-import { INSTRUCTION_PRESETS, defaultPresetKey, findPreset } from '../realtime/instructions';
+import { lastUsedKey, listPresets, rememberPreset, renderPreset } from '../realtime/presets';
 import type { AudioTap, SessionStatus, TranscriptDelta, VoiceSession } from '../realtime/types';
 import type { FaceKit } from '../facekit/kit';
 import { activeKit } from '../facekit/store';
@@ -41,10 +41,10 @@ import { tailSentences } from './text';
 /**
  * The live-model playground.
  *
- * Separate from App.tsx by design. That page is a comparison rig — two
- * providers, every knob exposed, everything held constant so the numbers mean
- * something. This one is fixed to a single model and spends its screen on the
- * character instead. Nothing here reaches back into it.
+ * Separate from App.tsx by design. That page is a comparison rig — both models,
+ * every knob exposed, everything held constant so the numbers mean something.
+ * This one is fixed to a single model and spends its screen on the character
+ * instead. The prompt list is the only thing the two share; see presets.ts.
  */
 
 /** The only model this page runs. It is the thing being tried out. */
@@ -70,7 +70,6 @@ const PREFS_KEY = 'vocotrial.live.v6';
 
 interface Prefs {
   language: string;
-  presetKey: string;
   driver: MouthDriver;
   lookaheadMs: number;
   motion: HeadMotion;
@@ -183,7 +182,14 @@ const STATUS_LABEL: Record<SessionStatus, string> = {
 export default function LiveTrial() {
   const [prefs] = useState(loadPrefs);
   const [language, setLanguage] = useState(prefs.language ?? defaultLanguageCode());
-  const [presetKey, setPresetKey] = useState(prefs.presetKey ?? defaultPresetKey());
+  /**
+   * Not in this page's prefs, unlike everything else here: the prompt list and
+   * the last pick live in realtime/presets.ts, which the comparison rig writes
+   * to as well. A prompt saved over there is offered here, and picking one here
+   * is what that page opens on next.
+   */
+  const [presets] = useState(listPresets);
+  const [presetKey, setPresetKey] = useState(lastUsedKey);
   // Scheduled by default: it is the better mouth, and reactive is kept beside
   // it as the thing to compare against rather than the thing to start from.
   const [driver, setDriver] = useState<MouthDriver>(prefs.driver ?? 'scheduled');
@@ -293,7 +299,6 @@ export default function LiveTrial() {
         PREFS_KEY,
         JSON.stringify({
           language,
-          presetKey,
           driver,
           lookaheadMs,
           motion,
@@ -311,7 +316,6 @@ export default function LiveTrial() {
     }
   }, [
     language,
-    presetKey,
     driver,
     lookaheadMs,
     motion,
@@ -410,7 +414,6 @@ export default function LiveTrial() {
     setMuted(false);
     queue.current.discard();
 
-    const preset = findPreset(presetKey) ?? INSTRUCTION_PRESETS[0];
     const choice = findLanguage(language) ?? LANGUAGES[0];
 
     const handlers = {
@@ -465,7 +468,7 @@ export default function LiveTrial() {
     try {
       lastActivity.current = Date.now();
       const started = await startGeminiSession(handlers, MODEL_KEY, language, {
-        instructions: preset.render(choice),
+        instructions: renderPreset(presetKey, choice),
       });
       session.current = started;
       setTap(started.tap ?? null);
@@ -947,13 +950,16 @@ export default function LiveTrial() {
             <SlidersHorizontal size={13} className="text-slate-500" />
             <select
               value={presetKey}
-              onChange={(event) => setPresetKey(event.target.value)}
+              onChange={(event) => {
+                setPresetKey(event.target.value);
+                rememberPreset(event.target.value);
+              }}
               disabled={live || busy}
               className="flex-1 bg-transparent text-sm text-slate-200 outline-none disabled:opacity-40"
             >
-              {INSTRUCTION_PRESETS.map((preset) => (
+              {presets.map((preset) => (
                 <option key={preset.key} value={preset.key} className="bg-slate-900">
-                  {preset.label}
+                  {preset.builtIn ? preset.label : `${preset.label} · saved`}
                 </option>
               ))}
             </select>

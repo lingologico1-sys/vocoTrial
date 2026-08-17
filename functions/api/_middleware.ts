@@ -14,10 +14,10 @@
  *    what actually keeps strangers off the account, because it is the only one
  *    of the two that curl cannot simply assert. See auth/_cookie.ts.
  *
- * Everything under /api/* needs both, including the WebSocket upgrade — a
- * minted OpenAI or Gemini token is billable the moment it exists, and the relay
- * spends the Google key directly for as long as the socket is open. The only
- * exemption is /api/auth/* itself, which mints nothing.
+ * Everything under /api/* needs both, including the WebSocket upgrade — the
+ * relay spends the Google key directly for as long as the socket is open, and
+ * image generation spends on every request. The only exemption is /api/auth/*
+ * itself, which spends nothing.
  *
  * STILL NOT DONE: per-caller rate limiting. Workers have no shared counter
  * without KV or a Durable Object, so there is nothing here slowing down
@@ -27,6 +27,10 @@
 import { readToken, tokenIsValid } from './auth/_cookie';
 
 export interface GateEnv {
+  /**
+   * Face-kit image generation only, since OpenAI Realtime was removed — see
+   * functions/api/image/generate.ts. No voice path reads it any more.
+   */
   OPENAI_API_KEY?: string;
   /** Vertex AI key (GCP billing), primary then fallback — see _vertex.ts. */
   GEMINI_API_KEY?: string;
@@ -37,7 +41,6 @@ export interface GateEnv {
    * only the models marked `surface: 'aistudio'` are served by it.
    */
   GOOGLE_API_KEY?: string;
-  OPENAI_REALTIME_VOICE?: string;
   /** The site password. A Secret in the dashboard — never in wrangler.toml. */
   SITE_PASSWORD?: string;
 }

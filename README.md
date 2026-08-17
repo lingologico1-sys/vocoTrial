@@ -1,18 +1,21 @@
 # vocoTrial
 
 A live voice agent — you talk, the model talks back — running on Cloudflare
-Pages. Two providers behind one UI: **Gemini Live** (WebSocket) and **OpenAI
-Realtime** (WebRTC).
+Pages, on **Gemini Live** over a relayed WebSocket.
+
+> **OpenAI Realtime was removed.** It rode WebRTC straight from the browser
+> against an ephemeral `ek_…` secret, and it worked; the app is Gemini-only for
+> now by choice, not because that path broke. What went with it: the provider
+> picker, `/api/session/*`, and seven settings that were OpenAI's alone —
+> speaking rate, the two VAD detectors and their sub-fields, the input
+> transcription model and its language hint, and noise reduction. `git log` is
+> the reference if it comes back. `OPENAI_API_KEY` is still live and still
+> needed: face-kit image generation uses it.
 
 ## How it fits together
 
 ```
-OpenAI ── ephemeral secret, then audio goes direct ────────────────────┐
-  browser ──POST /api/session/openai──► Worker ──► OpenAI              │
-     │◄──────── ek_… secret ───────────────┘                           │
-     └──────── WebRTC audio, no relay ────────────────────► OpenAI ◄───┘
-
-Gemini ── no usable browser credential exists, so the socket is relayed
+No usable browser credential exists, so the socket is relayed
   browser ──WS /api/live/gemini──► Worker ──WS ?key=…──► Vertex AI or AI Studio
      └──────── audio both ways, through Cloudflare ───────────┘   (per model)
 ```
@@ -47,9 +50,9 @@ here": it closes the socket with `1007 Invalid resource field value` or `1008
 Publisher model … was not found`, both of which read as a wrong model id. The
 identical frames reach `setupComplete` against the regional host.
 
-The one rule the whole design turns on: **the provider API keys never reach the
-browser.** Anything in a JS bundle is public, and a leaked Realtime key is a
-metered bill.
+The one rule the whole design turns on: **the API keys never reach the
+browser.** Anything in a JS bundle is public, and a leaked key is a metered
+bill.
 
 The site is private, behind a single shared password. What that gate protects is
 the account, not the UI: a stranger who never loads the page can still spend the
@@ -60,36 +63,34 @@ cannot set custom headers on a WebSocket handshake, and a cookie is the one
 credential that rides both the `fetch` and the socket. See
 [functions/api/auth/_cookie.ts](functions/api/auth/_cookie.ts).
 
-OpenAI lets us honour that cheaply: the Worker trades the key for a short-lived
-`ek_…` secret, and audio then flows browser-to-OpenAI with no hop through
-Cloudflare. Gemini cannot — its ephemeral tokens are refused on this account
-(see below) — so its socket is relayed through the Worker instead, which keeps
-the key private at the cost of a latency leg.
+Gemini cannot honour that cheaply — its ephemeral tokens are refused on this
+account (see below) — so the socket is relayed through the Worker, which keeps
+the key private at the cost of a latency leg and some billed Worker time.
 
 | Path | What it does |
 | --- | --- |
 | [functions/api/_middleware.ts](functions/api/_middleware.ts) | Same-origin **and** session-cookie gate in front of every `/api/*` route; POST-only except WebSocket upgrades |
 | [functions/api/auth/](functions/api/auth/) | Trades the site password for a signed session cookie |
 | [src/PasswordGate.tsx](src/PasswordGate.tsx) | The sign-in screen. Cosmetic — the middleware is what actually refuses |
-| [functions/api/session/openai.ts](functions/api/session/openai.ts) | Mints an OpenAI Realtime client secret (`ek_…`) |
 | [functions/api/live/gemini.ts](functions/api/live/gemini.ts) | Relays the Gemini Live socket with the API key attached, to whichever surface carries the model |
+| [functions/api/live/_resolve.ts](functions/api/live/_resolve.ts) | Checks the prompt and settings that arrive in the socket's opening frame |
+| [functions/api/live/_setup.ts](functions/api/live/_setup.ts) | Turns those settings into the Live `setup` payload |
 | [functions/api/_vertex.ts](functions/api/_vertex.ts) | Vertex host, key pair, region and express-mode model naming |
 | [functions/api/live/regions.ts](functions/api/live/regions.ts) | Asks every region which models it serves, and whether it has capacity — free, and the A/B behind the quota question |
 | [functions/api/_aistudio.ts](functions/api/_aistudio.ts) | The same three facts for AI Studio, for models Vertex has no build of |
-| [src/realtime/instructions.ts](src/realtime/instructions.ts) | The prompt presets, and the default the server falls back to |
-| [src/realtime/settings.ts](src/realtime/settings.ts) | Which provider knobs exist, which models take them, and the sanitiser |
-| [functions/api/session/_providerConfig.ts](functions/api/session/_providerConfig.ts) | Translates those settings into each provider's payload shape |
+| [src/realtime/instructions.ts](src/realtime/instructions.ts) | The five built-in prompts, and the default the server falls back to |
+| [src/realtime/presets.ts](src/realtime/presets.ts) | Those plus your saved ones, and the last-used pick. Browser only |
+| [src/realtime/settings.ts](src/realtime/settings.ts) | Which knobs exist, which models take them, and the sanitiser |
 | [src/SettingsPanel.tsx](src/SettingsPanel.tsx) | The panel, rendered from the settings schema rather than written out |
-| [src/realtime/openai.ts](src/realtime/openai.ts) | WebRTC session — the browser handles mic and playback |
 | [src/realtime/gemini.ts](src/realtime/gemini.ts) | WebSocket session — this code handles mic and playback |
-| [src/realtime/audio.ts](src/realtime/audio.ts) | 16 kHz capture and 24 kHz scheduled playback, Gemini only |
+| [src/realtime/audio.ts](src/realtime/audio.ts) | 16 kHz capture and 24 kHz scheduled playback |
 | [public/worklets/pcm-capture.js](public/worklets/pcm-capture.js) | AudioWorklet: float32 → int16, batched to ~128 ms |
 
 ## What a call can be configured with
 
 This is a rig for comparing realtime models as language tutors, so the prompt
-and the provider knobs are set per call, from the panel, and kept in
-`localStorage` between calls.
+and the knobs are set per call, from the panel, and kept in `localStorage`
+between calls.
 
 **The prompt is the client's to write.** It used to be server-only, so that a
 visitor could not turn a metered key into their own chatbot — the right call for
@@ -100,24 +101,46 @@ off the account.
 What the client still may **not** send is a model id or a language code. Those
 travel as keys that the Worker looks up in [src/realtime/models.ts](src/realtime/models.ts)
 and [src/realtime/languages.ts](src/realtime/languages.ts), because the model
-decides which meter the key is spent against and the language reaches Whisper as
-free text. A prompt decides neither.
+decides which meter the key is spent against. A prompt decides neither.
 
 The settings are declared once, in
 [src/realtime/settings.ts](src/realtime/settings.ts), and that one table drives
-the panel, the Worker's validation and the translation into each provider's
-payload. Applicability is per **model**, not per provider — native audio takes
-fields the half-cascade model rejects outright, and a rejected field fails the
-whole call at connect. Adding a knob means adding one entry there.
+the panel, the Worker's validation and the translation into the `setup` frame.
+Applicability is per **model**: native audio takes fields the half-cascade model
+rejects outright, and a rejected field fails the whole call at connect. Adding a
+knob means adding one entry there.
 
 Two consequences worth knowing:
 
 - Unset is a real state. An untouched control sends no field at all, rather than
-  sending the value that happens to be the provider's default today.
-- Gemini gets its configuration in the socket's **opening frame**, not the query
-  string — a system instruction is far too long for a URL. The Worker holds the
+  sending the value that happens to be Google's default today.
+- Configuration arrives in the socket's **opening frame**, not the query string
+  — a system instruction is far too long for a URL. The Worker holds the
   upstream socket unconfigured until that frame arrives, or for three seconds,
   whichever comes first.
+
+### Prompts you save yourself
+
+The five built-in prompts are functions of the language: pick Italian and every
+one of them says "Italian" throughout, because they are rendered rather than
+stored. They live in code, in
+[src/realtime/instructions.ts](src/realtime/instructions.ts), and the Worker
+imports that file for the fallback prompt — which is why it holds no browser
+APIs and knows nothing about saved ones.
+
+Saved prompts live beside them in
+[src/realtime/presets.ts](src/realtime/presets.ts), under
+`vocotrial.presets.v1` in `localStorage`. Write anything in the box, **Save as
+new**, name it, and it joins the picker; **Update** writes over the selected one
+and **Delete** removes it. Both pages read this store, so a prompt written on
+the comparison rig is offered on liveTrial too, and whichever was picked last —
+on either page — is the one both open on.
+
+One real difference, surfaced in the panel rather than hidden: a saved prompt is
+**fixed text**, captured in whatever language it was written in, and it does not
+follow the language picker afterwards. Rewriting someone's own words on a
+dropdown change would be worse than letting them go stale. Updating a built-in
+is deliberately not offered — they are code; save your version as your own.
 
 ## First-time deploy
 
@@ -132,7 +155,7 @@ gates the build.
 3. **Settings → Variables and Secrets**, add these **Secrets** (encrypted, not
    plain text) to Production *and* Preview:
    - `SITE_PASSWORD`
-   - `OPENAI_API_KEY`
+   - `OPENAI_API_KEY` (face-kit image generation only — no voice path reads it)
    - `GEMINI_API_KEY` (Vertex AI key — see below, it is a particular kind)
    - `GEMINI_API_KEY2` (optional fallback Vertex key)
    - `GOOGLE_API_KEY` (ordinary AI Studio key, for models with no Vertex build)
@@ -198,9 +221,8 @@ cp .dev.vars.example .dev.vars   # then paste in the password and the keys
 npm run dev:api                  # SPA + functions, which is what you want
 ```
 
-`npm run dev` alone serves the SPA but not `functions/`, so `/api/session/*` and
-`/api/live/*` return 404 and no call can start. Use `dev:api` for anything
-touching audio.
+`npm run dev` alone serves the SPA but not `functions/`, so `/api/live/*`
+returns 404 and no call can start. Use `dev:api` for anything touching audio.
 
 Getting a microphone requires a secure context: `localhost` counts, an IP on
 your LAN does not.
@@ -219,27 +241,23 @@ npm run lint
 | SPA, `_headers`, `_redirects`, Git-integration deploys | working |
 | Same-origin gate (`403` on a forged Origin) | working |
 | Password gate (`401` on every `/api/*` without a cookie, fetch and WebSocket alike) | working — verified against `wrangler pages dev`, including a tampered cookie and an unset `SITE_PASSWORD` |
-| `/api/session/openai` | mints ephemeral secrets correctly |
 | `/api/live/gemini` | **working on both surfaces** — `setupComplete` through the relay on Vertex *and* AI Studio |
 | `/api/live/models` | probes candidate ids with `generateContent`, the only call this key may make |
 | `/api/live/regions` | **run 2026-08-16** — all twelve hosts take the key; Pro is global-endpoint-only, Flash is in seven regions |
 | `/api/image/generate` | **working on Vertex** — returned an image in ~16s on Flash |
-| OpenAI voice conversation | **working** — confirmed from a browser on `gpt-realtime` and `gpt-realtime-mini`, and untouched by the Vertex move |
 | Gemini handshake | **working** — 2.5 native audio on Vertex, 3.1 Flash Live on AI Studio |
 | Gemini audio in a browser | untested; needs a mic |
+| Saved prompt presets | typechecks and builds; the create/update/delete round trip is **untested in a browser** |
+| Cost readout on 2.5 native audio | **was showing "no rates"** until this change — the rate table was keyed to the model's old AI Studio id. Now keyed to `gemini-live-2.5-flash-native-audio`; the figures themselves are unverified since the rename |
 
 ### Which model ids are actually confirmed
 
 A model id can only be confirmed by a call that connects, because nothing
-earlier looks at it. Neither provider validates the model when issuing a
-credential — Google's `auth_tokens` accepted four mutually exclusive spellings
-of a 3.1 id, and OpenAI's `client_secrets` minted a deliberate
-`gpt-realtime-no-such-model` just like the real ones. OpenAI's `/realtime/calls`
-rejects a hand-rolled SDP offer before it reads the model, so that proves
-nothing either.
-
-Both OpenAI ids are confirmed by real browser calls, and the Vertex move does
-not touch them.
+earlier looks at it. Google's `auth_tokens` accepted four mutually exclusive
+spellings of a 3.1 id before minting against any of them, and the relay does not
+discover a bad id either: it opens the upstream socket first, and only the
+`setup` frame names the model, so a wrong one surfaces as a close code seconds
+later rather than as a refusal to connect.
 
 Both Gemini Live ids reach `setupComplete` today, each on its own surface — and
 the responses differ in a way that confirms it: Vertex returns a `sessionId`, AI
@@ -358,7 +376,7 @@ generates. `429` is the exception worth watching for in either phase — quota i
 checked at admission, ahead of both, so a region can refuse a probe it would
 otherwise have answered for free. That refusal *is* the measurement.
 
-### Why Gemini is proxied and OpenAI is not
+### Why Gemini is proxied
 
 Gemini's ephemeral tokens do not work on this account. `auth_tokens` mints one
 happily, and the token is then refused as a credential *everywhere* — not just
@@ -376,10 +394,9 @@ Since nothing browser-safe can be handed out, the socket is relayed through
 stays server-side and the Worker — not the page — sends the setup message, so a
 visitor still cannot redefine the agent. The cost is that Gemini audio hops
 through Cloudflare, adding a leg of latency and billing Worker time for the
-length of a call.
-
-OpenAI keeps the direct path: its ephemeral secrets work, so WebRTC goes
-browser-to-OpenAI with no relay.
+length of a call. There is no second path to fall back to: OpenAI Realtime kept
+a direct browser-to-provider WebRTC line because its ephemeral secrets work, and
+that was removed along with the provider.
 
 The move to Vertex does not change any of that on its own — the relay is still
 carrying the audio, and an express-mode API key is no more browser-safe than an

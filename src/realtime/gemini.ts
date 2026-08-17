@@ -12,9 +12,9 @@ import type { SessionConfig, SessionHandlers, VoiceSession } from './types';
  * also sends the setup message, so this file never does — it streams audio and
  * listens.
  *
- * Unlike the OpenAI path there is no WebRTC doing the media work, so this file
- * owns the whole loop: mic -> int16 -> base64 -> socket, and socket -> base64
- * -> int16 -> scheduled playback. See src/realtime/audio.ts for both halves.
+ * There is no WebRTC doing the media work here, so this file owns the whole
+ * loop: mic -> int16 -> base64 -> socket, and socket -> base64 -> int16 ->
+ * scheduled playback. See src/realtime/audio.ts for both halves.
  */
 
 function liveSocketUrl(modelKey: string, language: string): string {
@@ -290,7 +290,6 @@ export async function startGeminiSession(
   }
 
   return {
-    provider: 'gemini',
     // Non-null by here: resume() built the context before anything was awaited.
     tap: player.tap(),
     setMuted: (muted) => mic.setMuted(muted),

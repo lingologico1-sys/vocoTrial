@@ -87,10 +87,7 @@ export async function onRequestPost(
   }
 
   // Whatever the pickers offer today, plus the spellings worth discovering.
-  const live = [
-    ...MODELS.filter((model) => model.provider === 'gemini').map((model) => model.id),
-    ...LIVE_CANDIDATES,
-  ];
+  const live = [...MODELS.map((model) => model.id), ...LIVE_CANDIDATES];
   const image = [
     ...IMAGE_MODELS.filter((model) => model.provider === 'gemini').map((model) => model.id),
     ...IMAGE_CANDIDATES,

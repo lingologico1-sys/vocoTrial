@@ -1,15 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Mic, MicOff, PhoneOff, Radio } from 'lucide-react';
-import { startOpenAiSession } from './realtime/openai';
 import { startGeminiSession } from './realtime/gemini';
 import { defaultModelKey, findModel, visibleModels } from './realtime/models';
 import { LANGUAGES, defaultLanguageCode, findLanguage } from './realtime/languages';
+import { MAX_INSTRUCTIONS } from './realtime/instructions';
 import {
-  INSTRUCTION_PRESETS,
-  MAX_INSTRUCTIONS,
-  defaultPresetKey,
-  findPreset,
-} from './realtime/instructions';
+  deletePreset,
+  lastUsedKey,
+  listPresets,
+  rememberPreset,
+  renderPreset as renderFor,
+  savePreset,
+  updatePreset,
+} from './realtime/presets';
 import type { SessionSettings } from './realtime/settings';
 import SettingsPanel from './SettingsPanel';
 import {
@@ -24,21 +27,16 @@ import {
   totalTokens,
   type UsageTotals,
 } from './realtime/cost';
-import type { Provider, SessionStatus, TranscriptDelta, VoiceSession } from './realtime/types';
+import type { SessionStatus, TranscriptDelta, VoiceSession } from './realtime/types';
 
 interface Turn {
-  /** The provider's id for this turn, when it gives one. See TranscriptDelta. */
+  /** Google's id for this turn, when it gives one. See TranscriptDelta. */
   id?: string;
   role: 'user' | 'agent';
   text: string;
   /** Closed turns never take another delta, so a new one starts a new bubble. */
   done: boolean;
 }
-
-const PROVIDERS: Array<{ id: Provider; label: string }> = [
-  { id: 'gemini', label: 'Gemini Live' },
-  { id: 'openai', label: 'OpenAI Realtime' },
-];
 
 /**
  * How long a call may go with nobody talking before it hangs itself up.
@@ -53,26 +51,44 @@ const IDLE_TIMEOUT_MS = 90_000;
 const IDLE_POLL_MS = 5_000;
 
 /**
- * Where the prompt and the settings survive a reload.
+ * Where the in-progress prompt and the settings survive a reload.
  *
  * A trial is a sequence of calls you compare, and retyping a prompt between two
  * of them is both tedious and a way to change the thing you were holding
  * constant. Nothing here is a secret — the credentials live in an HttpOnly
  * cookie precisely so that they never touch this store.
+ *
+ * Distinct from the preset store in realtime/presets.ts, which holds the
+ * prompts you deliberately saved and is shared with the liveTrial page. This is
+ * the scratch copy: the text in the box right now, whether or not it has a name.
  */
 const PREFS_KEY = 'vocotrial.prefs.v1';
 
 interface Prefs {
+  /**
+   * Which preset the saved `instructions` were being written against.
+   *
+   * Stored so it can be *compared*, not to decide what opens — the preset store
+   * decides that, because it is the one both pages write to. If the two
+   * disagree, a pick was made somewhere else since this was written and the
+   * scratch text belongs to a prompt that is no longer selected; see the load
+   * below, which drops it rather than showing it under the wrong name.
+   */
   presetKey: string;
   instructions: string;
   edited: boolean;
   settings: SessionSettings;
 }
 
-function renderPreset(presetKey: string, languageCode: string): string {
-  const preset = findPreset(presetKey) ?? INSTRUCTION_PRESETS[0];
-  const language = findLanguage(languageCode) ?? LANGUAGES[0];
-  return preset.render(language);
+/**
+ * Renders a preset straight from the store.
+ *
+ * Only for the initial state, which runs once. Everything after mount goes
+ * through the in-memory list instead — see renderPreset inside the component,
+ * and the note there on why that distinction earns its keep.
+ */
+function renderStoredPreset(presetKey: string, languageCode: string): string {
+  return renderFor(presetKey, findLanguage(languageCode) ?? LANGUAGES[0]);
 }
 
 /** Anything malformed is discarded rather than repaired: it is only a cache. */
@@ -95,27 +111,36 @@ const STATUS_LABEL: Record<SessionStatus, string> = {
 };
 
 export default function App() {
-  const [provider, setProvider] = useState<Provider>('gemini');
-  // Keyed by provider so switching back and forth remembers each side's pick.
-  const [modelKeys, setModelKeys] = useState<Record<Provider, string>>({
-    gemini: defaultModelKey('gemini'),
-    openai: defaultModelKey('openai'),
-  });
-  // Not keyed by provider: the language is the user's, not the model's.
+  const [modelKey, setModelKey] = useState(defaultModelKey());
   const [language, setLanguage] = useState(defaultLanguageCode());
 
   /**
-   * The prompt and the knobs. Shared across providers on purpose — running two
-   * models on the same instructions is the entire point of the rig, and the
-   * Worker drops whatever the chosen model does not accept.
+   * The prompt and the knobs. Kept across a model switch on purpose — running
+   * both models on the same instructions is the entire point of the rig, and
+   * the Worker drops whatever the chosen model does not accept.
+   *
+   * The page opens on the preset used last, here or on liveTrial. The scratch
+   * text from the previous visit comes back with it only if it was written
+   * against that same preset — see Prefs.presetKey.
    */
   const [prefs] = useState(loadPrefs);
-  const [presetKey, setPresetKey] = useState(prefs.presetKey ?? defaultPresetKey());
-  const [instructions, setInstructions] = useState(
-    () => prefs.instructions ?? renderPreset(prefs.presetKey ?? defaultPresetKey(), defaultLanguageCode()),
+  const [presets, setPresets] = useState(listPresets);
+  const [presetKey, setPresetKey] = useState(lastUsedKey);
+  const [instructions, setInstructions] = useState(() => {
+    const key = lastUsedKey();
+    return prefs.presetKey === key && prefs.instructions !== undefined
+      ? prefs.instructions
+      : renderStoredPreset(key, defaultLanguageCode());
+  });
+  const [edited, setEdited] = useState(
+    () => (prefs.presetKey === lastUsedKey() ? (prefs.edited ?? false) : false),
   );
-  const [edited, setEdited] = useState(prefs.edited ?? false);
   const [settings, setSettings] = useState<SessionSettings>(prefs.settings ?? {});
+  /**
+   * Why a save or a delete could not be done. Shown beside the panel rather
+   * than thrown away: a full quota is the one failure here that loses writing.
+   */
+  const [presetError, setPresetError] = useState<string | null>(null);
 
   const [status, setStatus] = useState<SessionStatus>('idle');
   const [detail, setDetail] = useState<string | null>(null);
@@ -137,6 +162,24 @@ export default function App() {
    * projection that divides by it.
    */
   const [callSeconds, setCallSeconds] = useState<number | null>(null);
+
+  /**
+   * A preset's text, rendered from the list already in memory.
+   *
+   * Not from the store, unlike the initial state above, and the difference is
+   * not stylistic: this runs on *every keystroke* in the prompt box — see
+   * writeInstructions, which re-renders the preset to work out whether what has
+   * been typed still matches it. Reading localStorage and parsing every saved
+   * prompt to answer that, once per character, is the version of this that gets
+   * slower the more prompts you save.
+   */
+  const renderPreset = useCallback(
+    (key: string, languageCode: string) => {
+      const preset = presets.find((option) => option.key === key) ?? presets[0];
+      return preset.render(findLanguage(languageCode) ?? LANGUAGES[0]);
+    },
+    [presets],
+  );
 
   const session = useRef<VoiceSession | null>(null);
   const log = useRef<HTMLDivElement>(null);
@@ -172,11 +215,15 @@ export default function App() {
    * Rewriting someone's own words because they switched from French to Italian
    * would lose work, so the tracking stops the moment they type. Editing it back
    * to the preset's exact text starts it again — see onInstructions below.
+   *
+   * A saved preset is fixed text and renders the same whatever the language, so
+   * this re-sets it to what it already was. Harmless, and cheaper to let happen
+   * than to special-case.
    */
   useEffect(() => {
     if (edited) return;
     setInstructions(renderPreset(presetKey, language));
-  }, [presetKey, language, edited]);
+  }, [presetKey, language, edited, renderPreset]);
 
   const appendTranscript = useCallback((delta: TranscriptDelta) => {
     // Any transcript at all means somebody just said something.
@@ -211,7 +258,7 @@ export default function App() {
     setUsage(null);
     setCallSeconds(null);
     wentLive.current = null;
-    setBilledModel(findModel(modelKeys[provider])?.id ?? null);
+    setBilledModel(findModel(modelKey)?.id ?? null);
 
     const handlers = {
       onStatus: (next: SessionStatus, message?: string) => {
@@ -238,17 +285,13 @@ export default function App() {
     };
 
     try {
-      const modelKey = modelKeys[provider];
       // The settings go over as written and are checked on arrival, where the
-      // model is known: functions/api/session/_resolve.ts.
+      // model is known: functions/api/live/_resolve.ts.
       const config = { instructions, settings };
       // Set before awaiting: the clock starts at the moment of connecting, so a
       // call nobody ever speaks into still times out.
       lastActivity.current = Date.now();
-      session.current =
-        provider === 'openai'
-          ? await startOpenAiSession(handlers, modelKey, language, config)
-          : await startGeminiSession(handlers, modelKey, language, config);
+      session.current = await startGeminiSession(handlers, modelKey, language, config);
     } catch (error) {
       session.current = null;
       setStatus('error');
@@ -293,6 +336,9 @@ export default function App() {
     setPresetKey(key);
     setEdited(false);
     setInstructions(renderPreset(key, language));
+    setPresetError(null);
+    // What makes it the one this page and liveTrial open on next time.
+    rememberPreset(key);
   };
 
   const writeInstructions = (text: string) => {
@@ -306,12 +352,70 @@ export default function App() {
     setInstructions(renderPreset(presetKey, language));
   };
 
+  /**
+   * Runs a change to the preset store and re-reads the list from it.
+   *
+   * Re-reading rather than patching the array in place: the store is the thing
+   * both pages share, and a list assembled here from what we *think* happened
+   * would be the copy that drifts.
+   */
+  const withPresets = (change: () => void): boolean => {
+    let ok = true;
+    try {
+      change();
+      setPresetError(null);
+    } catch (error) {
+      ok = false;
+      setPresetError(error instanceof Error ? error.message : 'Could not save the prompt');
+    }
+    setPresets(listPresets());
+    return ok;
+  };
+
+  /** Keeps the text in the box as a preset of its own, and selects it. */
+  const saveAsPreset = (label: string): boolean =>
+    withPresets(() => {
+      // savePreset records the new key as the last-used one itself, so there is
+      // no rememberPreset call to pair with this the way choosePreset has.
+      const created = savePreset(label, instructions);
+      setPresetKey(created.key);
+      // Saved *is* the preset now, so there is nothing left to be edited from.
+      setEdited(false);
+    });
+
+  /** Writes the box over the selected saved preset, keeping its name and key. */
+  const updateSelectedPreset = () => {
+    withPresets(() => {
+      updatePreset(presetKey, instructions);
+      setEdited(false);
+    });
+  };
+
+  /**
+   * Deletes the selected saved preset and falls back to the built-in default.
+   *
+   * Confirmed first, and worth the interruption: this is text the user wrote,
+   * the store keeps no history, and the button sits one row from Save.
+   */
+  const deleteSelectedPreset = () => {
+    const preset = presets.find((option) => option.key === presetKey);
+    if (!preset || preset.builtIn) return;
+    if (!window.confirm(`Delete the saved prompt “${preset.label}”? This cannot be undone.`)) {
+      return;
+    }
+
+    withPresets(() => {
+      deletePreset(presetKey);
+      choosePreset(lastUsedKey());
+    });
+  };
+
   const busy = status === 'connecting';
   const live = status === 'live';
   // The Worker refuses an over-long prompt too; catching it here saves a round
   // trip and says so next to the button rather than in the status line.
   const tooLong = instructions.length > MAX_INSTRUCTIONS;
-  const model = findModel(modelKeys[provider]) ?? visibleModels(provider)[0];
+  const model = findModel(modelKey) ?? visibleModels()[0];
 
   // A reserved turn whose transcript never arrived holds its place in the
   // ordering but has nothing to draw.
@@ -329,9 +433,6 @@ export default function App() {
           time: callSeconds === null ? null : speakingTime(billedModel, usage, callSeconds),
           hourly: callSeconds === null ? null : projectHour(billedModel, usage, callSeconds),
           truncated: status === 'error',
-          // The relay leg is a property of the call that ran, so it is read off
-          // the billed model for the same reason the rates are.
-          relayed: billedModel.startsWith('gemini'),
         }
       : null;
 
@@ -379,24 +480,6 @@ export default function App() {
           </a>
         </header>
 
-        <div className="flex gap-2">
-          {PROVIDERS.map((option) => (
-            <button
-              key={option.id}
-              type="button"
-              onClick={() => setProvider(option.id)}
-              disabled={live || busy}
-              className={`flex-1 rounded-lg border px-4 py-2.5 text-sm font-medium transition disabled:opacity-40 ${
-                provider === option.id
-                  ? 'border-sky-500 bg-sky-500/10 text-sky-300'
-                  : 'border-slate-800 text-slate-400 hover:border-slate-700'
-              }`}
-            >
-              {option.label}
-            </button>
-          ))}
-        </div>
-
         <label className="flex items-center gap-3 rounded-lg border border-slate-800 px-4 py-2.5">
           <span className="text-xs uppercase tracking-wide text-slate-500">Practising</span>
           <select
@@ -417,14 +500,12 @@ export default function App() {
         <label className="flex items-center gap-3 rounded-lg border border-slate-800 px-4 py-2.5">
           <span className="text-xs uppercase tracking-wide text-slate-500">Model</span>
           <select
-            value={modelKeys[provider]}
-            onChange={(event) =>
-              setModelKeys((current) => ({ ...current, [provider]: event.target.value }))
-            }
+            value={modelKey}
+            onChange={(event) => setModelKey(event.target.value)}
             disabled={live || busy}
             className="flex-1 bg-transparent text-sm text-slate-200 outline-none disabled:opacity-40"
           >
-            {visibleModels(provider).map((model) => (
+            {visibleModels().map((model) => (
               <option key={model.key} value={model.key} className="bg-slate-900">
                 {model.label}
                 {model.unverified ? ' (unverified id)' : ''}
@@ -433,18 +514,27 @@ export default function App() {
           </select>
         </label>
 
-        <SettingsPanel
-          model={model}
-          disabled={live || busy}
-          presetKey={presetKey}
-          onPreset={choosePreset}
-          instructions={instructions}
-          onInstructions={writeInstructions}
-          edited={edited}
-          onResetInstructions={resetInstructions}
-          settings={settings}
-          onSettings={setSettings}
-        />
+        <div>
+          <SettingsPanel
+            model={model}
+            disabled={live || busy}
+            presets={presets}
+            presetKey={presetKey}
+            onPreset={choosePreset}
+            instructions={instructions}
+            onInstructions={writeInstructions}
+            edited={edited}
+            onResetInstructions={resetInstructions}
+            onSavePreset={saveAsPreset}
+            onUpdatePreset={updateSelectedPreset}
+            onDeletePreset={deleteSelectedPreset}
+            settings={settings}
+            onSettings={setSettings}
+          />
+          {/* Outside the <details>, so a save that failed is visible even if
+              the panel has since been collapsed over it. */}
+          {presetError && <p className="mt-1 px-1 text-xs text-rose-400">{presetError}</p>}
+        </div>
 
         <div className="flex items-center gap-3 rounded-lg border border-slate-800 px-4 py-3">
           <Radio
@@ -569,9 +659,8 @@ export default function App() {
                 <p className="mt-1 text-[11px] leading-relaxed text-slate-600">
                   This call&rsquo;s spend per second, stretched to 60 minutes. Expect more:
                   every turn re-sends the conversation so far, so an untrimmed, uncached
-                  hour reaches {formatUsd(summary.hourly.ceilingUsd)}. Caching and the
-                  providers&rsquo; own context trimming pull it back towards the first
-                  figure.
+                  hour reaches {formatUsd(summary.hourly.ceilingUsd)}. Google&rsquo;s own
+                  context trimming pulls it back towards the first figure.
                 </p>
               </div>
             )}
@@ -584,9 +673,8 @@ export default function App() {
             )}
 
             <p className="mt-3 text-[11px] leading-relaxed text-slate-600">
-              Provider-reported tokens at {RATES_VERIFIED_ON} list prices — an estimate, not
-              your bill.
-              {summary.relayed && ' Excludes the Cloudflare Worker time the relay bills.'}
+              Google-reported tokens at {RATES_VERIFIED_ON} list prices — an estimate, not your
+              bill. Excludes the Cloudflare Worker time the relay bills.
               {summary.truncated && ' The call ended abnormally, so the final usage may be missing.'}
             </p>
           </div>
