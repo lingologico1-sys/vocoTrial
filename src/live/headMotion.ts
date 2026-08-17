@@ -702,24 +702,38 @@ const PRESS: Envelope = { attack: 0.1, hold: 0.08, release: 0.16 };
 /**
  * How far toward `mbp` a press goes, as a share of the whole pose.
  *
- * Short of it on purpose, and for the lesson BROW_FLASH_LIFT had to be corrected
- * to learn: an idle movement that reaches what speech reaches has stopped being
- * idle. `mbp` is a real viseme — the one the classifier returns for a barely
- * audible frame — so a press driven the whole way is indistinguishable from a
- * consonant, and a consonant with no sound under it is the exact thing this
- * gesture is trying not to look like. Stopping short puts the lips somewhere the
- * analyser never puts them, which reads as a small movement rather than as a
- * phoneme.
+ * All the way, and it shipped at 0.6 on an argument that measurement did not
+ * support. The argument was BROW_FLASH_LIFT's, which is a good one in general: an
+ * idle movement that reaches what speech reaches has stopped being idle, and
+ * `mbp` is a real viseme, so a press driven the whole way would be
+ * indistinguishable from a consonant with no sound under it.
  *
- * Not so short that it disappears, which is the other half of the sizing and the
- * half that is a property of the artwork rather than of this file. `rest` and
- * `mbp` are both closed mouths and most generators draw them very much alike —
- * on the kit this was built against the two patches are hard to tell apart in
- * the picker — so the whole travel can be a couple of pixels before any share is
- * taken of it. If a press cannot be seen on a given kit, that is the two patches
- * being alike, and the fix is in the art rather than in this number.
+ * What that reasoning assumed is that `mbp` looks like something. It does not.
+ * Running patchDivergence over the shipped kit — the share of centre pixels that
+ * differ visibly, which is what the twin check on the kit page already uses —
+ * puts `rest` against `mbp` at 7.9%, the *closest* pair in the set by some way:
+ *
+ *   rest / mbp    7.9%     this gesture, at full travel
+ *   rest / oh    11.8%
+ *   rest / ee    15.2%
+ *   rest / uh    20.8%
+ *   rest / aa    34.0%
+ *   aa   / oh    37.8%     the widest the mouth ever moves
+ *
+ * So the ordering the brow flash exists to protect is not in danger at any
+ * setting: a full press is already the smallest movement this mouth can make,
+ * a fifth of what a vowel change does. Six tenths of it came to under 5% of the
+ * pixels changing for a third of a second, which is not a subtle gesture — it is
+ * an invisible one, and that is exactly how it was reported.
+ *
+ * Which leaves the artwork as the real ceiling, and worth stating plainly because
+ * no number here can lift it. Both poses are a closed mouth, and a model asked to
+ * close a mouth that is already closed has little to do — slots.ts records the
+ * sharper version of this, where the two came back identical. 7.9% is the whole
+ * budget this gesture has to spend, and the only way to raise it is to draw an
+ * `mbp` that sits further from `rest`.
  */
-const PRESS_DEPTH = 0.6;
+const PRESS_DEPTH = 1;
 
 /**
  * How long a press refuses to fire again, in seconds.

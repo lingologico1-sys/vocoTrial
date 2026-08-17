@@ -60,24 +60,25 @@ const BLINK_EVERY_MS = 4200;
  */
 const PLACEHOLDER_BROW_BOLDNESS = 1.5;
 
-/**
- * And the same allowance for the lip press, at the same figure.
+/*
+ * There is deliberately no such allowance for the lip press, which had one until
+ * PRESS_DEPTH went to full travel and it became a way of asking for a mouth
+ * nobody has drawn.
  *
- * Deliberately the same number, because it is the same argument and not a second
- * tuning: this drawing has to overact to say anything. The arithmetic is worth
- * having rather than trusting, though, because the press is a much smaller
- * movement than a brow raise and the margin is thinner. `rest` to `mbp` is 4
- * units of half-width and 1.7 of aperture; the stage draws this head at 160
- * pixels, so a unit is 0.8 of one. At PRESS_DEPTH's 0.6 that is 1.9 pixels at the
- * corners and 0.8 across the opening — under the width of the stroke drawing it,
- * which is what "the mouth does not appear to move" looks like from the inside,
- * and the exact failure DEFAULT_BROW_LIFT spent two revisions on. Times 1.5 it
- * comes to 2.9 and 1.2, which is small and is at least there.
+ * The brows can be overacted because their travel is a free number — a distance
+ * in head units, with no drawing at the end of it saying where to stop. The press
+ * ends at a pose: VISEMES.mbp, the same one a kit dissolves to. Multiplying past
+ * that does not exaggerate the gesture, it extrapolates a fourth shape out of two
+ * that exist, and the placeholder would then be demonstrating a mouth the live
+ * face cannot make.
  *
- * Clamped at 1 where it is used, so the boldness can only close the gap to `mbp`
- * and never overshoot past it into a pose the artwork has no drawing for.
+ * For scale, since it is the same question the brows had to answer: `rest` to
+ * `mbp` is 4 units of half-width and 1.7 of aperture, and the stage draws this
+ * head at 160 pixels, so a unit is 0.8 of one. Full travel is therefore 3.2
+ * pixels at the corners and 1.4 across the opening — modest, and unlike the brows
+ * at 1.4px it is a shape change across the whole mouth rather than a line moving
+ * under its own stroke width.
  */
-const PLACEHOLDER_PRESS_BOLDNESS = 1.5;
 
 /**
  * How far the brow patch fades out at its top and sides, in head units.
@@ -701,13 +702,12 @@ export default function Face({
    * still releasing when the first syllable lands eases out of wherever the
    * mouth has got to instead of snapping back from a pose it has already left.
    */
-  const boldPress = Math.min(1, pressed * PLACEHOLDER_PRESS_BOLDNESS);
   const drawn: LipShape =
-    boldPress > 0
+    pressed > 0
       ? {
-          w: shape.w + (VISEMES.mbp.w - shape.w) * boldPress,
-          up: shape.up + (VISEMES.mbp.up - shape.up) * boldPress,
-          down: shape.down + (VISEMES.mbp.down - shape.down) * boldPress,
+          w: shape.w + (VISEMES.mbp.w - shape.w) * pressed,
+          up: shape.up + (VISEMES.mbp.up - shape.up) * pressed,
+          down: shape.down + (VISEMES.mbp.down - shape.down) * pressed,
         }
       : shape;
 
