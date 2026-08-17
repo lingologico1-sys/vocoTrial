@@ -1,29 +1,46 @@
 {
   "format": 2,
-  "name": "face",
+  "name": "Jean LeBlanc",
   "base": "base.png",
   "boxes": {
     "mouth": {
-      "width": 319,
-      "height": 247,
-      "x": 339,
-      "y": 521
+      "width": 331,
+      "height": 249,
+      "x": 338,
+      "y": 628
     },
     "eyeLeft": {
-      "width": 121,
-      "height": 58,
-      "x": 344,
-      "y": 366
+      "width": 138,
+      "height": 62,
+      "x": 333,
+      "y": 445
     },
     "eyeRight": {
-      "width": 117,
-      "height": 63,
-      "x": 547,
-      "y": 361
+      "width": 138,
+      "height": 62,
+      "x": 543,
+      "y": 448
+    },
+    "browLeft": {
+      "x": 323,
+      "y": 366,
+      "width": 172,
+      "height": 76,
+      "headroom": 19
+    },
+    "browRight": {
+      "x": 523,
+      "y": 366,
+      "width": 164,
+      "height": 78,
+      "headroom": 21
     }
   },
+  "lashes": "none",
   "patches": {
     "rest": "mouth-rest.png",
+    "mbp": "mouth-mbp.png",
+    "ee": "mouth-ee.png",
     "uh": "mouth-uh.png",
     "aa": "mouth-aa.png",
     "oh": "mouth-oh.png",
