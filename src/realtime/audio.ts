@@ -32,20 +32,80 @@ export function decodeBase64(value: string): Int16Array {
 }
 
 /**
- * Captures the microphone as 16 kHz int16 chunks.
+ * What counts as the microphone hearing a voice, as RMS of full scale.
+ *
+ * Deliberately generous, because the two ways of being wrong here do not cost
+ * the same. A false positive spends one lip press on a cough or a chair, which
+ * is a gesture nobody can attribute to anything and nobody notices. A false
+ * negative loses the press on somebody's actual answer, which is the whole
+ * feature. So this sits low enough that a quiet speaker on a laptop mic clears
+ * it, and the tuning that matters is the release below rather than this.
+ *
+ * getUserMedia is asked for automatic gain control, which does most of the work
+ * of making one threshold serve every microphone: the constraint's job is to
+ * put speech at a usable level whatever the hardware, and it is the reason a
+ * fixed figure can be written down here at all.
+ */
+const VOICE_RMS = 0.02;
+
+/**
+ * How long the mic goes on counting as active after the sound drops, in ms.
+ *
+ * This is the number that decides whether an utterance is one event or twenty.
+ * Speech is mostly silence — every stop consonant is a gap, and the pause
+ * between two words is longer than either — so a bare threshold read off 128ms
+ * chunks would report a voice starting and stopping several times a sentence.
+ * Everything downstream wants "somebody is talking", not "there is energy in
+ * this chunk".
+ *
+ * Sized like PAUSE_HOLD in headMotion.ts and for the same reason, which is
+ * worth reading across: about a third of a second is where language stops and
+ * hesitation begins, and this sits just past it so that a thinking pause inside
+ * an answer does not end the answer. Longer would be safe here too — nothing
+ * downstream cares when the voice *stops*, only when it starts, and the cost of
+ * releasing late is only that a reply beginning within this window of the last
+ * one is read as the same reply.
+ */
+const VOICE_RELEASE_MS = 600;
+
+/**
+ * Captures the microphone as 16 kHz int16 chunks, and says when it hears a voice.
  *
  * Asking the AudioContext for a 16 kHz sample rate makes the browser resample
  * the mic for us. Not every browser honours the request, so the real rate is
  * read back and reported — a mismatch is the first thing to check if the agent
  * hears chipmunks.
+ *
+ * The voice detection is a second job bolted to the first, and it is here
+ * because this is the only place in the app that touches the input signal at
+ * all. Every analyser in audio.ts and visemes.ts sits across the *output* graph,
+ * measuring the agent; nothing measured the user until the face wanted to react
+ * to them. Rather than open a second graph on the same stream, this reads the
+ * chunks already passing through on their way to the socket — which costs one
+ * pass over 2048 samples every 128ms and needs no new node, no new permission
+ * and nothing from the provider.
+ *
+ * It reports a boolean rather than a level, and only when that boolean changes.
+ * A level would be a value arriving eight times a second for the whole of a
+ * call, and everything downstream of here is React state feeding a face that
+ * goes to some trouble not to re-render while it has nothing to do.
  */
 export class MicCapture {
   private context: AudioContext | null = null;
   private stream: MediaStream | null = null;
   private node: AudioWorkletNode | null = null;
   private muted = false;
+  private onVoice: ((active: boolean) => void) | null = null;
+  /** Whether the last thing reported was a voice. */
+  private voice = false;
+  /** Milliseconds of chunks under VOICE_RMS since the last one over it. */
+  private quietFor = 0;
 
-  async start(onChunk: (pcm: ArrayBuffer) => void): Promise<void> {
+  async start(
+    onChunk: (pcm: ArrayBuffer) => void,
+    onVoice?: (active: boolean) => void,
+  ): Promise<void> {
+    this.onVoice = onVoice ?? null;
     this.stream = await navigator.mediaDevices.getUserMedia({
       audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
     });
@@ -63,7 +123,13 @@ export class MicCapture {
     const source = this.context.createMediaStreamSource(this.stream);
     this.node = new AudioWorkletNode(this.context, 'pcm-capture');
     this.node.port.onmessage = (event) => {
-      if (!this.muted) onChunk(event.data as ArrayBuffer);
+      if (this.muted) return;
+      const pcm = event.data as ArrayBuffer;
+      // Measured before it is handed on, which is safe only because nothing
+      // downstream detaches it — encodeBase64 copies. If that ever stops being
+      // true this has to move ahead of the send rather than merely before it.
+      this.listen(pcm);
+      onChunk(pcm);
     };
 
     source.connect(this.node);
@@ -75,6 +141,10 @@ export class MicCapture {
 
   setMuted(muted: boolean): void {
     this.muted = muted;
+    // A muted mic hears nothing by definition, and saying so is not optional:
+    // chunks stop arriving the moment this is set, so a gate left true would
+    // stay true for the rest of the call with nothing able to lower it.
+    if (muted) this.report(false);
     // Also stop the track, so the browser's own mic indicator is truthful.
     this.stream?.getAudioTracks().forEach((track) => {
       track.enabled = !muted;
@@ -82,6 +152,8 @@ export class MicCapture {
   }
 
   stop(): void {
+    this.report(false);
+    this.onVoice = null;
     this.node?.port.close();
     this.node?.disconnect();
     this.stream?.getTracks().forEach((track) => track.stop());
@@ -89,6 +161,38 @@ export class MicCapture {
     this.node = null;
     this.stream = null;
     this.context = null;
+  }
+
+  /** One chunk's worth of "is anyone talking", with the release above on it. */
+  private listen(pcm: ArrayBuffer): void {
+    const samples = new Int16Array(pcm);
+    if (samples.length === 0) return;
+
+    let energy = 0;
+    for (const sample of samples) energy += sample * sample;
+    const rms = Math.sqrt(energy / samples.length) / 0x8000;
+
+    // Off the context's real rate rather than off INPUT_SAMPLE_RATE, because
+    // the two differ on any browser that declined the constructor's request —
+    // the same mismatch start() warns about, which would otherwise quietly
+    // rescale the release.
+    const chunkMs = (samples.length / (this.context?.sampleRate ?? INPUT_SAMPLE_RATE)) * 1000;
+
+    if (rms >= VOICE_RMS) {
+      this.quietFor = 0;
+      this.report(true);
+      return;
+    }
+
+    this.quietFor += chunkMs;
+    if (this.quietFor >= VOICE_RELEASE_MS) this.report(false);
+  }
+
+  /** Reports a change and nothing else. */
+  private report(active: boolean): void {
+    if (active === this.voice) return;
+    this.voice = active;
+    this.onVoice?.(active);
   }
 }
 

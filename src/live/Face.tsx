@@ -6,6 +6,7 @@ import {
   DEFAULT_BROW_LIFT,
   DEFAULT_CADENCE,
   DEFAULT_HEAD_MOTION,
+  DEFAULT_PRESS_TRIGGERS,
   DEFAULT_TILT_ROLL,
   DEFAULT_TILT_TRIGGERS,
   HeadPerformer,
@@ -17,6 +18,7 @@ import {
   type HeadMotion,
   type MotionCadence,
   type Performance,
+  type PressTrigger,
   type TiltCue,
   type TiltTrigger,
 } from './headMotion';
@@ -114,14 +116,23 @@ interface FaceProps {
   /** Whether some blinks carry a brow lift. See BROW_FLASH in headMotion.ts. */
   browBlink?: boolean;
   /**
-   * Whether the lips close for a moment as a turn begins. See PRESS.
+   * Which moments close the lips for an instant. See PRESS_TRIGGERS. Empty is off.
    *
-   * Reads `speaking` and nothing else, so a face with no call behind it never
-   * does this — which is the same silence the tilt's default relies on, and for
-   * once it is not a compromise: the whole gesture is about a turn starting, and
-   * a preview has no turns.
+   * Reads `speaking` and `heard` and nothing else, so a face with no call behind
+   * it never does this — which is the same silence the tilt's default relies on,
+   * and for once it is not a compromise: both moments are the edge of a turn,
+   * and a preview has no turns.
    */
-  lipPress?: boolean;
+  press?: readonly PressTrigger[];
+  /**
+   * Whether the microphone is hearing a voice. See `heard` on CueInput.
+   *
+   * Only the press reads it, and only the `reply` half of the press. Defaulting
+   * to false is what keeps the kit page's preview from pressing its lips at a
+   * microphone that is not open — the same defence `speaking` makes for the
+   * tilt, owed to the same page.
+   */
+  heard?: boolean;
   /**
    * How far the brows travel at full lift, in head units. See DEFAULT_BROW_LIFT.
    *
@@ -200,7 +211,8 @@ export default function Face({
   motion = DEFAULT_HEAD_MOTION,
   cadence = DEFAULT_CADENCE,
   browBlink = true,
-  lipPress = true,
+  press = DEFAULT_PRESS_TRIGGERS,
+  heard = false,
   browLift = DEFAULT_BROW_LIFT,
   tilt = DEFAULT_TILT_TRIGGERS,
   tiltRoll = DEFAULT_TILT_ROLL,
@@ -233,10 +245,10 @@ export default function Face({
    * face finding its feet cannot be used for the one thing it exists for, which
    * is flipping between two schedules on the same sentence.
    */
-  const latest = useRef({ level, cadence, browBlink, lipPress, tilt, speaking });
+  const latest = useRef({ level, cadence, browBlink, press, heard, tilt, speaking });
   useEffect(() => {
-    latest.current = { level, cadence, browBlink, lipPress, tilt, speaking };
-  }, [level, cadence, browBlink, lipPress, tilt, speaking]);
+    latest.current = { level, cadence, browBlink, press, heard, tilt, speaking };
+  }, [level, cadence, browBlink, press, heard, tilt, speaking]);
 
   /**
    * Questions and handovers, handed to the performer as they arrive.
@@ -309,7 +321,8 @@ export default function Face({
       const next = performer.current!.read(dt, latest.current.level, latest.current.cadence, {
         triggers: latest.current.tilt,
         speaking: latest.current.speaking,
-        press: latest.current.lipPress,
+        heard: latest.current.heard,
+        press: latest.current.press,
       });
       // Returning the identical object when nothing has moved is what keeps a
       // silent face cheap: between flashes this loop costs one callback a frame
@@ -401,6 +414,12 @@ export default function Face({
    * the mouth by the entire depth of the press between two frames, on the exact
    * frame the first syllable lands. This way the press is already on its way out
    * as the sound comes up, which is also what lips parting into a word look like.
+   *
+   * `level` is the *agent's* loudness and always was, which is why this fade
+   * does nothing to a `reply` press: that one fires while the face is silent, so
+   * the term is 1 for the whole of it and the gesture is seen at whatever depth
+   * PRESS_DEPTH asked for. The user's own voice never reaches this line. It has
+   * already done its work upstream, deciding that there was a press at all.
    */
   const pressed = perf.press * Math.max(0, 1 - level / SILENCE);
 

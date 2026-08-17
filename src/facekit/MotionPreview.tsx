@@ -8,6 +8,7 @@ import {
   MOTION_CADENCES,
   type HeadMotion,
   type MotionCadence,
+  type PressTrigger,
   TILT_ROLL_MAX,
   type TiltCue,
   type TiltTrigger,
@@ -119,6 +120,22 @@ const TILT_DEMO: readonly TiltTrigger[] = ['question'];
  * every frame by design.
  */
 const TILT_OFF: readonly TiltTrigger[] = [];
+
+/**
+ * The press this panel can demonstrate, which is one of the two.
+ *
+ * `turn` fires on the rising edge of `speaking`, and the button below fakes that
+ * edge on a timer — see PRESS_DEMO_MS. `reply` cannot be faked the same way and
+ * is deliberately not tried: it fires when a microphone hears the user, this
+ * page never opens one, and pulsing `heard` at a face with nothing to hear would
+ * be a demonstration of the wiring rather than of the artwork.
+ *
+ * Nothing is lost by leaving it out, because the two are the same gesture. What
+ * this panel is for is deciding whether a kit's `rest` and `mbp` are drawn far
+ * enough apart to see, and that question has one answer for both triggers.
+ */
+const PRESS_DEMO: readonly PressTrigger[] = ['turn'];
+const PRESS_OFF: readonly PressTrigger[] = [];
 
 interface MotionPreviewProps {
   kit: FaceKit;
@@ -339,7 +356,7 @@ export default function MotionPreview({ kit, focus, note }: MotionPreviewProps) 
             motion={motion}
             cadence={cadence}
             browBlink={browBlink}
-            lipPress={pressing}
+            press={pressing ? PRESS_DEMO : PRESS_OFF}
             // Pulsed rather than reported, and it reaches the face for the press
             // alone: nothing else here reads it, because `hesitation` is not in
             // TILT_DEMO and so the pause detector has nothing to fire.

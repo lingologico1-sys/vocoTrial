@@ -1,7 +1,13 @@
 import { useLayoutEffect, useRef, useState } from 'react';
 import type { AudioTap } from '../realtime/audio';
 import type { FaceKit } from '../facekit/kit';
-import type { HeadMotion, MotionCadence, TiltCue, TiltTrigger } from './headMotion';
+import type {
+  HeadMotion,
+  MotionCadence,
+  PressTrigger,
+  TiltCue,
+  TiltTrigger,
+} from './headMotion';
 import SpeakingFace from './SpeakingFace';
 import type { MouthDriver, RoundnessMode } from './visemes';
 import Bubble, { BUBBLE_FILL } from './Bubble';
@@ -72,8 +78,10 @@ interface StageProps {
   cadence?: MotionCadence;
   /** Whether some blinks carry a brow lift. */
   browBlink?: boolean;
-  /** Whether the lips close as a turn begins. See PRESS in headMotion.ts. */
-  lipPress?: boolean;
+  /** Which moments close the lips. See PRESS_TRIGGERS in headMotion.ts. */
+  press?: readonly PressTrigger[];
+  /** Whether the mic is hearing a voice. See `heard` on CueInput. */
+  heard?: boolean;
   /** How far the brows travel, in head units. See DEFAULT_BROW_LIFT in headMotion.ts. */
   browLift?: number;
   /** Which events may lean the head sideways. See TILT_TRIGGERS in headMotion.ts. */
@@ -87,8 +95,9 @@ interface StageProps {
    *
    * Three consumers now, and they want it for unrelated reasons: the balloon
    * dims when it goes false, the tilt uses it to tell a pause inside a turn from
-   * the end of one, and the lip press takes its rising edge as the one moment it
-   * is allowed to fire.
+   * the end of one, and the lip press reads both of its edges — the rising one
+   * as a moment to fire on, the falling one as permission for `heard` to be
+   * about the user rather than about the speakers.
    */
   speaking: boolean;
 }
@@ -105,7 +114,8 @@ export default function Stage({
   motion,
   cadence,
   browBlink,
-  lipPress,
+  press,
+  heard,
   browLift,
   tilt,
   tiltRoll,
@@ -205,7 +215,8 @@ export default function Stage({
               motion={motion}
               cadence={cadence}
               browBlink={browBlink}
-              lipPress={lipPress}
+              press={press}
+              heard={heard}
               browLift={browLift}
               tilt={tilt}
               tiltRoll={tiltRoll}

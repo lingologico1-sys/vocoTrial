@@ -56,6 +56,22 @@ export interface SessionHandlers {
   /** The agent started or stopped speaking — drives the level indicator. */
   onSpeaking?: (speaking: boolean) => void;
   /**
+   * The microphone started or stopped hearing a voice.
+   *
+   * The one signal here that describes the user rather than the agent, and the
+   * only one measured locally rather than reported by the provider. Neither
+   * provider offers it in a usable form: OpenAI's `speech_started` is tied to
+   * its server VAD committing a buffer, and Gemini says nothing at all about
+   * input until the transcript arrives, which is after the utterance rather
+   * than at the start of it. See MicCapture, which measures the chunks already
+   * on their way out.
+   *
+   * Debounced at the source — see VOICE_RELEASE_MS — so this is "somebody is
+   * talking" and not "there is energy in this chunk". Absent on transports that
+   * never see the input samples, which today means the WebRTC path.
+   */
+  onVoice?: (active: boolean) => void;
+  /**
    * The user talked over the agent, and every unplayed sound was dropped.
    *
    * Distinct from onSpeaking(false), which also fires when a turn simply ends.

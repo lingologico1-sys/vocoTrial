@@ -268,16 +268,22 @@ export async function startGeminiSession(
   }
 
   try {
-    await mic.start((pcm) => {
-      if (socket.readyState !== WebSocket.OPEN) return;
-      socket.send(
-        JSON.stringify({
-          realtimeInput: {
-            audio: { mimeType: 'audio/pcm;rate=16000', data: encodeBase64(pcm) },
-          },
-        }),
-      );
-    });
+    await mic.start(
+      (pcm) => {
+        if (socket.readyState !== WebSocket.OPEN) return;
+        socket.send(
+          JSON.stringify({
+            realtimeInput: {
+              audio: { mimeType: 'audio/pcm;rate=16000', data: encodeBase64(pcm) },
+            },
+          }),
+        );
+      },
+      // Passed straight through. Nothing on this side has an opinion about what
+      // the user starting to talk means — the socket does not need to know, and
+      // the gesture it feeds is the face's business.
+      (active) => handlers.onVoice?.(active),
+    );
   } catch {
     cleanup();
     throw new Error('Microphone permission denied');

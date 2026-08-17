@@ -15,15 +15,18 @@ import {
   DEFAULT_BROW_LIFT,
   DEFAULT_CADENCE,
   DEFAULT_HEAD_MOTION,
+  DEFAULT_PRESS_TRIGGERS,
   DEFAULT_TILT_ROLL,
   DEFAULT_TILT_TRIGGERS,
   HEAD_MOTIONS,
   MOTION_CADENCES,
+  PRESS_TRIGGERS,
   TILT_ROLL_MAX,
   TILT_ROLL_MIN,
   TILT_TRIGGERS,
   type HeadMotion,
   type MotionCadence,
+  type PressTrigger,
   type TiltCue,
   type TiltTrigger,
 } from './headMotion';
@@ -63,7 +66,7 @@ const BUBBLE_SENTENCES = 2;
  * without the bump, the only people still seeing the old value are the ones who
  * used the page enough to have an opinion. Bump it when a default moves.
  */
-const PREFS_KEY = 'vocotrial.live.v5';
+const PREFS_KEY = 'vocotrial.live.v6';
 
 interface Prefs {
   language: string;
@@ -73,7 +76,7 @@ interface Prefs {
   motion: HeadMotion;
   cadence: MotionCadence;
   browBlink: boolean;
-  lipPress: boolean;
+  press: PressTrigger[];
   browLift: number;
   tilt: TiltTrigger[];
   tiltRoll: number;
@@ -198,7 +201,10 @@ export default function LiveTrial() {
   // Defaulted on, and it is the one setting here that does something while
   // nobody is speaking at all — it rides on the blink, which never stops.
   const [browBlink, setBrowBlink] = useState<boolean>(prefs.browBlink ?? true);
-  const [lipPress, setLipPress] = useState<boolean>(prefs.lipPress ?? true);
+  // A set for the tilt's reason, arrived at from the other direction: these two
+  // are not rivals either, and unlike the tilt they cannot even be read as a
+  // frequency dial — one lockout covers both ends of a short exchange.
+  const [press, setPress] = useState<PressTrigger[]>(prefs.press ?? [...DEFAULT_PRESS_TRIGGERS]);
   // A slider for the lean's reason and one of its own: how far a brow travels
   // depends on how much forehead the portrait wearing it has, so there is no
   // single right answer to write into the file — and every previous attempt to
@@ -217,6 +223,19 @@ export default function LiveTrial() {
   const [detail, setDetail] = useState<string | null>(null);
   const [muted, setMuted] = useState(false);
   const [speaking, setSpeaking] = useState(false);
+  /**
+   * Whether the microphone is hearing the user right now.
+   *
+   * State rather than a ref, because the face is a component and has to be told.
+   * It is cheap to hold as state only because MicCapture debounces it into an
+   * on/off — this changes once or twice per turn, where the level behind it
+   * changes eight times a second.
+   *
+   * Never set outside a call: it is cleared when the session closes, below, and
+   * MicCapture reports false on both mute and stop, so a call that ends
+   * mid-sentence cannot leave the face believing it is still being spoken to.
+   */
+  const [heard, setHeard] = useState(false);
   const [turns, setTurns] = useState<Turn[]>([]);
   const [showLog, setShowLog] = useState(false);
   /**
@@ -280,7 +299,7 @@ export default function LiveTrial() {
           motion,
           cadence,
           browBlink,
-          lipPress,
+          press,
           browLift,
           tilt,
           tiltRoll,
@@ -298,7 +317,7 @@ export default function LiveTrial() {
     motion,
     cadence,
     browBlink,
-    lipPress,
+    press,
     browLift,
     tilt,
     tiltRoll,
@@ -405,6 +424,7 @@ export default function LiveTrial() {
           session.current = null;
           setTap(null);
           setSpeaking(false);
+          setHeard(false);
         }
       },
       onTranscript,
@@ -416,6 +436,25 @@ export default function LiveTrial() {
         // user, which is the whole of what a listening tilt responds to. The
         // channel's own lockout takes care of a provider that says it twice.
         if (!next) cue('listening');
+      },
+      /**
+       * The user's voice, straight through to the face.
+       *
+       * No arming and no edge detection on the way, which is the part worth
+       * noticing: both live in HeadPerformer, beside the gesture they decide.
+       * This page's job is to report that a microphone heard something, and it
+       * is deliberately the same shape as `speaking` above — a fact about the
+       * present moment, not a claim about what it means.
+       *
+       * It counts as activity for the idle timer, and that is a small fix
+       * rather than a side effect. The timer previously only saw the agent:
+       * transcription of the user arrives at the end of an utterance, so a
+       * learner talking steadily to a tutor that had stopped answering could
+       * have the call hung up underneath them.
+       */
+      onVoice: (active: boolean) => {
+        if (active) lastActivity.current = Date.now();
+        setHeard(active);
       },
       // Barge-in. The audio for anything still queued was thrown away unplayed,
       // so showing those words would put sentences on screen that were cut off
@@ -491,7 +530,8 @@ export default function LiveTrial() {
           motion={motion}
           cadence={cadence}
           browBlink={browBlink}
-          lipPress={lipPress}
+          press={press}
+          heard={heard}
           browLift={browLift}
           tilt={tilt}
           tiltRoll={tiltRoll}
@@ -752,14 +792,14 @@ export default function LiveTrial() {
           </div>
 
           {/*
-            A row of its own with one box on it, which looks like waste and is
-            not. Every other row here groups settings that answer one question —
-            which way, how often, how far — and this answers a question none of
-            them ask: whether the mouth is allowed to move for a reason other
-            than sound. Folded in beside the brows it would read as a third brow
-            setting, and the one thing worth knowing about it is that it is the
-            only control on this panel that touches the mouth without touching
-            the analyser.
+            A row of its own, which it earned when it held one box and keeps now
+            that it holds two. Every other row here groups settings that answer
+            one question — which way, how often, how far — and this answers a
+            question none of them ask: whether the mouth is allowed to move for a
+            reason other than sound. Folded in beside the brows it would read as
+            a third brow setting, and the one thing worth knowing about it is
+            that it is the only control on this panel that touches the mouth
+            without touching the analyser.
 
             No travel slider beside it, unlike the two rows above. Those became
             sliders because a constant turned out to be taste; this one has a
@@ -769,18 +809,27 @@ export default function LiveTrial() {
           */}
           <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
             <span className="w-16 shrink-0 text-xs text-slate-500">Lips</span>
-            <label
-              title="The lips close for a third of a second as a turn begins, in the gap between the tutor's audio being queued and the first sound of it arriving — which is what a person does just before they start talking. It never fires while anything is audible, and never during your turn. Untick it to hear the same sentence start from a mouth that was doing nothing."
-              className="flex cursor-help items-center gap-2 text-sm text-slate-300"
-            >
-              <input
-                type="checkbox"
-                checked={lipPress}
-                onChange={(event) => setLipPress(event.target.checked)}
-                className="accent-sky-500"
-              />
-              Close before speaking
-            </label>
+            {PRESS_TRIGGERS.map((option) => (
+              <label
+                key={option.id}
+                title={option.hint}
+                className="flex cursor-help items-center gap-2 text-sm text-slate-300"
+              >
+                <input
+                  type="checkbox"
+                  checked={press.includes(option.id)}
+                  onChange={(event) =>
+                    setPress((current) =>
+                      event.target.checked
+                        ? [...current, option.id]
+                        : current.filter((id) => id !== option.id),
+                    )
+                  }
+                  className="accent-sky-500"
+                />
+                {option.label}
+              </label>
+            ))}
           </div>
 
           {/*
@@ -819,6 +868,42 @@ export default function LiveTrial() {
                     which get swallowed by one that has just happened.
                   </p>
                 )}
+              </>
+            )}
+          </div>
+
+          {/*
+            The tilt's argument, owed harder. Two moments, one identical
+            movement, and this one is smaller than the lean by some way — so
+            watching without knowing what is ticked tells you nothing at all, and
+            the last line is here because the most likely reaction to ticking
+            both boxes is to wonder whether anything happened.
+          */}
+          <div className="space-y-1 text-xs leading-relaxed text-slate-500">
+            {press.length === 0 ? (
+              <p>No press. The mouth moves only with the sound of the tutor’s own voice.</p>
+            ) : (
+              <>
+                {PRESS_TRIGGERS.filter((option) => press.includes(option.id)).map((option) => (
+                  <p key={option.id}>
+                    <span className="text-slate-400">{option.label}:</span> {option.hint}
+                  </p>
+                ))}
+                {press.length > 1 && (
+                  <p>
+                    The two sit at either end of your turn and share one lockout of about two
+                    seconds, so a short exchange gets one press rather than both — ticking the
+                    second changes which end of your turn the face reacts at, not how often it
+                    reacts.
+                  </p>
+                )}
+                <p>
+                  Expect this to be subtle to the point of deniability. Both poses it moves between
+                  are a closed mouth, and on the kit shipped with the app they differ by under a
+                  tenth of the pixels in the mouth — a fifth of what changing a vowel does. If you
+                  cannot see it, that is the artwork rather than the setting, and the kit page’s
+                  motion panel is where to find out which.
+                </p>
               </>
             )}
           </div>

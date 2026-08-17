@@ -667,7 +667,62 @@ const TILT: Envelope = { attack: 0.28, hold: 1, release: 0.8 };
 const TILT_LOCKOUT = 5;
 
 /**
- * The lips closing as a turn begins — the mouth's one movement that is not speech.
+ * Which moments close the lips, offered as a set for TILT_TRIGGERS' reason.
+ *
+ * Both are the same gesture on the same channel, and they differ only in whose
+ * turn is beginning:
+ *
+ *  - `turn` is the original, and it is the face's own preparation. It fires on
+ *    the rising edge of `speaking` — the window between the transport queueing
+ *    audio and the first sound of it arriving. See PRESS.
+ *  - `reply` is the face reacting to being answered. It fires when the mic first
+ *    hears a voice with the agent silent, so the lips close as the user starts
+ *    talking rather than as the tutor stops. See `heard` on CueInput.
+ *
+ * The pair reads very differently and only one of them is about attention.
+ * `turn` is self-directed: the mouth getting ready to use itself, which is
+ * honest and says nothing about the listener. `reply` is the one that looks like
+ * noticing — a mouth that shuts the moment somebody else starts is a mouth
+ * declining the floor, and that is the whole content of the gesture.
+ *
+ * Ticking both does not press twice as often, which is worth knowing before
+ * reading it as a frequency setting. The two moments bracket the user's turn:
+ * `reply` at the start of it, `turn` at the end when the answer comes back. A
+ * short exchange puts them inside PRESS_LOCKOUT of each other and the second is
+ * swallowed, so the pair costs at most one press per exchange either way — it
+ * changes which end of the user's turn gets the gesture, not how much there is.
+ */
+export type PressTrigger = 'turn' | 'reply';
+
+/**
+ * Both, which is the opposite of how the tilt shipped and for a reason.
+ *
+ * DEFAULT_TILT_TRIGGERS holds one of three back because the open question there
+ * is frequency — three leans at once is a face that cannot keep still, and
+ * shipping all of them would answer that question in the wrong direction before
+ * anyone had looked. This set cannot ask that question: the lockout above means
+ * two ticks and one tick produce the same number of presses in any exchange
+ * short enough for it to matter. What the second box buys is *which* moment,
+ * and there is nothing to learn from withholding it.
+ */
+export const DEFAULT_PRESS_TRIGGERS: readonly PressTrigger[] = ['turn', 'reply'];
+
+export const PRESS_TRIGGERS: Array<{ id: PressTrigger; label: string; hint: string }> = [
+  {
+    id: 'turn',
+    label: 'Before speaking',
+    hint: 'Closes the lips as the tutor’s turn begins, in the gap between its audio being queued and the first sound of it arriving — which is what a person does just before they start talking.',
+  },
+  {
+    id: 'reply',
+    label: 'As you answer',
+    hint: 'Closes the lips when your microphone first hears you with the tutor silent, about a quarter of a second into your first word. The face registering that you have started, rather than waiting to be told the turn is over.',
+  },
+];
+
+/**
+ * The lips closing at the edge of a turn — the mouth's one movement that is not
+ * speech.
  *
  * It is the question the idle sway asked and lost, put to the feature where
  * losing it would cost the most. A mouth is what the eye watches for speech, so
@@ -676,7 +731,14 @@ const TILT_LOCKOUT = 5;
  * interrupting. The sway's verdict holds here with the volume up — what fails an
  * idle movement is not its size, it is the absence of a cause.
  *
- * So this one is not idle at all, and the cause it waits for was already written
+ * That second clause is also the objection `reply` had to clear, since it puts
+ * the mouth in motion during exactly the stretch named there as the worst place
+ * for it. It clears it on the one property no other mouth movement has: this
+ * gesture travels *toward* closed. `rest` to `mbp` is the lips coming together,
+ * and a mouth that shuts cannot be read as a mouth trying to speak — it is the
+ * shape of declining the floor. The rule stands and this is its one exception.
+ *
+ * So neither trigger is idle, and the cause `turn` waits for was already written
  * down a few dozen lines below, as an obstacle. `heardThisTurn` exists because
  * the quiet a turn *begins* with runs longer than PAUSE_HOLD: the transport
  * flips `speaking` the moment it queues audio, which is better than 450ms before
@@ -690,6 +752,16 @@ const TILT_LOCKOUT = 5;
  * syllable lands is not a failure, though, and is the reason the release is the
  * longest of the three terms: lips parting into a sound is what the end of a
  * press is *for*, and the only thing that must be over by then is the closing.
+ *
+ * `reply` inherits that envelope and has no window to fit inside, which makes
+ * one term read differently rather than wrongly. It fires while the face is
+ * silent and stays silent, so nothing is racing the release and the whole shape
+ * is simply seen — where `turn` is a gesture caught in the act of being
+ * interrupted by speech, this one plays to the end. If the two ever want
+ * different envelopes it is the hold that would move, because a reaction can
+ * afford to be looked at and a preparation cannot. They share one for now on the
+ * grounds that nothing has yet been observed that asks them to differ, and a
+ * second envelope is a second thing to tune.
  *
  * The channel it borrows is the one genuinely contended thing here. Brow and
  * blink combine with a max because they are magnitudes; the viseme is a single
@@ -738,12 +810,27 @@ const PRESS_DEPTH = 1;
 /**
  * How long a press refuses to fire again, in seconds.
  *
- * Insurance rather than pacing, unlike every other lockout here. Turns are
- * seconds apart by their nature, so nothing about a conversation needs this —
- * what needs it is that `speaking` is a prop from the transport rather than a
- * clock in this file, and a prop that flickers false and true between queued
- * chunks would spend a press on each flicker. Two seconds is longer than any
- * such flicker and shorter than any real gap between turns.
+ * It began as insurance rather than pacing, unlike every other lockout here.
+ * Turns are seconds apart by their nature, so nothing about a conversation
+ * needed it — what needed it is that `speaking` is a prop from the transport
+ * rather than a clock in this file, and a prop that flickers false and true
+ * between queued chunks would spend a press on each flicker. Two seconds is
+ * longer than any such flicker and shorter than any real gap between turns.
+ *
+ * `reply` gave it a second job, and this one is pacing in earnest. The mic gate
+ * releases after VOICE_RELEASE_MS, so an answer with a thinking pause longer
+ * than that arrives here as two utterances rather than one — and without a
+ * lockout the face would close its lips again every time the user resumed. That
+ * is the failure the whole feature is built to avoid, one gesture short of it:
+ * a mouth moving repeatedly through somebody else's turn stops being a reaction
+ * and becomes the muttering PRESS argues against. Two seconds does not cover
+ * every long answer, and does not need to — it has to be longer than the gaps
+ * *inside* a sentence, which VOICE_RELEASE_MS has already absorbed, and the
+ * press that survives it is a face re-engaging after a genuine silence.
+ *
+ * It is also what makes ticking both triggers cheap. The two moments sit at
+ * either end of the user's turn, so a short exchange has them inside this of
+ * each other and the second is simply refused. See PressTrigger.
  */
 const PRESS_LOCKOUT = 2;
 
@@ -860,14 +947,33 @@ export interface CueInput {
    * mid-sentence and the end of a turn are the same silence, and only the
    * transport knows whether more audio is queued behind it.
    *
-   * Two features read it now and they want opposite things from it. The tilt
-   * wants to know whether a silence sits *inside* a turn. The press wants the
+   * Three features read it now and they want different things from it. The tilt
+   * wants to know whether a silence sits *inside* a turn. `turn` wants the
    * rising edge — the frame the transport first admits a turn is coming, which
-   * arrives before there is anything to hear.
+   * arrives before there is anything to hear. `reply` wants it false, as the
+   * proof that the voice in the microphone is not this face's own.
    */
   speaking: boolean;
-  /** Whether the lips close as a turn begins. See PRESS. */
-  press: boolean;
+  /**
+   * Whether the microphone is hearing a voice right now.
+   *
+   * A state rather than an event, and shaped after `speaking` deliberately: the
+   * performer takes its rising edge itself, exactly as it does for that one, and
+   * for the reason written on `wasSpeaking` below — a second copy of a fact that
+   * is already arriving every frame is a second thing to keep in step with the
+   * first.
+   *
+   * Debounced well before it gets here. What arrives is "somebody is talking",
+   * held across the gaps inside a sentence by VOICE_RELEASE_MS, which is what
+   * lets this be read as an edge at all: the raw threshold it is derived from
+   * rises and falls several times a sentence.
+   *
+   * False on any face with no call behind it, which is every preview. There is
+   * no microphone on the kit page and nothing there for one to hear.
+   */
+  heard: boolean;
+  /** Which moments close the lips. Empty is that feature off. See PressTrigger. */
+  press: readonly PressTrigger[];
 }
 
 /**
@@ -960,6 +1066,21 @@ export class HeadPerformer {
    * the first.
    */
   private wasSpeaking = false;
+  /**
+   * And whether the microphone was hearing a voice, for `reply`'s edge.
+   *
+   * Tracked unconditionally, including through the agent's own turn when the
+   * edge cannot be used. That is what makes the echo case fail quiet rather than
+   * loud. A microphone hears the tutor through the speakers, and while echo
+   * cancellation removes most of it, what matters is what happens to whatever
+   * gets through: tracked this way it has already set the flag by the time the
+   * turn ends, so there is no rising edge waiting at the handover and no press
+   * fires with nobody talking. The cost is that a user who answers within
+   * VOICE_RELEASE_MS of the tutor stopping is heard as a continuation of the
+   * echo and gets no press. Losing the gesture on the fastest answers is a much
+   * better failure than spending it on silence.
+   */
+  private wasHeard = false;
   /** Set by `blinked`, spent by the next `read`. */
   private flashPending = false;
   /** Set by `heardQuestion` and `yielded`, spent by the next `read`. */
@@ -1061,13 +1182,29 @@ export class HeadPerformer {
     const flash = this.flashChannel.advance(dt, this.flashPending) * BROW_FLASH_LIFT;
     this.flashPending = false;
 
-    // The lips, closing before the voice arrives. The edge is taken whether or
-    // not the box is ticked, so that ticking it mid-call cannot inherit a turn
-    // that started before it — the promise the lockouts above make about
-    // switching cadence, owed here for the same reason.
+    // The lips, closing at whichever edge of the turn is ticked. Both edges are
+    // taken whether or not their box is, so that ticking one mid-call cannot
+    // inherit a turn that started before it — the promise the lockouts above
+    // make about switching cadence, owed here for the same reason.
     const turnStarting = cue.speaking && !this.wasSpeaking;
+    const replyStarting = cue.heard && !this.wasHeard;
     this.wasSpeaking = cue.speaking;
-    const press = this.pressChannel.advance(dt, turnStarting && cue.press) * PRESS_DEPTH;
+    this.wasHeard = cue.heard;
+    const wantsPress = (id: PressTrigger) => cue.press.includes(id);
+    /*
+      `reply` is gated on the agent being silent, and the gate is not merely
+      belt-and-braces for the echo the flag above absorbs. It is what keeps the
+      press off a barge-in. A user talking over the tutor produces this edge
+      mid-sentence, and the mouth is drawing visemes at that moment — the press
+      would be scaled to nothing by `pressed` in Face.tsx and invisible, but it
+      would still be *spent*, and the lockout would then swallow the honest
+      press waiting at the other end of the interruption. Refused here, the
+      channel is still loaded when it is wanted.
+    */
+    const pressing =
+      (turnStarting && wantsPress('turn')) ||
+      (replyStarting && !cue.speaking && wantsPress('reply'));
+    const press = this.pressChannel.advance(dt, pressing) * PRESS_DEPTH;
 
     // The gap detector. Runs whether or not `hesitation` is ticked, so that
     // ticking it mid-call does not inherit a pause that started a minute ago —
