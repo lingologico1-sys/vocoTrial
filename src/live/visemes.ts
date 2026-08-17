@@ -211,8 +211,17 @@ export function scheduledFeatures(tap: AudioTap, lookahead: () => number): Featu
   };
 }
 
-/** Below this share of the running peak, treat the frame as silence. */
-const SILENCE = 0.12;
+/**
+ * Below this share of the running peak, treat the frame as silence.
+ *
+ * Exported because the lip press needs the same line drawn in the same place.
+ * That gesture may only show while the analyser has nothing to say, and
+ * `viseme === 'rest'` is exactly `level < SILENCE` — so reading the constant
+ * lets the press fade out at the very threshold the classifier switches on,
+ * rather than at a boolean test that would put a cliff a frame either side of
+ * it. See PRESS in headMotion.ts, and `pressed` in Face.tsx.
+ */
+export const SILENCE = 0.12;
 /** Openness thresholds, as a share of the running peak. */
 const MID = 0.3;
 const WIDE = 0.62;

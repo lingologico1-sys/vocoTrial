@@ -77,6 +77,27 @@ const ZOOM = 2.4;
 const TILT_DEMO_MS = 2600;
 
 /**
+ * How often the lip press is provoked, and for how long, in milliseconds.
+ *
+ * The same lie of convenience as TILT_DEMO below, told about a different prop.
+ * The press fires on the rising edge of `speaking`, and `speaking` means the
+ * transport has queued audio — which cannot happen on a page with no call
+ * behind it. So the button pulses the prop instead: on, held long enough for the
+ * gesture to play out, off again in time for the next edge.
+ *
+ * The period has to clear PRESS_LOCKOUT at its longest, or some pulses would be
+ * swallowed by a channel that has not finished refusing yet and the panel would
+ * look like it was dropping them at random. Longest rather than nominal is the
+ * whole of the sizing: LOCKOUT_JITTER spreads every lockout by ±40%, so the two
+ * seconds that constant advertises is really anything up to 2.8 — and a period
+ * chosen against the advertised figure would work most of the time, which is the
+ * worst available outcome for a panel whose job is to tell you whether something
+ * fired.
+ */
+const PRESS_DEMO_MS = 3000;
+const PRESS_DEMO_HOLD_MS = 800;
+
+/**
  * The set that turns the tilt on here, and it is a lie of convenience.
  *
  * The kit page has no transcript and no call, so none of the three real triggers
@@ -192,6 +213,45 @@ export default function MotionPreview({ kit, focus, note }: MotionPreviewProps) 
    */
   const [tilting, setTilting] = useState(false);
   const [tiltCue, setTiltCue] = useState<TiltCue | null>(null);
+  /**
+   * Off, and the only thing on this panel that asks a question about a patch
+   * rather than about a box.
+   *
+   * The press dissolves `mbp` in over `rest` at PRESS_DEPTH, so what it costs to
+   * draw is nothing and what it *shows* is entirely a property of those two
+   * images. Most generators draw them very much alike — they are both a closed
+   * mouth — and a pair drawn too alike produces a gesture that runs perfectly
+   * and cannot be seen. There is nowhere else on this page to find that out: the
+   * filmstrip shows the two patches side by side, which is a comparison nobody
+   * watching a face ever gets to make, and the live page shows the press once
+   * per turn at a moment you are listening rather than looking.
+   *
+   * Judged with the loudness dragged to nothing, which takes both controls and
+   * is worth saying precisely because pausing alone does not do it. The press is
+   * scaled away by anything audible — correctly, since a face mid-sentence has
+   * no business closing its lips — and Pause stops the loop wherever the
+   * oscillation had got to, which is usually somewhere loud. So it is the slider
+   * that has to come down, and the button only stops it climbing back.
+   */
+  const [pressing, setPressing] = useState(false);
+  /** The pulsed `speaking`, which is the only thing the press listens to. */
+  const [turn, setTurn] = useState(false);
+
+  useEffect(() => {
+    if (!pressing) {
+      setTurn(false);
+      return;
+    }
+    let ending = 0;
+    const starting = window.setInterval(() => {
+      setTurn(true);
+      ending = window.setTimeout(() => setTurn(false), PRESS_DEMO_HOLD_MS);
+    }, PRESS_DEMO_MS);
+    return () => {
+      window.clearInterval(starting);
+      window.clearTimeout(ending);
+    };
+  }, [pressing]);
 
   useEffect(() => {
     if (!tilting) {
@@ -254,6 +314,11 @@ export default function MotionPreview({ kit, focus, note }: MotionPreviewProps) 
             motion={motion}
             cadence={cadence}
             browBlink={browBlink}
+            lipPress={pressing}
+            // Pulsed rather than reported, and it reaches the face for the press
+            // alone: nothing else here reads it, because `hesitation` is not in
+            // TILT_DEMO and so the pause detector has nothing to fire.
+            speaking={turn}
             // The same rule as the lean below, and this panel's oldest one: the
             // extreme is the frame that fails. A brow box judged at the default
             // travel tells you nothing about the box, only about the setting — and
@@ -398,6 +463,47 @@ export default function MotionPreview({ kit, focus, note }: MotionPreviewProps) 
               onClick={() => setBrowBlink(value)}
               className={`px-2.5 py-1 ${
                 browBlink === value
+                  ? 'bg-slate-800 text-slate-100'
+                  : 'text-slate-500 hover:text-slate-300'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/*
+        Fourth in the group, and the only one asking about artwork the page has
+        no other way to test. The brow rows judge a seam this component makes out
+        of the base image; this judges whether two patches a generator drew are
+        different enough from each other to read as a movement when one is
+        dissolved into the other.
+      */}
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        <span className="w-12 shrink-0 text-slate-500">Lips</span>
+        <div className="flex overflow-hidden rounded-lg border border-slate-700">
+          {(
+            [
+              [
+                false,
+                'Speech only',
+                'The mouth holds the rest pose and moves for nothing but sound, which on this panel means it does not move at all.',
+              ],
+              [
+                true,
+                'Closing',
+                'Every three seconds the lips close most of the way toward the M/B/P pose and part again, which is what the live face does in the moment before a turn begins. Drag the loudness to nothing to see it: the gesture is scaled away by anything audible, so it is correctly invisible while this page is pretending to speak.',
+              ],
+            ] as const
+          ).map(([value, label, hint]) => (
+            <button
+              key={label}
+              type="button"
+              title={hint}
+              onClick={() => setPressing(value)}
+              className={`px-2.5 py-1 ${
+                pressing === value
                   ? 'bg-slate-800 text-slate-100'
                   : 'text-slate-500 hover:text-slate-300'
               }`}

@@ -73,6 +73,7 @@ interface Prefs {
   motion: HeadMotion;
   cadence: MotionCadence;
   browBlink: boolean;
+  lipPress: boolean;
   browLift: number;
   tilt: TiltTrigger[];
   tiltRoll: number;
@@ -197,6 +198,7 @@ export default function LiveTrial() {
   // Defaulted on, and it is the one setting here that does something while
   // nobody is speaking at all — it rides on the blink, which never stops.
   const [browBlink, setBrowBlink] = useState<boolean>(prefs.browBlink ?? true);
+  const [lipPress, setLipPress] = useState<boolean>(prefs.lipPress ?? true);
   // A slider for the lean's reason and one of its own: how far a brow travels
   // depends on how much forehead the portrait wearing it has, so there is no
   // single right answer to write into the file — and every previous attempt to
@@ -278,6 +280,7 @@ export default function LiveTrial() {
           motion,
           cadence,
           browBlink,
+          lipPress,
           browLift,
           tilt,
           tiltRoll,
@@ -295,6 +298,7 @@ export default function LiveTrial() {
     motion,
     cadence,
     browBlink,
+    lipPress,
     browLift,
     tilt,
     tiltRoll,
@@ -487,6 +491,7 @@ export default function LiveTrial() {
           motion={motion}
           cadence={cadence}
           browBlink={browBlink}
+          lipPress={lipPress}
           browLift={browLift}
           tilt={tilt}
           tiltRoll={tiltRoll}
@@ -743,6 +748,38 @@ export default function LiveTrial() {
               <span className="w-10 text-right font-mono text-slate-300">
                 {(browLift / 2).toFixed(1)}%
               </span>
+            </label>
+          </div>
+
+          {/*
+            A row of its own with one box on it, which looks like waste and is
+            not. Every other row here groups settings that answer one question —
+            which way, how often, how far — and this answers a question none of
+            them ask: whether the mouth is allowed to move for a reason other
+            than sound. Folded in beside the brows it would read as a third brow
+            setting, and the one thing worth knowing about it is that it is the
+            only control on this panel that touches the mouth without touching
+            the analyser.
+
+            No travel slider beside it, unlike the two rows above. Those became
+            sliders because a constant turned out to be taste; this one has a
+            ceiling that is not taste at all — a press that reaches `mbp` is a
+            consonant, and there would be nothing above the useful range for the
+            slider to offer but that mistake.
+          */}
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+            <span className="w-16 shrink-0 text-xs text-slate-500">Lips</span>
+            <label
+              title="The lips close for a third of a second as a turn begins, in the gap between the tutor's audio being queued and the first sound of it arriving — which is what a person does just before they start talking. It never fires while anything is audible, and never during your turn. Untick it to hear the same sentence start from a mouth that was doing nothing."
+              className="flex cursor-help items-center gap-2 text-sm text-slate-300"
+            >
+              <input
+                type="checkbox"
+                checked={lipPress}
+                onChange={(event) => setLipPress(event.target.checked)}
+                className="accent-sky-500"
+              />
+              Close before speaking
             </label>
           </div>
 

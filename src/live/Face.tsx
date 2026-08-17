@@ -20,7 +20,7 @@ import {
   type TiltCue,
   type TiltTrigger,
 } from './headMotion';
-import { MOUTH_BOX, lipPath, type LipShape, type Viseme } from './visemes';
+import { MOUTH_BOX, SILENCE, VISEMES, lipPath, type LipShape, type Viseme } from './visemes';
 
 /**
  * The placeholder face.
@@ -61,6 +61,25 @@ const BLINK_EVERY_MS = 4200;
 const PLACEHOLDER_BROW_BOLDNESS = 1.5;
 
 /**
+ * And the same allowance for the lip press, at the same figure.
+ *
+ * Deliberately the same number, because it is the same argument and not a second
+ * tuning: this drawing has to overact to say anything. The arithmetic is worth
+ * having rather than trusting, though, because the press is a much smaller
+ * movement than a brow raise and the margin is thinner. `rest` to `mbp` is 4
+ * units of half-width and 1.7 of aperture; the stage draws this head at 160
+ * pixels, so a unit is 0.8 of one. At PRESS_DEPTH's 0.6 that is 1.9 pixels at the
+ * corners and 0.8 across the opening — under the width of the stroke drawing it,
+ * which is what "the mouth does not appear to move" looks like from the inside,
+ * and the exact failure DEFAULT_BROW_LIFT spent two revisions on. Times 1.5 it
+ * comes to 2.9 and 1.2, which is small and is at least there.
+ *
+ * Clamped at 1 where it is used, so the boldness can only close the gap to `mbp`
+ * and never overshoot past it into a pose the artwork has no drawing for.
+ */
+const PLACEHOLDER_PRESS_BOLDNESS = 1.5;
+
+/**
  * How far the brow patch fades out at its top and sides, in head units.
  *
  * The one number that decides whether this looks like a lift or like a
@@ -93,6 +112,15 @@ interface FaceProps {
   cadence?: MotionCadence;
   /** Whether some blinks carry a brow lift. See BROW_FLASH in headMotion.ts. */
   browBlink?: boolean;
+  /**
+   * Whether the lips close for a moment as a turn begins. See PRESS.
+   *
+   * Reads `speaking` and nothing else, so a face with no call behind it never
+   * does this — which is the same silence the tilt's default relies on, and for
+   * once it is not a compromise: the whole gesture is about a turn starting, and
+   * a preview has no turns.
+   */
+  lipPress?: boolean;
   /**
    * How far the brows travel at full lift, in head units. See DEFAULT_BROW_LIFT.
    *
@@ -151,6 +179,7 @@ export default function Face({
   motion = DEFAULT_HEAD_MOTION,
   cadence = DEFAULT_CADENCE,
   browBlink = true,
+  lipPress = true,
   browLift = DEFAULT_BROW_LIFT,
   tilt = DEFAULT_TILT_TRIGGERS,
   tiltRoll = DEFAULT_TILT_ROLL,
@@ -159,7 +188,7 @@ export default function Face({
   mouthRef,
 }: FaceProps) {
   const [blinking, setBlinking] = useState(false);
-  const [perf, setPerf] = useState<Performance>({ head: 0, brow: 0, tilt: 0 });
+  const [perf, setPerf] = useState<Performance>({ head: 0, brow: 0, tilt: 0, press: 0 });
   const timers = useRef<number[]>([]);
   /**
    * Built once, and reachable from both effects below rather than owned by the
@@ -182,10 +211,10 @@ export default function Face({
    * face finding its feet cannot be used for the one thing it exists for, which
    * is flipping between two schedules on the same sentence.
    */
-  const latest = useRef({ level, cadence, browBlink, tilt, speaking });
+  const latest = useRef({ level, cadence, browBlink, lipPress, tilt, speaking });
   useEffect(() => {
-    latest.current = { level, cadence, browBlink, tilt, speaking };
-  }, [level, cadence, browBlink, tilt, speaking]);
+    latest.current = { level, cadence, browBlink, lipPress, tilt, speaking };
+  }, [level, cadence, browBlink, lipPress, tilt, speaking]);
 
   /**
    * Questions and handovers, handed to the performer as they arrive.
@@ -258,6 +287,7 @@ export default function Face({
       const next = performer.current!.read(dt, latest.current.level, latest.current.cadence, {
         triggers: latest.current.tilt,
         speaking: latest.current.speaking,
+        press: latest.current.lipPress,
       });
       // Returning the identical object when nothing has moved is what keeps a
       // silent face cheap: between flashes this loop costs one callback a frame
@@ -271,7 +301,8 @@ export default function Face({
       setPerf((current) =>
         Math.abs(current.head - next.head) < 1e-4 &&
         Math.abs(current.brow - next.brow) < 1e-4 &&
-        Math.abs(current.tilt - next.tilt) < 1e-4
+        Math.abs(current.tilt - next.tilt) < 1e-4 &&
+        Math.abs(current.press - next.press) < 1e-4
           ? current
           : next,
       );
@@ -323,6 +354,23 @@ export default function Face({
   // voice, and putting it on a schedule would make the face blink-adjacent at
   // moments it had not chosen to blink.
   const eyeOpen = blinking ? 0.08 : 1 - level * 0.12;
+  /**
+   * The lip press, faded out by whatever the voice is doing.
+   *
+   * This one line is the whole of how the press and the analyser settle which of
+   * them owns the mouth, and the answer is that the analyser always does. The
+   * gesture is scaled by how far below the classifier's own silence threshold
+   * this frame sits, so it is at full strength while the analyser is reporting
+   * `rest` and at nothing by the time it reports anything else — the two are the
+   * same test, because `viseme === 'rest'` *is* `level < SILENCE`.
+   *
+   * Continuous rather than a test on `viseme` directly, which would be the
+   * identical rule expressed as a cliff. The cliff is the problem: it would drop
+   * the mouth by the entire depth of the press between two frames, on the exact
+   * frame the first syllable lands. This way the press is already on its way out
+   * as the sound comes up, which is also what lips parting into a word look like.
+   */
+  const pressed = perf.press * Math.max(0, 1 - level / SILENCE);
 
   /**
    * The drawn face, wearing artwork.
@@ -577,6 +625,25 @@ export default function Face({
               );
             })}
     
+            {/*
+              The poses: one fully opaque, the rest hidden — except during a
+              press, when `mbp` is faded in on top of `rest`.
+
+              That pairing is what lets the press be a *partial* one at all, and
+              it works only because `rest` stays at full opacity underneath.
+              These patches are painted over the base portrait, which has a mouth
+              of its own; fade two of them to a half each and the composite keeps
+              a quarter of the base showing through — a third mouth ghosting
+              behind the other two, in the one place on the face nobody would
+              miss it. Held at 1 with `mbp` coming up above it, which VISEME_ORDER
+              guarantees is the paint order, the pair sums to exactly one opaque
+              mouth at every depth, and what the eye gets is a dissolve between
+              two poses rather than a blend of three.
+
+              `pressed` is what keeps the second branch from ever firing during
+              speech: it is zero for every frame the analyser is not reporting
+              `rest`, so `mbp` cannot be laid over a vowel.
+            */}
             {VISEME_ORDER.map((id) => {
               const patch = kit.patches[id];
               if (!patch) return null;
@@ -588,7 +655,7 @@ export default function Face({
                   y={toHead(mouth.y)}
                   width={toHead(mouth.width)}
                   height={toHead(mouth.height)}
-                  opacity={viseme === id ? 1 : 0}
+                  opacity={viseme === id ? 1 : id === 'mbp' ? pressed : 0}
                 />
               );
             })}
@@ -620,6 +687,29 @@ export default function Face({
       </svg>
     );
   }
+
+  /**
+   * The drawn mouth, pressed.
+   *
+   * A lerp of the three numbers rather than a fourth named shape, which is what
+   * LipShape is parameterised for: the placeholder interpolates its way between
+   * poses already, and a press is just a partial trip toward one of them. Where
+   * a kit dissolves between two pictures, this moves the actual geometry — the
+   * same gesture arrived at by the only means each face has.
+   *
+   * Taken from the live `shape` rather than from VISEMES.rest, so that a press
+   * still releasing when the first syllable lands eases out of wherever the
+   * mouth has got to instead of snapping back from a pose it has already left.
+   */
+  const boldPress = Math.min(1, pressed * PLACEHOLDER_PRESS_BOLDNESS);
+  const drawn: LipShape =
+    boldPress > 0
+      ? {
+          w: shape.w + (VISEMES.mbp.w - shape.w) * boldPress,
+          up: shape.up + (VISEMES.mbp.up - shape.up) * boldPress,
+          down: shape.down + (VISEMES.mbp.down - shape.down) * boldPress,
+        }
+      : shape;
 
   return (
     <svg viewBox="0 0 200 200" className="h-full w-full overflow-visible" aria-hidden="true">
@@ -673,7 +763,7 @@ export default function Face({
           viewBox={`0 0 ${MOUTH_BOX.width} ${MOUTH_BOX.height}`}
           overflow="visible"
         >
-          <path d={lipPath(shape)} fill={THROAT} stroke={INK} strokeWidth="2.5" />
+          <path d={lipPath(drawn)} fill={THROAT} stroke={INK} strokeWidth="2.5" />
           <circle
             ref={mouthRef}
             cx={MOUTH_BOX.width / 2}

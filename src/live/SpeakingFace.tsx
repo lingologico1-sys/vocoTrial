@@ -42,6 +42,8 @@ interface SpeakingFaceProps {
   cadence?: MotionCadence;
   /** Whether some blinks carry a brow lift. */
   browBlink?: boolean;
+  /** Whether the lips close as a turn begins. See PRESS in headMotion.ts. */
+  lipPress?: boolean;
   /** How far the brows travel, in head units. Switchable mid-call, like the lean. */
   browLift?: number;
   /** Which events may lean the head sideways. See TILT_TRIGGERS. */
@@ -71,6 +73,7 @@ export default function SpeakingFace({
   motion,
   cadence,
   browBlink,
+  lipPress,
   browLift,
   tilt,
   tiltRoll,
@@ -163,6 +166,7 @@ export default function SpeakingFace({
       motion={motion}
       cadence={cadence}
       browBlink={browBlink}
+      lipPress={lipPress}
       browLift={browLift}
       tilt={tilt}
       tiltRoll={tiltRoll}

@@ -72,6 +72,8 @@ interface StageProps {
   cadence?: MotionCadence;
   /** Whether some blinks carry a brow lift. */
   browBlink?: boolean;
+  /** Whether the lips close as a turn begins. See PRESS in headMotion.ts. */
+  lipPress?: boolean;
   /** How far the brows travel, in head units. See DEFAULT_BROW_LIFT in headMotion.ts. */
   browLift?: number;
   /** Which events may lean the head sideways. See TILT_TRIGGERS in headMotion.ts. */
@@ -83,9 +85,10 @@ interface StageProps {
   /**
    * Whether the agent is still saying the words in the balloon.
    *
-   * Two consumers now, and they want it for unrelated reasons: the balloon dims
-   * when it goes false, and the tilt uses it to tell a pause inside a turn from
-   * the end of one.
+   * Three consumers now, and they want it for unrelated reasons: the balloon
+   * dims when it goes false, the tilt uses it to tell a pause inside a turn from
+   * the end of one, and the lip press takes its rising edge as the one moment it
+   * is allowed to fire.
    */
   speaking: boolean;
 }
@@ -102,6 +105,7 @@ export default function Stage({
   motion,
   cadence,
   browBlink,
+  lipPress,
   browLift,
   tilt,
   tiltRoll,
@@ -201,6 +205,7 @@ export default function Stage({
               motion={motion}
               cadence={cadence}
               browBlink={browBlink}
+              lipPress={lipPress}
               browLift={browLift}
               tilt={tilt}
               tiltRoll={tiltRoll}

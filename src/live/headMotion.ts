@@ -9,6 +9,13 @@
  *
  * Every number here is in head units — the 200x200 space Face.tsx draws in — and
  * degrees.
+ *
+ * The name has been outgrown twice and is kept anyway. The brows have lived here
+ * since the blink learned to carry them, and the lips arrived with PRESS — which
+ * is not head motion by any reading. What the file actually holds is every
+ * movement the face makes that the *sound* does not dictate: the mouth's shape
+ * during speech belongs to visemes.ts and always will, and one gesture at the
+ * edge of a turn belongs here, with the schedules.
  */
 
 /**
@@ -660,6 +667,73 @@ const TILT: Envelope = { attack: 0.28, hold: 1, release: 0.8 };
 const TILT_LOCKOUT = 5;
 
 /**
+ * The lips closing as a turn begins — the mouth's one movement that is not speech.
+ *
+ * It is the question the idle sway asked and lost, put to the feature where
+ * losing it would cost the most. A mouth is what the eye watches for speech, so
+ * anything it does without sound reads as an *attempt* to speak: on a timer that
+ * is a face muttering to itself, and during the user's turn it is a face
+ * interrupting. The sway's verdict holds here with the volume up — what fails an
+ * idle movement is not its size, it is the absence of a cause.
+ *
+ * So this one is not idle at all, and the cause it waits for was already written
+ * down a few dozen lines below, as an obstacle. `heardThisTurn` exists because
+ * the quiet a turn *begins* with runs longer than PAUSE_HOLD: the transport
+ * flips `speaking` the moment it queues audio, which is better than 450ms before
+ * anyone hears any. That window is a nuisance to the pause detector and a gift
+ * to this — closing the lips in it is what a person does before they start
+ * talking, and it is the rare case where the honest gesture and the free one are
+ * the same gesture.
+ *
+ * Under a third of a second all told, which is sized to fit inside that window
+ * rather than chosen for its shape. Being caught still releasing as the first
+ * syllable lands is not a failure, though, and is the reason the release is the
+ * longest of the three terms: lips parting into a sound is what the end of a
+ * press is *for*, and the only thing that must be over by then is the closing.
+ *
+ * The channel it borrows is the one genuinely contended thing here. Brow and
+ * blink combine with a max because they are magnitudes; the viseme is a single
+ * discrete slot the analyser owns on every frame it has anything to say. The
+ * press never argues for it — see PRESS_DEPTH for how much it asks, and
+ * `pressed` in Face.tsx for how it hands the slot back.
+ */
+const PRESS: Envelope = { attack: 0.1, hold: 0.08, release: 0.16 };
+
+/**
+ * How far toward `mbp` a press goes, as a share of the whole pose.
+ *
+ * Short of it on purpose, and for the lesson BROW_FLASH_LIFT had to be corrected
+ * to learn: an idle movement that reaches what speech reaches has stopped being
+ * idle. `mbp` is a real viseme — the one the classifier returns for a barely
+ * audible frame — so a press driven the whole way is indistinguishable from a
+ * consonant, and a consonant with no sound under it is the exact thing this
+ * gesture is trying not to look like. Stopping short puts the lips somewhere the
+ * analyser never puts them, which reads as a small movement rather than as a
+ * phoneme.
+ *
+ * Not so short that it disappears, which is the other half of the sizing and the
+ * half that is a property of the artwork rather than of this file. `rest` and
+ * `mbp` are both closed mouths and most generators draw them very much alike —
+ * on the kit this was built against the two patches are hard to tell apart in
+ * the picker — so the whole travel can be a couple of pixels before any share is
+ * taken of it. If a press cannot be seen on a given kit, that is the two patches
+ * being alike, and the fix is in the art rather than in this number.
+ */
+const PRESS_DEPTH = 0.6;
+
+/**
+ * How long a press refuses to fire again, in seconds.
+ *
+ * Insurance rather than pacing, unlike every other lockout here. Turns are
+ * seconds apart by their nature, so nothing about a conversation needs this —
+ * what needs it is that `speaking` is a prop from the transport rather than a
+ * clock in this file, and a prop that flickers false and true between queued
+ * chunks would spend a press on each flicker. Two seconds is longer than any
+ * such flicker and shorter than any real gap between turns.
+ */
+const PRESS_LOCKOUT = 2;
+
+/**
  * What counts as the voice having stopped, and for how long, in share and seconds.
  *
  * The threshold sits just under the mouth's own SILENCE of 0.12, so the lips are
@@ -723,8 +797,9 @@ function smooth(t: number): number {
   return clamped * clamped * (3 - 2 * clamped);
 }
 
-/** What the head and brows are doing this frame, as multipliers on MOTION. */
+/** What everything but the spoken mouth is doing this frame. */
 export interface Performance {
+  /** The head, as a multiplier on MOTION. */
   head: number;
   /**
    * Never negative, and now guaranteed rather than merely observed.
@@ -747,11 +822,21 @@ export interface Performance {
    * to say what was wrong, and everybody would notice.
    */
   tilt: number;
+  /**
+   * How far the lips are closed toward `mbp`, 0 to 1, and 0 for nearly all of a
+   * call.
+   *
+   * The odd one out in what it describes. The other three are multipliers on a
+   * transform — how far to lift, to lean, to raise — and mean nothing without the
+   * number they scale. This one names a pose the mouth already has, and says how
+   * far along the way to it the lips have got. See PRESS.
+   */
+  press: number;
 }
 
-/** What the caller knows about the tilt that the loudness cannot tell it. */
-export interface TiltInput {
-  /** Which events may fire one. Empty is the feature switched off. */
+/** What the caller knows about the moment that the loudness cannot tell it. */
+export interface CueInput {
+  /** Which events may fire a tilt. Empty is that feature switched off. */
   triggers: readonly TiltTrigger[];
   /**
    * True while the agent's audio is playing, gaps inside it included.
@@ -760,8 +845,15 @@ export interface TiltInput {
    * a prop rather than something inferred here: from inside this file a pause
    * mid-sentence and the end of a turn are the same silence, and only the
    * transport knows whether more audio is queued behind it.
+   *
+   * Two features read it now and they want opposite things from it. The tilt
+   * wants to know whether a silence sits *inside* a turn. The press wants the
+   * rising edge — the frame the transport first admits a turn is coming, which
+   * arrives before there is anything to hear.
    */
   speaking: boolean;
+  /** Whether the lips close as a turn begins. See PRESS. */
+  press: boolean;
 }
 
 /**
@@ -842,6 +934,18 @@ export class HeadPerformer {
   private readonly browChannel = new Channel(GESTURE, BROW_LOCKOUT);
   private readonly flashChannel = new Channel(BROW_FLASH);
   private readonly tiltChannel = new Channel(TILT, TILT_LOCKOUT);
+  private readonly pressChannel = new Channel(PRESS, PRESS_LOCKOUT);
+  /**
+   * Whether a turn was running last frame, so the press can take the rising edge.
+   *
+   * Found here rather than pushed in like `blinked`, `heardQuestion` and
+   * `yielded`, and the difference is not inconsistency. Those three report things
+   * this file cannot see at any price — a clock it does not own, a transcript it
+   * never reads. This one is already arriving on every frame as `speaking`, and a
+   * second copy of it as an event would be a second thing to keep in step with
+   * the first.
+   */
+  private wasSpeaking = false;
   /** Set by `blinked`, spent by the next `read`. */
   private flashPending = false;
   /** Set by `heardQuestion` and `yielded`, spent by the next `read`. */
@@ -920,7 +1024,7 @@ export class HeadPerformer {
    * @param dt Seconds since the previous frame.
    * @param level Smoothed loudness from the mouth analyser, 0 to 1.
    */
-  read(dt: number, level: number, cadence: MotionCadence, tilt: TiltInput): Performance {
+  read(dt: number, level: number, cadence: MotionCadence, cue: CueInput): Performance {
     this.phrase += (level - this.phrase) * ease(dt, level > this.phrase ? PHRASE_ATTACK : PHRASE_RELEASE);
 
     // Fired from the phrase envelope rather than from `level`, which is what
@@ -943,10 +1047,18 @@ export class HeadPerformer {
     const flash = this.flashChannel.advance(dt, this.flashPending) * BROW_FLASH_LIFT;
     this.flashPending = false;
 
+    // The lips, closing before the voice arrives. The edge is taken whether or
+    // not the box is ticked, so that ticking it mid-call cannot inherit a turn
+    // that started before it — the promise the lockouts above make about
+    // switching cadence, owed here for the same reason.
+    const turnStarting = cue.speaking && !this.wasSpeaking;
+    this.wasSpeaking = cue.speaking;
+    const press = this.pressChannel.advance(dt, turnStarting && cue.press) * PRESS_DEPTH;
+
     // The gap detector. Runs whether or not `hesitation` is ticked, so that
     // ticking it mid-call does not inherit a pause that started a minute ago —
     // the same promise the lockouts above make about switching cadence.
-    if (!tilt.speaking) {
+    if (!cue.speaking) {
       this.heardThisTurn = false;
       this.quietFor = 0;
       this.pauseSpent = false;
@@ -965,7 +1077,7 @@ export class HeadPerformer {
     // wanted. Both events are cleared either way, for the flash's reason —
     // banked and cashed in later, a question would tilt the head at a moment
     // with nothing in the conversation to account for it.
-    const wanted = (id: TiltTrigger) => tilt.triggers.includes(id);
+    const wanted = (id: TiltTrigger) => cue.triggers.includes(id);
     const fireTilt =
       (this.questionPending && wanted('question')) ||
       (this.yieldPending && wanted('listening')) ||
@@ -1011,6 +1123,6 @@ export class HeadPerformer {
     // asking for more, which is the correct thing for the smaller movement to do.
     const brow = Math.max(spoken, flash);
 
-    return { head, brow, tilt: leaning * this.tiltSide };
+    return { head, brow, tilt: leaning * this.tiltSide, press };
   }
 }
