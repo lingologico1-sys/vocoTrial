@@ -127,10 +127,13 @@ export default function MotionPreview({ kit, focus, note }: MotionPreviewProps) 
   const [level, setLevel] = useState(1);
   const [loop, setLoop] = useState(true);
   /**
-   * Starts close, because the brows are the only thing `focus` ever frames now
-   * and a brow seam is a few pixels tall. Untick it to watch the head instead.
+   * Starts wide, because the whole head is the thing you have an opinion about
+   * first: whether this face moves like a person at all, and whether the frame
+   * still holds it at the far end of a lean. A seam a few pixels tall is a
+   * second look, taken once the first one has passed — so the zoom is offered
+   * rather than imposed. Tick it to go in on whatever `focus` frames.
    */
-  const [zoom, setZoom] = useState(true);
+  const [zoom, setZoom] = useState(false);
   /**
    * Local to the preview, and deliberately not written back to the kit.
    *

@@ -17,8 +17,16 @@ import { SLOTS, type SlotId } from './slots';
  * plays here is the artwork, not a preview of it.
  */
 
-/** Roughly the rate a real mouth changes shape at during connected speech. */
-const DEFAULT_FPS = 12;
+/**
+ * Half the rate a real mouth changes shape at during connected speech.
+ *
+ * Speaking speed is the honest setting and it is one drag away, but it is the
+ * wrong one to open on: at twelve a second the frames blur into a single
+ * impression of a face, and a kit that crawls tells you only that something is
+ * wrong. Slow enough that each mouth is its own picture, drift stops being a
+ * crawl and becomes a jump you can point at — which is the frame to regenerate.
+ */
+const DEFAULT_FPS = 6;
 
 const MOUTH_SLOTS = SLOTS.filter((entry) => entry.region === 'mouth').map((entry) => entry.id);
 
@@ -162,9 +170,9 @@ export default function Filmstrip({ kit }: FilmstripProps) {
         {/*
           Every frame stays mounted and is revealed by opacity rather than by
           swapping one element's src. A data URL still has to be decoded the
-          first time it is painted, and doing that at twelve frames a second
-          produces a stutter that looks exactly like the artefact this preview
-          exists to detect.
+          first time it is painted, and doing that at playback speed produces a
+          stutter that looks exactly like the artefact this preview exists to
+          detect.
         */}
         {frames.map((frame) => (
           <img
