@@ -18,15 +18,20 @@ import { SLOTS, type SlotId } from './slots';
  */
 
 /**
- * Half the rate a real mouth changes shape at during connected speech.
+ * A sixth of the rate a real mouth changes shape at during connected speech.
  *
  * Speaking speed is the honest setting and it is one drag away, but it is the
  * wrong one to open on: at twelve a second the frames blur into a single
  * impression of a face, and a kit that crawls tells you only that something is
- * wrong. Slow enough that each mouth is its own picture, drift stops being a
- * crawl and becomes a jump you can point at — which is the frame to regenerate.
+ * wrong. Half a second a mouth is slow enough that each one arrives as its own
+ * picture, and drift stops being a crawl and becomes a jump between two stills
+ * you can name — which is the frame to regenerate.
+ *
+ * It is also the slider's own floor, so the strip opens at one end of its range
+ * rather than in the middle: every drag from here is toward speaking speed, and
+ * the setting that needs finding is the one you start on.
  */
-const DEFAULT_FPS = 6;
+const DEFAULT_FPS = 2;
 
 const MOUTH_SLOTS = SLOTS.filter((entry) => entry.region === 'mouth').map((entry) => entry.id);
 

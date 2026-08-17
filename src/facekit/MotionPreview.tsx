@@ -236,6 +236,31 @@ export default function MotionPreview({ kit, focus, note }: MotionPreviewProps) 
   const [pressing, setPressing] = useState(false);
   /** The pulsed `speaking`, which is the only thing the press listens to. */
   const [turn, setTurn] = useState(false);
+  /**
+   * Off, and the only control here that stops the face rather than changing it.
+   *
+   * Everything else on this panel is watched: the loop runs, the movement goes
+   * past, and you form an opinion about whether it read. Two of the frames it
+   * goes past cannot be judged that way, because they are the ones the artwork
+   * itself can be wrong in and they are both over in about a tenth of a second.
+   * A lid patch either sits on the base under it or it does not, and a blink is
+   * too short to tell which. A brow crop at full lift either has plain forehead
+   * above it or is dragging a band of skin into a fringe, and full lift is one
+   * instant inside a gesture that has already moved on.
+   *
+   * Neither is a question about motion, so neither is answered by watching. This
+   * button parks the face on both at once — lids shut, brows as high as this kit
+   * will ever take them — and leaves it there.
+   *
+   * It stops the loudness as well as the face, which is the part worth stating.
+   * `hold` reaches the lids and the brows and nothing else, so a held face on a
+   * running loop would still be swinging and possibly leaning, and a seam a few
+   * pixels tall cannot be inspected on a moving head. So the click does what a
+   * drag of the slider does — takes the loop off — and then takes the loudness to
+   * nothing, which is the only value that leaves the head at rest. Speak gives
+   * it all back.
+   */
+  const [held, setHeld] = useState(false);
 
   useEffect(() => {
     if (!pressing) {
@@ -334,6 +359,7 @@ export default function MotionPreview({ kit, focus, note }: MotionPreviewProps) 
             // drag it to.
             tiltRoll={TILT_ROLL_MAX}
             tiltCue={tiltCue}
+            hold={held}
           />
         </div>
       </div>
@@ -341,10 +367,43 @@ export default function MotionPreview({ kit, focus, note }: MotionPreviewProps) 
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-slate-400">
         <button
           type="button"
-          onClick={() => setLoop((current) => !current)}
+          // Releases the hold on the way past, whichever way it is going. The two
+          // cannot both be in charge, and a click on this one is a statement that
+          // the loop is: pressing Speak on a face parked with its eyes shut and
+          // getting a talking face with its eyes still shut is not a state
+          // anybody meant to ask for.
+          onClick={() => {
+            setLoop((current) => !current);
+            setHeld(false);
+          }}
           className="rounded-lg border border-slate-700 px-2.5 py-1 text-slate-200 hover:border-slate-500"
         >
           {loop ? 'Pause' : 'Speak'}
+        </button>
+
+        {/*
+          Beside the loop rather than down among the switches, because it is the
+          other thing you can do to the whole face — those rows change what the
+          face does, and these two decide whether it is doing anything.
+        */}
+        <button
+          type="button"
+          title="Stops the face with the lids shut and the brows as high as this kit will ever take them — two frames that otherwise pass in about a tenth of a second each. Tick Close and look for a lid patch that does not sit on the base underneath it, and for a hard edge or a flat band of skin where the lifted brow crop meets the forehead. Speak sets it going again."
+          onClick={() => {
+            const next = !held;
+            setHeld(next);
+            if (next) {
+              setLoop(false);
+              setLevel(0);
+            }
+          }}
+          className={`rounded-lg border px-2.5 py-1 ${
+            held
+              ? 'border-violet-600 bg-violet-950/40 text-violet-200'
+              : 'border-slate-700 text-slate-200 hover:border-slate-500'
+          }`}
+        >
+          {held ? 'Release' : 'Shut and lifted'}
         </button>
 
         {/*

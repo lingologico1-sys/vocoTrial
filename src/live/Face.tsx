@@ -156,6 +156,26 @@ interface FaceProps {
    * kit page's preview — from finding a hesitation in its own silence.
    */
   speaking?: boolean;
+  /**
+   * Holds the lids shut and the brows at their ceiling for as long as it is on.
+   *
+   * The kit page's affordance, and nothing the live face ever sets. Both are
+   * frames the face otherwise only shows in passing — a blink is BLINK_MS, and a
+   * brow at full lift is one instant inside a gesture — and both are frames where
+   * a kit's artwork can be wrong in a way no other view on that page can show: a
+   * closed-lid patch that does not register with the base under it, or a brow crop
+   * whose top edge has cleared the plain forehead and is drawing a band of skin
+   * across a fringe. Stopping on them is the only way to look at either for longer
+   * than it exists.
+   *
+   * It overrides rather than drives. The blink schedule and the performer both
+   * keep running underneath, and what they say about these two channels is
+   * discarded until this goes off — so releasing it hands the face straight back
+   * to whatever they had got to, with nothing to resynchronise. Nothing else is
+   * touched: a held face still swings and still leans if it is given a loudness,
+   * which is the caller's business to stop.
+   */
+  hold?: boolean;
   /** Anchor for the speech bubble's tail. Marks the mouth, not the head. */
   mouthRef?: React.Ref<SVGCircleElement>;
 }
@@ -186,6 +206,7 @@ export default function Face({
   tiltRoll = DEFAULT_TILT_ROLL,
   tiltCue,
   speaking = false,
+  hold = false,
   mouthRef,
 }: FaceProps) {
   const [blinking, setBlinking] = useState(false);
@@ -347,14 +368,24 @@ export default function Face({
    */
   const roll = perf.head * travel.roll + perf.tilt * tiltRoll;
   const move = `translate(0 ${-perf.head * travel.rise}) rotate(${roll} ${PIVOT_X} ${PIVOT_Y})`;
+  /**
+   * The two channels `hold` takes over, resolved once for both faces below.
+   *
+   * A full brow rather than a number of its own: full is what the cap in the kit
+   * branch is written against, so this asks for the whole of `browLift` and gets
+   * back exactly what that box affords — which is the height the artwork is being
+   * held still to be judged at. Anything less would be judging the setting.
+   */
+  const brow = hold ? 1 : perf.brow;
+  const shut = hold || blinking;
   // Bolder than a kit's, and following the same setting. See
   // PLACEHOLDER_BROW_BOLDNESS.
-  const drawnBrowRise = perf.brow * browLift * PLACEHOLDER_BROW_BOLDNESS;
+  const drawnBrowRise = brow * browLift * PLACEHOLDER_BROW_BOLDNESS;
   // Left on the raw loudness, alone among these. It is not a gesture — it is a
   // twelve percent narrowing that happens to the eyes of anyone raising their
   // voice, and putting it on a schedule would make the face blink-adjacent at
   // moments it had not chosen to blink.
-  const eyeOpen = blinking ? 0.08 : 1 - level * 0.12;
+  const eyeOpen = shut ? 0.08 : 1 - level * 0.12;
   /**
    * The lip press, faded out by whatever the voice is doing.
    *
@@ -443,7 +474,7 @@ export default function Face({
     const brows = BROW_BOXES.flatMap((id) => {
       const box = kit.boxes[id];
       if (!box) return [];
-      const rise = Math.min(perf.brow * browLift, toHead(browHeadroom(box)));
+      const rise = Math.min(brow * browLift, toHead(browHeadroom(box)));
       if (rise <= 0) return [];
       return [
         {
@@ -670,7 +701,7 @@ export default function Face({
                   y={toHead(lid.box.y)}
                   width={toHead(lid.box.width)}
                   height={toHead(lid.box.height)}
-                  opacity={blinking ? 1 : 0}
+                  opacity={shut ? 1 : 0}
                 />
               ) : null,
             )}
