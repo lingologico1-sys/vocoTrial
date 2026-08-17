@@ -52,6 +52,39 @@ export interface BrowBox extends Box {
 }
 
 /**
+ * The mouth's rectangle, plus the one thing a rectangle cannot say.
+ *
+ * `chin` is the resting chin's lowest row, in base pixels, measured down from the
+ * box's own top edge — the same direction and the same units as a brow's
+ * `headroom`, deliberately, because they are the same kind of fact: where the
+ * face inside the box actually is, which the four corners cannot state.
+ *
+ * What it separates is not travel. Above the line is the lower face at rest;
+ * below it is clear room the open pose's chin falls into, and that band is the
+ * one thing this box needs that no other box does. `defaultBoxes` has asked for
+ * it in prose since the box existed and nothing has ever measured it, so a box
+ * drawn to the resting chin looked exactly like a box drawn well until an "aa"
+ * came back with its chin cropped off above the base's own — two chins, paid for.
+ *
+ * Optional, and absent means "not measured" rather than a value to guess. See
+ * `chinClearance` for why this one is allowed to mean nothing when `headroom` is
+ * not.
+ */
+export interface MouthBox extends Box {
+  chin?: number;
+}
+
+/**
+ * Either box that carries a measurement inside it.
+ *
+ * For the code that handles both drags at once, which is the picker and the one
+ * handler it reports to. Neither of them cares which line is being moved — the
+ * pointer capture, the canvas scale and the write-back are identical — and this
+ * saves them a union they would only ever widen again.
+ */
+export type MeasuredBox = BrowBox & MouthBox;
+
+/**
  * The rectangles, with the one optional member spelled out.
  *
  * The three regions are required: a slot is cropped to each of them, and a kit
@@ -71,6 +104,7 @@ export interface BrowBox extends Box {
  * inert data rather than a thing to clean up.
  */
 export interface Boxes extends Record<Region, Box> {
+  mouth: MouthBox;
   browLeft?: BrowBox;
   browRight?: BrowBox;
 }
@@ -96,6 +130,58 @@ export interface Boxes extends Record<Region, Box> {
  */
 export function browHeadroom(box: BrowBox): number {
   return Math.min(box.height, box.headroom ?? box.height / 2);
+}
+
+/**
+ * Where a mouth box's line sits when nobody has dragged it, as a share of height.
+ *
+ * Three quarters down, which leaves the bottom quarter as the clear band. It is
+ * the shape `defaultBoxes` was already drawing — a box reaching from above the
+ * lip to well past the chin — said as a number so the line has somewhere to start
+ * and the picker has something to grab.
+ */
+const CHIN_SHARE = 0.75;
+
+/**
+ * The clear band below the resting chin, in base pixels, or null when unmeasured.
+ *
+ * Null rather than a guess, which is the opposite of what `browHeadroom` does one
+ * box over, and the difference is worth stating because it looks like an
+ * inconsistency and is not. A brow's cap *has* to exist: there is a lift every
+ * frame and something must bound it, so a kit with no measurement gets the old
+ * fraction and moves. Nothing here needs a number at all — the two things that
+ * read this each have a good answer for "not measured", and in both cases that
+ * answer is precisely what the code did before the line existed. Guessing would
+ * change how every kit already in the store feathers on the strength of a line
+ * nobody drew, which is a worse failure than the one it would be guessing at.
+ *
+ * Clamped at both ends for `browHeadroom`'s reason exactly, and at both ends
+ * because a subtraction fails in two directions where a cap fails in one: a
+ * manifest in public/faces is hand-edited JSON, so a `chin` below its own
+ * rectangle would report negative clearance, and one above the top edge would
+ * report more room than the box has — a figure over 100% of the box, on a page
+ * whose whole purpose is to say what is really there.
+ */
+export function chinClearance(box: MouthBox): number | null {
+  if (box.chin === undefined) return null;
+  return box.height - chinLine(box);
+}
+
+/**
+ * Where to draw the chin line, which is not the same question as the one above.
+ *
+ * That one asks what has been measured and is entitled to answer "nothing". This
+ * one is asked by a picker that has to put a draggable line *somewhere*, and for
+ * an unmeasured box the honest thing to offer is the default position — an offer,
+ * not a reading, which is why the picker says so underneath rather than printing
+ * a clearance figure nobody stood behind.
+ *
+ * Splitting them is what lets absent keep meaning absent. One function doing both
+ * would have to pick a number for the feather to use, and picking one there is the
+ * failure `chinClearance` exists to avoid.
+ */
+export function chinLine(box: MouthBox): number {
+  return Math.min(box.height, Math.max(0, box.chin ?? box.height * CHIN_SHARE));
 }
 
 export interface FaceKit {
@@ -190,6 +276,7 @@ export function migrate(kit: FaceKit): FaceKit {
  */
 export function defaultBoxes(): Boxes {
   const edge = CANVAS_EDGE;
+  const mouthHeight = Math.round(edge * 0.27);
   const eye = {
     y: Math.round(edge * 0.33),
     width: Math.round(edge * 0.16),
@@ -206,11 +293,19 @@ export function defaultBoxes(): Boxes {
     // so a box ending at the resting chin leaves the lowered one cropped off
     // above the original, which reads as two chins. This default is a starting
     // position to drag, and on most portraits it wants dragging lower.
+    //
+    // The `chin` is stated for `defaultBrowBox`'s reason: absent means "this kit
+    // predates the measurement", and a box being placed for the first time today
+    // is not that. It is the same number `chinLine` would have offered anyway, so
+    // a box placed now and one placed before the line existed start in the same
+    // place — the difference is that this one has been measured, badly, by a
+    // default that has never seen the portrait, and says so by holding a value.
     mouth: {
       x: Math.round(edge * 0.33),
       y: Math.round(edge * 0.54),
       width: Math.round(edge * 0.34),
-      height: Math.round(edge * 0.27),
+      height: mouthHeight,
+      chin: Math.round(mouthHeight * CHIN_SHARE),
     },
     // Narrow enough to sit inside a lens rather than across a frame. Being a
     // little too small is the safe error here: a box that clips the outer
@@ -323,15 +418,25 @@ export function newKit(name: string, base: string): FaceKit {
  * shrinking. Pulled along with the edge instead, so the line stays on the last row
  * the box still contains and the number never says more than the rectangle does.
  *
- * Left absent when it was absent, which the conditional spread is doing rather
- * than defaulting: absent is the load-bearing state — it means this kit predates
- * the measurement and wants the guess. See `browHeadroom`.
+ * The mouth's `chin` gets the same treatment because it is the same measurement
+ * pointing the other way, but note that its permissive direction is the opposite
+ * one: clearance is what is left *below* the line, so a box dragged shorter than
+ * its own chin line would report no room rather than all of it. That is the safe
+ * error of the two — it warns and it shrinks the fade — and clamping still beats
+ * it, because a line sitting under the box it belongs to is not a measurement of
+ * anything.
+ *
+ * Left absent when it was absent, which the conditional spreads are doing rather
+ * than defaulting: absent is the load-bearing state for both. On a brow it means
+ * this kit predates the measurement and wants the guess (`browHeadroom`); on the
+ * mouth it means nothing has been measured and nothing should be inferred
+ * (`chinClearance`).
  */
 export function clampBox<T extends Box>(box: T): T {
   const min = 48;
   const width = Math.min(CANVAS_EDGE, Math.max(min, Math.round(box.width)));
   const height = Math.min(CANVAS_EDGE, Math.max(min, Math.round(box.height)));
-  const { headroom } = box as BrowBox;
+  const { headroom, chin } = box as MeasuredBox;
   return {
     ...box,
     width,
@@ -339,6 +444,7 @@ export function clampBox<T extends Box>(box: T): T {
     x: Math.min(CANVAS_EDGE - width, Math.max(0, Math.round(box.x))),
     y: Math.min(CANVAS_EDGE - height, Math.max(0, Math.round(box.y))),
     ...(headroom === undefined ? {} : { headroom: Math.min(headroom, height) }),
+    ...(chin === undefined ? {} : { chin: Math.min(chin, height) }),
   };
 }
 

@@ -3,7 +3,14 @@ import BoxPicker from './BoxPicker';
 import DiagnosticsPanel from './DiagnosticsPanel';
 import Filmstrip from './Filmstrip';
 import MotionPreview from './MotionPreview';
-import { composite, dataUrlToBlob, fileToDataUrl, normalise, patchDivergence } from './canvas';
+import {
+  composite,
+  dataUrlToBlob,
+  featherDepth,
+  fileToDataUrl,
+  normalise,
+  patchDivergence,
+} from './canvas';
 import { generateBase, generatePatch } from './generate';
 import {
   IMAGE_MODELS,
@@ -14,6 +21,7 @@ import {
 import {
   KIT_FORMAT,
   browHeadroom,
+  chinClearance,
   defaultBoxSize,
   defaultBrowBox,
   newKit,
@@ -22,6 +30,8 @@ import {
   type Box,
   type BrowBox,
   type FaceKit as Kit,
+  type MeasuredBox,
+  type MouthBox,
 } from './kit';
 import {
   NEUTRALISE_BASE_PROMPT,
@@ -111,6 +121,72 @@ function sameAs(twins: Distance[]): string {
  */
 const distanceNote = (near: Distance[]) =>
   near.map(({ id, share }) => `${slot(id).label} ${percent(share)}`).join(' · ');
+
+/**
+ * What the mouth box's chin line has measured, said out loud under the picker.
+ *
+ * Here rather than in the picker for the reason the brow's paragraph is here too:
+ * that component drags rectangles, this page explains them. But this one has to
+ * earn its place harder than the brow's did. A brow's line can be dragged while
+ * watching the preview answer, so it teaches itself; the mouth's is spent at the
+ * next generation and moves nothing on screen, so without a caption it is a
+ * dashed line with no visible purpose and the natural conclusion is that it does
+ * nothing.
+ *
+ * The warning threshold is the patch's own fade, and it is chosen because it is
+ * the one bound here that is mechanical rather than anatomical. How far a jaw
+ * drops is a fact about a portrait and a prompt, and no number on this page knows
+ * it. How far the seam fades is arithmetic on this rectangle — so a box with less
+ * clear space below the chin than its own seam needs is provably too shallow,
+ * whatever the face is doing. It is a floor and it is a low one: clearing it is
+ * evidence there is *some* room, never that there is enough, which the caption
+ * says rather than letting a green-looking figure imply otherwise.
+ */
+function ChinNote({ box, locked }: { box: MouthBox; locked: boolean }) {
+  const clearance = chinClearance(box);
+  const fade = featherDepth(box);
+  const frame = 'rounded-lg border px-3 py-2 text-xs';
+
+  if (clearance === null) {
+    return (
+      <p className={`${frame} border-slate-800 bg-slate-900/40 text-slate-400`}>
+        The chin line has not been placed, so nothing is assumed: every edge fades as it did
+        before the line existed.{' '}
+        {locked
+          ? // Told plainly rather than left as advice that cannot be taken. A
+            // locked box draws no line, so "drag it" would name something that is
+            // not on screen — and the way back is a button with a price on it.
+            'This box is fixed, so there is no line to drag: unlocking it, and re-cutting what was cut to it, is the only way to measure this one now.'
+          : 'Drag the dashed line onto the bottom of the chin at rest — it is the only check on whether this box leaves room for a dropped jaw, and it is what holds the bottom fade off the chin.'}
+      </p>
+    );
+  }
+
+  const share = Math.round((clearance / box.height) * 100);
+
+  if (clearance < fade) {
+    return (
+      <p className={`${frame} border-amber-700/70 bg-amber-950/20 text-amber-300`}>
+        Only {clearance}px of clear room below the chin line, which is less than the {fade}px this
+        box&rsquo;s seam fades over. The bottom edge is sitting on the resting chin: the open pose
+        drops its jaw into space that is not in the box, comes back cropped above the base&rsquo;s
+        own chin, and reads as two chins.{' '}
+        {locked
+          ? 'This box is fixed, so the poses already cut to it were cut this shallow. Unlocking and re-cutting them is what fixes it.'
+          : 'Drag the bottom edge lower before generating anything — it fixes on the first one.'}
+      </p>
+    );
+  }
+
+  return (
+    <p className={`${frame} border-slate-800 bg-slate-900/40 text-slate-400`}>
+      {clearance}px clear below the chin, {share}% of the box, and the bottom seam fades over{' '}
+      {Math.min(fade, clearance)}px inside that band rather than over the chin above it. That the
+      figure is not zero is all this can tell you: how far a jaw actually drops is a fact about
+      this portrait and this prompt, so the depth still wants judging against the picture.
+    </p>
+  );
+}
 
 /**
  * The eye tabs say which side of the *picture*, not which of her eyes, because
@@ -543,7 +619,7 @@ export default function FaceKit() {
    * geometry and its right to follow are settled at pointer-down and cannot
    * flicker part way through a resize as the page re-renders under it.
    */
-  const moveBox = (which: BoxId, box: BrowBox) => {
+  const moveBox = (which: BoxId, box: MeasuredBox) => {
     const was = kit?.boxes[which];
     const resized = was ? was.width !== box.width || was.height !== box.height : false;
     const partner = partnerBox(which);
@@ -913,6 +989,10 @@ export default function FaceKit() {
                       </p>
                     )}
 
+                    {region === 'mouth' && (
+                      <ChinNote box={kit.boxes.mouth} locked={committed[region] > 0} />
+                    )}
+
                     <p className="text-xs text-slate-500">
                       The box is the mask, the crop, and where the patch lands.
                       {region === 'mouth' ? (
@@ -925,7 +1005,12 @@ export default function FaceKit() {
                           low on the chin at least, and across the neck if the portrait allows it.
                           Every pose is cropped at this box, so one sized to the closed mouth cuts
                           the bottom off the open one — and one sized to the resting chin leaves the
-                          dropped chin above the original, which reads as two chins.
+                          dropped chin above the original, which reads as two chins. Then drag the
+                          dashed line onto the <em>bottom of the chin at rest</em>, which is what
+                          turns that instruction into a number: the band below it is the room the
+                          jaw drops into, and it also holds the patch&rsquo;s bottom fade off the
+                          face. Unlike a brow&rsquo;s line there is nothing to watch it do — it is
+                          spent on the next generation, and this box fixes on the first.
                         </>
                       ) : (
                         <>

@@ -284,7 +284,12 @@ export async function matchTone(patch: string, base: string, box: Box): Promise<
  * A gradient says what it means. Alpha is zero at the boundary and solid by
  * `radius`, with nothing beyond it touched.
  */
-function feather(source: CanvasImageSource, box: Box, radius: number): HTMLCanvasElement {
+function feather(
+  source: CanvasImageSource,
+  box: Box,
+  radius: number,
+  bottom = radius,
+): HTMLCanvasElement {
   const ctx = context(box.width, box.height);
   ctx.drawImage(source, 0, 0, box.width, box.height);
 
@@ -295,13 +300,22 @@ function feather(source: CanvasImageSource, box: Box, radius: number): HTMLCanva
 
   // Each edge erased by a ramp running inward. Corners are crossed by two of
   // them and so fade a little faster, which is what a corner should do anyway.
+  //
+  // The bottom takes a depth of its own because it is the only edge with
+  // something underneath it that has to survive the journey — see featherPatch.
   stencil.globalCompositeOperation = 'destination-out';
   const edges: [number, number, number, number, number, number, number, number][] = [
     [0, 0, radius, 0, 0, 0, radius, height], // left
     [width, 0, width - radius, 0, width - radius, 0, radius, height], // right
     [0, 0, 0, radius, 0, 0, width, radius], // top
-    [0, height, 0, height - radius, 0, height - radius, width, radius], // bottom
   ];
+  // Pushed rather than always present, so a depth of zero means no ramp instead
+  // of a ramp whose ends coincide. The spec says such a gradient paints nothing,
+  // which happens to be the right answer — but arriving at it by accident is not
+  // the same as asking for it.
+  if (bottom > 0) {
+    edges.push([0, height, 0, height - bottom, 0, height - bottom, width, bottom]);
+  }
 
   for (const [gx0, gy0, gx1, gy1, x, y, w, h] of edges) {
     const ramp = stencil.createLinearGradient(gx0, gy0, gx1, gy1);
@@ -318,6 +332,25 @@ function feather(source: CanvasImageSource, box: Box, radius: number): HTMLCanva
   return ctx.canvas;
 }
 
+/** The fade every patch edge gets, before either ceiling below is applied. */
+export const PATCH_FEATHER = 10;
+
+/**
+ * How deep this box's patches actually fade, in base pixels.
+ *
+ * Exported because the picker needs the same number to say whether a mouth box
+ * has room for its own seam, and a warning computing the depth separately is a
+ * warning that goes quietly wrong the day the ceiling changes.
+ *
+ * A tenth of the shorter side, at most. The ramp means what it says, so this
+ * ceiling is about proportion rather than damage control: on a short box a fixed
+ * ten pixels is a larger share of the artwork than it looks.
+ */
+export function featherDepth(box: Box, radius = PATCH_FEATHER): number {
+  const limit = Math.floor(Math.min(box.width, box.height) / 10);
+  return Math.max(0, Math.min(radius, limit));
+}
+
 /**
  * Bakes the fade into the patch, once, on the way into the kit.
  *
@@ -327,16 +360,43 @@ function feather(source: CanvasImageSource, box: Box, radius: number): HTMLCanva
  * up in the filmstrip and not in the thing being previewed. A kit whose patches
  * carry their own alpha looks the same however it is drawn, which is the only
  * way "what plays here is the artwork" can be true.
+ *
+ * `clearance` is the clear band below the resting chin, on a mouth box that has
+ * been measured (`chinClearance`), and it caps the bottom ramp alone. What it
+ * prevents is the fade climbing over face: the bottom edge is the one the lower
+ * lip and chin sit nearest, and a box drawn tight to the resting chin has the
+ * ramp eating the chin the portrait wears when it is *not* speaking — which then
+ * ghosts on every pose at once, since all six carry it.
+ *
+ * This is the same family as the blur that once erased a lower lip, and it is
+ * worth being clear about how it differs, because the earlier fix does not cover
+ * it. That one was a bug in the ramp: a nominal ten pixels spreading over thirty.
+ * This is a correct ten-pixel ramp landing on artwork, and no radius is small
+ * enough to fix it, because the distance that matters is not a property of the
+ * patch at all — it is how far below the chin somebody dragged the bottom edge.
+ * Only the box knows that, so only the box can bound it.
+ *
+ * What it does not promise: that a *generated* chin is untouched. The line is a
+ * measurement of the base at rest, and how far an open pose's jaw actually fell
+ * is a fact about an image that does not exist yet. The guarantee is the one that
+ * can be made from here — no fade over the resting face, and none at all where
+ * there is no room to fade in. Unmeasured boxes are left exactly as they were:
+ * absent means nothing is known, and a bottom ramp is what this did before.
  */
-export async function featherPatch(patch: string, box: Box, radius = 10): Promise<string> {
+export async function featherPatch(
+  patch: string,
+  box: Box,
+  radius = PATCH_FEATHER,
+  clearance?: number | null,
+): Promise<string> {
   const image = await loadImage(patch);
-  // A tenth of the shorter side, at most. The ramp now means what it says, so
-  // this ceiling is about proportion rather than damage control: on a short box
-  // a fixed ten pixels is a larger share of the artwork than it looks.
-  const limit = Math.floor(Math.min(box.width, box.height) / 10);
-  const applied = Math.max(0, Math.min(radius, limit));
+  const applied = featherDepth(box, radius);
   if (applied === 0) return patch;
-  return feather(image, box, applied).toDataURL('image/png');
+  const bottom =
+    clearance === undefined || clearance === null
+      ? applied
+      : Math.min(applied, Math.floor(Math.max(0, clearance)));
+  return feather(image, box, applied, bottom).toDataURL('image/png');
 }
 
 /**

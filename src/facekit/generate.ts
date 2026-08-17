@@ -10,7 +10,7 @@ import {
 } from './canvas';
 import { beginRun, type RunHandle } from './runLog';
 import { findImageModel } from './imageModels';
-import type { Box } from './kit';
+import { chinClearance, type MouthBox } from './kit';
 import { PREAMBLE } from './slots';
 
 /**
@@ -34,7 +34,15 @@ export interface Generated {
 interface GenerateArgs {
   modelKey: string;
   base: string;
-  box: Box;
+  /**
+   * Typed as the wider of the two rectangles, which every box already satisfies.
+   *
+   * The mouth's is the only one carrying a measurement inside it, and an eye box
+   * meets this type by not carrying one — which is exactly what `chinClearance`
+   * reads it as. The alternative was a plain `Box` here and the chin surviving
+   * only at runtime, so the one line that uses it would look like dead code.
+   */
+  box: MouthBox;
   /** The slot's instruction. The shared preamble is added here, not by callers. */
   instruction: string;
   /** What to call this run in the diagnostics panel. The slot's own label. */
@@ -386,7 +394,10 @@ export async function generatePatch({
     const clipped = await clipToBase(cropped, base, box);
     const matched = await matchTone(clipped, base, box);
     const generated = {
-      patch: await featherPatch(matched, box),
+      // The clearance rides along so the bottom of the fade stays off the chin.
+      // Null for every eye box and for any mouth box nobody has measured, which
+      // is the same instruction in both cases: fade all four edges as before.
+      patch: await featherPatch(matched, box, undefined, chinClearance(box)),
       full: await normalise(image),
       usd,
     };
