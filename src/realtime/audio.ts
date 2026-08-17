@@ -149,6 +149,28 @@ export interface EnvelopeSample {
   rms: number;
   /** Spectral centroid in Hz, or null when there was too little to place one. */
   centroid: number | null;
+  /**
+   * The share of speech-band magnitude sitting above ROUNDING_SPLIT_HZ, 0 to 1.
+   *
+   * Null on the same terms as the centroid: no measurable sound, no share.
+   *
+   * A second opinion about the lips, and it exists because one number cannot
+   * hold two articulations. Roundness and frontness move independently, and the
+   * centroid collapses them onto one axis — so a front rounded vowel, /y/ in
+   * French *tu* or German *über*, lands between /i/ and /u/ and gets read as
+   * spread when it is the most protruded sound in the language. No threshold on
+   * the centroid fixes that, because moving one to catch /y/ also catches /e/.
+   *
+   * What separates them is the third formant. Rounding drags F3 down hard — /y/
+   * sits near 2100 where /e/ is near 2600 — so a split at 2.4 kHz puts the whole
+   * of a rounded vowel's energy below it and leaves an unrounded one straddling.
+   * This is that split, as a ratio rather than as a formant, because a ratio of
+   * two sums is arithmetic already being done and formant tracking is not.
+   *
+   * Magnitude rather than energy, because the centroid beside it is
+   * magnitude-weighted and one window should not be summed two ways.
+   */
+  highShare: number | null;
 }
 
 /**
@@ -161,6 +183,16 @@ export interface EnvelopeSample {
  * compare.
  */
 export const SPEECH_BAND = { lowHz: 200, highHz: 5000 };
+
+/**
+ * Where the band is cut in two for `highShare`, in Hz.
+ *
+ * Sited above a rounded vowel's F3 and below an unrounded one's, which is the
+ * whole trick — see EnvelopeSample.highShare. It lives beside SPEECH_BAND and
+ * for the identical reason: both ways of measuring have to agree on it, or the
+ * two drivers would differ by more than the timing they exist to compare.
+ */
+export const ROUNDING_SPLIT_HZ = 2400;
 
 /** Envelope resolution: one measurement per hop, over a window this wide. */
 const ENVELOPE_HOP = 256;
@@ -303,7 +335,10 @@ export class PcmPlayer {
       before && Math.abs(before.t - time) < Math.abs(after.t - time) ? before : after;
 
     if (Math.abs(best.t - time) > ENVELOPE_TOLERANCE_SECONDS) return null;
-    return { rms: best.rms, centroid: best.centroid };
+    // Copied field by field rather than returned whole: an EnvelopeFrame also
+    // carries the playback time it was measured at, which is this method's own
+    // business and not something a mouth should be able to read.
+    return { rms: best.rms, centroid: best.centroid, highShare: best.highShare };
   }
 
   /**
@@ -363,19 +398,23 @@ export class PcmPlayer {
     const binHz = OUTPUT_SAMPLE_RATE / ENVELOPE_WINDOW;
     const low = Math.max(1, Math.floor(SPEECH_BAND.lowHz / binHz));
     const high = Math.min(ENVELOPE_WINDOW / 2 - 1, Math.ceil(SPEECH_BAND.highHz / binHz));
+    const split = Math.round(ROUNDING_SPLIT_HZ / binHz);
 
     let weighted = 0;
     let total = 0;
+    let above = 0;
     for (let i = low; i <= high; i++) {
       const magnitude = Math.hypot(this.re[i], this.im[i]);
       weighted += magnitude * i * binHz;
       total += magnitude;
+      if (i >= split) above += magnitude;
     }
 
     return {
       t,
       rms: Math.sqrt(energy / ENVELOPE_WINDOW),
       centroid: total > 1e-6 ? weighted / total : null,
+      highShare: total > 1e-6 ? above / total : null,
     };
   }
 

@@ -24,7 +24,12 @@ import {
   type TiltCue,
   type TiltTrigger,
 } from './headMotion';
-import type { MouthDriver } from './visemes';
+import {
+  DEFAULT_ROUNDNESS,
+  ROUNDNESS_MODES,
+  type MouthDriver,
+  type RoundnessMode,
+} from './visemes';
 import { tailSentences } from './text';
 
 /**
@@ -67,6 +72,7 @@ interface Prefs {
   browBlink: boolean;
   tilt: TiltTrigger[];
   tiltRoll: number;
+  roundness: RoundnessMode;
 }
 
 /**
@@ -174,6 +180,9 @@ export default function LiveTrial() {
   // it as the thing to compare against rather than the thing to start from.
   const [driver, setDriver] = useState<MouthDriver>(prefs.driver ?? 'scheduled');
   const [lookaheadMs, setLookaheadMs] = useState(prefs.lookaheadMs ?? DEFAULT_LOOKAHEAD_MS);
+  // Which evidence decides the lips. Lives with the driver rather than with the
+  // head motion: both are about how the sound is read, not about performance.
+  const [roundness, setRoundness] = useState<RoundnessMode>(prefs.roundness ?? DEFAULT_ROUNDNESS);
   // Rise by default for the same reason scheduled is: it is the better motion,
   // and swing is kept beside it as the thing to compare against. See HeadMotion
   // on why that stopped being a matter of taste.
@@ -262,12 +271,13 @@ export default function LiveTrial() {
           browBlink,
           tilt,
           tiltRoll,
+          roundness,
         } satisfies Prefs),
       );
     } catch {
       // Private browsing. Losing the pick is not worth an error.
     }
-  }, [language, presetKey, driver, lookaheadMs, motion, cadence, browBlink, tilt, tiltRoll]);
+  }, [language, presetKey, driver, lookaheadMs, motion, cadence, browBlink, tilt, tiltRoll, roundness]);
 
   useEffect(() => () => session.current?.stop(), []);
 
@@ -449,6 +459,8 @@ export default function LiveTrial() {
           tap={tap}
           driver={driver}
           lookaheadMs={lookaheadMs}
+          roundness={roundness}
+          language={language}
           kit={kit}
           motion={motion}
           cadence={cadence}
@@ -498,6 +510,45 @@ export default function LiveTrial() {
               </label>
             )}
           </div>
+
+          {/*
+            In this box rather than with the head motion, because it answers the
+            driver's kind of question and not the performance's: both of these
+            rows are about how the sound is *read*. The driver decides when a
+            measurement describes, this decides what is measured.
+          */}
+          <div className="mt-2 flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-slate-800/70 pt-2">
+            <span className="shrink-0 text-xs text-slate-500">Lips</span>
+            {ROUNDNESS_MODES.map((option) => (
+              <label
+                key={option.id}
+                title={option.hint}
+                className="flex cursor-help items-center gap-2 text-sm text-slate-300"
+              >
+                <input
+                  type="radio"
+                  name="roundness"
+                  checked={roundness === option.id}
+                  onChange={() => setRoundness(option.id)}
+                  className="accent-sky-500"
+                />
+                {option.label}
+              </label>
+            ))}
+          </div>
+
+          {/*
+            Said out loud rather than left in the tooltip, because this is the
+            one setting on the page whose thresholds have never been checked
+            against real audio — and the person flipping it is the only one who
+            can check them.
+          */}
+          <p className="mt-1.5 text-xs leading-relaxed text-slate-500">
+            {ROUNDNESS_MODES.find((option) => option.id === roundness)?.hint} The thresholds
+            behind the second measurement are reasoned from formant tables and checked against
+            synthesised vowels, never against this voice — so listen to French tu, rue, peu or
+            German über, schön and watch whether the lips purse or spread.
+          </p>
         </fieldset>
 
         {/*

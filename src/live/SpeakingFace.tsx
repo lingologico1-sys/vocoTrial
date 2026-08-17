@@ -10,6 +10,7 @@ import {
   scheduledFeatures,
   type LipShape,
   type MouthDriver,
+  type RoundnessMode,
   type Viseme,
 } from './visemes';
 
@@ -29,6 +30,10 @@ interface SpeakingFaceProps {
   driver: MouthDriver;
   /** How far ahead the scheduled driver runs, in milliseconds. Ignored by the other. */
   lookaheadMs: number;
+  /** What evidence the lips are decided on. See ROUNDNESS_MODES. Switchable mid-call. */
+  roundness?: RoundnessMode;
+  /** ISO-639-1 code of the language being spoken. Only `auto` roundness reads it. */
+  language?: string;
   /** Artwork for the face to wear. Null leaves the drawn placeholder in place. */
   kit?: FaceKit | null;
   /** Which way the head moves. Switchable mid-call, like the driver above. */
@@ -58,6 +63,8 @@ export default function SpeakingFace({
   tap,
   driver,
   lookaheadMs,
+  roundness,
+  language,
   kit,
   motion,
   cadence,
@@ -79,6 +86,19 @@ export default function SpeakingFace({
   useEffect(() => {
     lookahead.current = lookaheadMs;
   }, [lookaheadMs]);
+
+  /**
+   * Read per frame rather than captured, for the lookahead's reason exactly: the
+   * loop below must not be rebuilt to change this, or flipping the switch would
+   * reset the running peak and the smoothing and cost a second of the mouth
+   * settling in — during the one sentence the comparison is being made on.
+   */
+  const roundnessRef = useRef(roundness);
+  const languageRef = useRef(language);
+  useEffect(() => {
+    roundnessRef.current = roundness;
+    languageRef.current = language;
+  }, [roundness, language]);
 
   // Switching driver keeps the analyser, and with it the running peak and the
   // smoothing — so what changes on screen is the timing under comparison and
@@ -114,7 +134,7 @@ export default function SpeakingFace({
       // that in as one frame would snap every smoothed value to its target.
       const dt = Math.min(0.1, (time - last) / 1000);
       last = time;
-      const next = mouthAnalyser.read(dt);
+      const next = mouthAnalyser.read(dt, roundnessRef.current, languageRef.current);
       // A new object each frame on purpose — the analyser mutates its shape in
       // place, so passing it through unchanged would never re-render.
       // The viseme travels alongside the shape rather than instead of it: the

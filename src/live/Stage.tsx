@@ -3,7 +3,7 @@ import type { AudioTap } from '../realtime/audio';
 import type { FaceKit } from '../facekit/kit';
 import type { HeadMotion, MotionCadence, TiltCue, TiltTrigger } from './headMotion';
 import SpeakingFace from './SpeakingFace';
-import type { MouthDriver } from './visemes';
+import type { MouthDriver, RoundnessMode } from './visemes';
 import Bubble, { BUBBLE_FILL } from './Bubble';
 
 /**
@@ -60,6 +60,10 @@ interface StageProps {
   driver: MouthDriver;
   /** How far ahead the scheduled driver runs, in milliseconds. */
   lookaheadMs: number;
+  /** What evidence the lips are decided on. See ROUNDNESS_MODES in visemes.ts. */
+  roundness?: RoundnessMode;
+  /** ISO-639-1 code being spoken. Only `auto` roundness reads it. */
+  language?: string;
   /** Artwork for the face to wear, from /facekit. Null keeps the placeholder. */
   kit?: FaceKit | null;
   /** Which way the head moves. See HEAD_MOTIONS in headMotion.ts. */
@@ -90,6 +94,8 @@ export default function Stage({
   tap,
   driver,
   lookaheadMs,
+  roundness,
+  language,
   kit,
   motion,
   cadence,
@@ -186,6 +192,8 @@ export default function Stage({
               tap={tap}
               driver={driver}
               lookaheadMs={lookaheadMs}
+              roundness={roundness}
+              language={language}
               kit={kit}
               motion={motion}
               cadence={cadence}
