@@ -203,17 +203,56 @@ export async function cropToBox(src: string, box: Box): Promise<string> {
 }
 
 /**
+ * The middle value of a list, which this is allowed to reorder.
+ *
+ * In place because the only caller builds the array for this and throws it away,
+ * and a copy of every seam sample per channel is real work for no reader's
+ * benefit. Said out loud rather than left to be discovered.
+ */
+function median(values: number[]): number {
+  values.sort((a, b) => a - b);
+  const middle = values.length >> 1;
+  return values.length % 2 === 1 ? values[middle] : (values[middle - 1] + values[middle]) / 2;
+}
+
+/**
  * Shifts a patch onto the base's colour, measured at the seam itself.
  *
  * The comparison is made on a ring of pixels around the patch's own border and
  * the base pixels underneath that same ring — the two things that will end up
  * touching. Matching there rather than over the whole box is what makes this
  * safe: the middle of the patch is *supposed* to differ, since a new mouth is
- * the entire point, and averaging that in would drag the correction toward
+ * the entire point, and including that would drag the correction toward
  * whatever colour the new teeth happen to be.
  *
+ * The *median* of the ring, not its mean, and that distinction is the whole
+ * correctness of this function on the one pose that most needs it.
+ *
+ * The ring was chosen on the argument that the middle of a patch may differ and
+ * its border may not. Only half of that is true. A border pixel is unchanged on
+ * most poses and on some it is not: "aa" is allowed to take the chin down with
+ * the jaw (JAW_DROPS in slots.ts), so the bottom of its box is new artwork by
+ * design, and a jaw wide enough to need that box also reshades the cheeks either
+ * side of it. Measured on the shipped default kit, "aa" leaves 6% of its ring
+ * visibly changed where "rest" leaves none — and the changed part is not spread
+ * evenly, it sits on whole edges. The four edges of that ring disagreed by
+ * sixteen levels: top and bottom about +5 against the base, left and right about
+ * -10.
+ *
+ * A mean averages those into cancellation and then some. It reported the patch
+ * as roughly one level darker than the base — so the correction *lightened* an
+ * "aa" whose skin was already seven levels too light, every single time, which
+ * is why regenerating the pose never fixed it. The median reports +5 and takes
+ * most of it back out. Neither statistic can fully answer a drift that is a
+ * gradient rather than an offset, but one of them at least fits the majority of
+ * the ring instead of a point no part of it occupies.
+ *
+ * Nothing regresses on the poses that were already right: across the other five
+ * mouth slots of that kit the two statistics agree to within a level, because
+ * with a clean ring there is nothing for the median to be robust against.
+ *
  * Only opaque patch pixels are counted, and the shift is skipped entirely when
- * too few of them exist to average honestly.
+ * too few of them exist to measure honestly.
  */
 export async function matchTone(patch: string, base: string, box: Box): Promise<string> {
   const [patchImage, baseImage] = await Promise.all([loadImage(patch), loadImage(base)]);
@@ -229,8 +268,8 @@ export async function matchTone(patch: string, base: string, box: Box): Promise<
   /** How deep into the patch the seam ring reaches. */
   const ring = Math.max(2, Math.round(Math.min(box.width, box.height) * 0.06));
 
-  let counted = 0;
-  const drift = [0, 0, 0];
+  /** Every seam sample, kept per channel so each can be sorted on its own. */
+  const drift: [number[], number[], number[]] = [[], [], []];
 
   for (let y = 0; y < box.height; y++) {
     const vertical = y < ring || y >= box.height - ring;
@@ -240,16 +279,15 @@ export async function matchTone(patch: string, base: string, box: Box): Promise<
       // A transparent patch pixel has no colour to compare, and a transparent
       // base pixel is outside the cut-out portrait entirely.
       if (patchData.data[i + 3] < 250 || baseData.data[i + 3] < 250) continue;
-      drift[0] += patchData.data[i] - baseData.data[i];
-      drift[1] += patchData.data[i + 1] - baseData.data[i + 1];
-      drift[2] += patchData.data[i + 2] - baseData.data[i + 2];
-      counted++;
+      drift[0].push(patchData.data[i] - baseData.data[i]);
+      drift[1].push(patchData.data[i + 1] - baseData.data[i + 1]);
+      drift[2].push(patchData.data[i + 2] - baseData.data[i + 2]);
     }
   }
 
-  if (counted < 64) return patch;
+  if (drift[0].length < 64) return patch;
 
-  const shift = drift.map((total) => total / counted);
+  const shift = drift.map(median);
   // Under a quantisation step there is nothing to correct, and applying it
   // anyway would re-encode the patch for no gain.
   if (shift.every((value) => Math.abs(value) < 1)) return patch;
