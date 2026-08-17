@@ -10,6 +10,9 @@ import { activeKit } from '../facekit/store';
 import Stage from './Stage';
 import { RevealQueue } from './reveal';
 import {
+  BROW_LIFT_MAX,
+  BROW_LIFT_MIN,
+  DEFAULT_BROW_LIFT,
   DEFAULT_CADENCE,
   DEFAULT_HEAD_MOTION,
   DEFAULT_TILT_ROLL,
@@ -60,7 +63,7 @@ const BUBBLE_SENTENCES = 2;
  * without the bump, the only people still seeing the old value are the ones who
  * used the page enough to have an opinion. Bump it when a default moves.
  */
-const PREFS_KEY = 'vocotrial.live.v4';
+const PREFS_KEY = 'vocotrial.live.v5';
 
 interface Prefs {
   language: string;
@@ -70,6 +73,7 @@ interface Prefs {
   motion: HeadMotion;
   cadence: MotionCadence;
   browBlink: boolean;
+  browLift: number;
   tilt: TiltTrigger[];
   tiltRoll: number;
   roundness: RoundnessMode;
@@ -193,6 +197,11 @@ export default function LiveTrial() {
   // Defaulted on, and it is the one setting here that does something while
   // nobody is speaking at all — it rides on the blink, which never stops.
   const [browBlink, setBrowBlink] = useState<boolean>(prefs.browBlink ?? true);
+  // A slider for the lean's reason and one of its own: how far a brow travels
+  // depends on how much forehead the portrait wearing it has, so there is no
+  // single right answer to write into the file — and every previous attempt to
+  // pick one from a comment ended up either invisible or startled.
+  const [browLift, setBrowLift] = useState<number>(prefs.browLift ?? DEFAULT_BROW_LIFT);
   // A set rather than a pick: the open question is how many of these at once
   // stops reading as a person, which cannot be asked one at a time.
   const [tilt, setTilt] = useState<TiltTrigger[]>(prefs.tilt ?? [...DEFAULT_TILT_TRIGGERS]);
@@ -269,6 +278,7 @@ export default function LiveTrial() {
           motion,
           cadence,
           browBlink,
+          browLift,
           tilt,
           tiltRoll,
           roundness,
@@ -277,7 +287,19 @@ export default function LiveTrial() {
     } catch {
       // Private browsing. Losing the pick is not worth an error.
     }
-  }, [language, presetKey, driver, lookaheadMs, motion, cadence, browBlink, tilt, tiltRoll, roundness]);
+  }, [
+    language,
+    presetKey,
+    driver,
+    lookaheadMs,
+    motion,
+    cadence,
+    browBlink,
+    browLift,
+    tilt,
+    tiltRoll,
+    roundness,
+  ]);
 
   useEffect(() => () => session.current?.stop(), []);
 
@@ -465,6 +487,7 @@ export default function LiveTrial() {
           motion={motion}
           cadence={cadence}
           browBlink={browBlink}
+          browLift={browLift}
           tilt={tilt}
           tiltRoll={tiltRoll}
           tiltCue={tiltCue}
@@ -673,8 +696,16 @@ export default function LiveTrial() {
             )}
           </div>
 
+          {/*
+            Both brow settings on one row, in the shape the Tilt row above
+            established: the thing that fires the movement, and beside it how far
+            the movement goes. The label used to say "Idle", which was true of the
+            checkbox alone — the slider governs every brow movement the face makes,
+            the blink's included, so a row named after one of them would be naming
+            the smaller one.
+          */}
           <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
-            <span className="w-16 shrink-0 text-xs text-slate-500">Idle</span>
+            <span className="w-16 shrink-0 text-xs text-slate-500">Brows</span>
             <label
               title="About half of all blinks carry a small brow lift, so the face keeps moving between turns without the head drifting. Untick it to see how still the face is with nobody speaking."
               className="flex cursor-help items-center gap-2 text-sm text-slate-300"
@@ -685,7 +716,33 @@ export default function LiveTrial() {
                 onChange={(event) => setBrowBlink(event.target.checked)}
                 className="accent-sky-500"
               />
-              Brows lift with blinks
+              Lift with blinks
+            </label>
+
+            <label
+              title="How far the brows travel at their fullest. A kit only gets as much of this as its brow boxes say there is clear forehead for, so a portrait with a low fringe will stop responding partway up — that is the picture's answer, not the slider's. Drag it to nothing to hear the same sentence with the brows held still."
+              className="flex min-w-[11rem] flex-1 cursor-help items-center gap-2 text-xs text-slate-500"
+            >
+              Travel
+              <input
+                type="range"
+                min={BROW_LIFT_MIN}
+                max={BROW_LIFT_MAX}
+                step={0.5}
+                value={browLift}
+                onChange={(event) => setBrowLift(Number(event.target.value))}
+                className="flex-1 accent-sky-500"
+              />
+              {/*
+                As a share of the head's height rather than in the head units the
+                code keeps it in. 200 units is the head, so halving gives percent —
+                and percent is the only figure here that means the same thing on
+                this stage, on the kit page's zoomed panel, and on whatever size
+                the face is drawn at next.
+              */}
+              <span className="w-10 text-right font-mono text-slate-300">
+                {(browLift / 2).toFixed(1)}%
+              </span>
             </label>
           </div>
 

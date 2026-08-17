@@ -72,6 +72,8 @@ interface StageProps {
   cadence?: MotionCadence;
   /** Whether some blinks carry a brow lift. */
   browBlink?: boolean;
+  /** How far the brows travel, in head units. See DEFAULT_BROW_LIFT in headMotion.ts. */
+  browLift?: number;
   /** Which events may lean the head sideways. See TILT_TRIGGERS in headMotion.ts. */
   tilt?: readonly TiltTrigger[];
   /** How far it leans, in degrees. See DEFAULT_TILT_ROLL in headMotion.ts. */
@@ -100,6 +102,7 @@ export default function Stage({
   motion,
   cadence,
   browBlink,
+  browLift,
   tilt,
   tiltRoll,
   tiltCue,
@@ -198,6 +201,7 @@ export default function Stage({
               motion={motion}
               cadence={cadence}
               browBlink={browBlink}
+              browLift={browLift}
               tilt={tilt}
               tiltRoll={tiltRoll}
               tiltCue={tiltCue}

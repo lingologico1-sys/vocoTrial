@@ -1,8 +1,9 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { CANVAS_EDGE } from '../facekit/imageModels';
-import type { FaceKit } from '../facekit/kit';
+import { browHeadroom, type FaceKit } from '../facekit/kit';
 import { BROW_BOXES } from '../facekit/slots';
 import {
+  DEFAULT_BROW_LIFT,
   DEFAULT_CADENCE,
   DEFAULT_HEAD_MOTION,
   DEFAULT_TILT_ROLL,
@@ -45,28 +46,19 @@ const BLINK_MS = 120;
 const BLINK_EVERY_MS = 4200;
 
 /**
- * How far a kit's brows travel at full volume, in head units.
+ * How much bolder the placeholder's own brows are than a kit's.
  *
- * Still well under what the placeholder spends on its own drawn brows, because
- * the placeholder is a cartoon and a kit is usually not. On a portrait drawn
- * anywhere near naturalistically the cartoon amount does not read as emphasis,
- * it reads as alarm — the brows arrive somewhere no real brow goes, and stay
- * there for the length of a loud syllable.
+ * These are two strokes on flat skin with nothing registered to them, so the only
+ * thing limiting their travel is what looks right, and a drawing this simple has
+ * to overact slightly to say anything at all. On a portrait drawn anywhere near
+ * naturalistically the same amount does not read as emphasis, it reads as alarm.
  *
- * It was 1.8, which turned out to be under the floor rather than merely
- * restrained: the live stage draws this 200-unit head at 160 pixels, so 1.8
- * units is 1.4 pixels of travel, reached slowly through a phrase envelope and
- * given back just as slowly. Nobody reported it as too small. It was reported
- * as brows that do not appear to move, which is what a movement below the size
- * of the thing drawing it looks like.
- *
- * 3 units is 2.4 pixels, and sits under the cap a default brow box imposes
- * (a third of its height, 3.6 units) with enough room that the two figures do
- * not have to be read together. Kits whose boxes are shallower are still cut
- * back by that cap, which is the point of having it — this number is what the
- * brows want, and the box is what the picture can afford.
+ * A multiplier on the setting rather than a figure of its own, which it used to
+ * be. The reason is the slider: a control that moves the brows of every kit and
+ * does nothing to the face the page shows before a kit is chosen is a control
+ * whose first use teaches you it is broken.
  */
-const KIT_BROW_LIFT = 3;
+const PLACEHOLDER_BROW_BOLDNESS = 1.5;
 
 /**
  * How far the brow patch fades out at its top and sides, in head units.
@@ -101,6 +93,15 @@ interface FaceProps {
   cadence?: MotionCadence;
   /** Whether some blinks carry a brow lift. See BROW_FLASH in headMotion.ts. */
   browBlink?: boolean;
+  /**
+   * How far the brows travel at full lift, in head units. See DEFAULT_BROW_LIFT.
+   *
+   * What a kit's brows get is this or what its box affords, whichever is smaller —
+   * so this is a request rather than a promise, and a portrait with no forehead to
+   * spare quietly keeps its own answer. The placeholder's drawn brows have nothing
+   * registered to them and take it in full, times PLACEHOLDER_BROW_BOLDNESS.
+   */
+  browLift?: number;
   /** Which events may lean the head sideways. See TILT_TRIGGERS. Empty is off. */
   tilt?: readonly TiltTrigger[];
   /**
@@ -150,6 +151,7 @@ export default function Face({
   motion = DEFAULT_HEAD_MOTION,
   cadence = DEFAULT_CADENCE,
   browBlink = true,
+  browLift = DEFAULT_BROW_LIFT,
   tilt = DEFAULT_TILT_TRIGGERS,
   tiltRoll = DEFAULT_TILT_ROLL,
   tiltCue,
@@ -313,11 +315,9 @@ export default function Face({
    */
   const roll = perf.head * travel.roll + perf.tilt * tiltRoll;
   const move = `translate(0 ${-perf.head * travel.rise}) rotate(${roll} ${PIVOT_X} ${PIVOT_Y})`;
-  // Bolder than a kit's, and for the cartoon's reason rather than in spite of
-  // it: these brows are two strokes on flat skin with nothing registered to
-  // them, so the only thing limiting the travel is what looks right. A drawing
-  // this simple has to overact slightly to say anything at all.
-  const browLift = perf.brow * 5;
+  // Bolder than a kit's, and following the same setting. See
+  // PLACEHOLDER_BROW_BOLDNESS.
+  const drawnBrowRise = perf.brow * browLift * PLACEHOLDER_BROW_BOLDNESS;
   // Left on the raw loudness, alone among these. It is not a gesture — it is a
   // twelve percent narrowing that happens to the eyes of anyone raising their
   // voice, and putting it on a schedule would make the face blink-adjacent at
@@ -375,15 +375,26 @@ export default function Face({
     /**
      * The brows, and how far each one goes this frame.
      *
-     * Capped at a third of the box because the height of the box is the only
-     * statement anyone makes about how much clear forehead is up there to move
-     * into. A kit with no brow box gets no lift and no rectangles, which is how
-     * every kit authored before this behaved.
+     * Capped at the clear forehead the box says is above the brow, which is a
+     * measurement now rather than a fraction of the box — see `browHeadroom`. A
+     * kit with no brow box gets no lift and no rectangles, which is how every kit
+     * authored before this behaved.
+     *
+     * Worth knowing what the cap is protecting, because it is not a seam. Nothing
+     * here breaks at a large rise: the crop covers the brow's old position, and
+     * whatever the crop leaves behind is covered by the stretched row below it. It
+     * is the two *cosmetic* failures that grow. The crop's top edge travels `rise`
+     * above the box, drawing forehead pixels over forehead they did not come from
+     * — fine while both are plain forehead, and a hard-edged band of skin across a
+     * fringe the moment the edge clears the clean part. And the fill below is one
+     * row of skin stretched over `rise` units, so it replaces graded skin with a
+     * flat band that widens as the lift does. Both are bounded by the same thing:
+     * how much of that box is plain forehead, which is what the line measures.
      */
     const brows = BROW_BOXES.flatMap((id) => {
       const box = kit.boxes[id];
       if (!box) return [];
-      const rise = Math.min(perf.brow * KIT_BROW_LIFT, toHead(box.height) / 3);
+      const rise = Math.min(perf.brow * browLift, toHead(browHeadroom(box)));
       if (rise <= 0) return [];
       return [
         {
@@ -607,7 +618,7 @@ export default function Face({
           strokeWidth="4.5"
           strokeLinecap="round"
           fill="none"
-          transform={`translate(0 ${-browLift})`}
+          transform={`translate(0 ${-drawnBrowRise})`}
         >
           <path d="M 61 64 Q 72 58 84 63" />
           <path d="M 116 63 Q 128 58 139 64" />

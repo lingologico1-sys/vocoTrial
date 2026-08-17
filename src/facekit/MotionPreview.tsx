@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import Face from '../live/Face';
 import {
+  BROW_LIFT_MAX,
   DEFAULT_CADENCE,
   DEFAULT_HEAD_MOTION,
   HEAD_MOTIONS,
@@ -250,6 +251,13 @@ export default function MotionPreview({ kit, focus, note }: MotionPreviewProps) 
             motion={motion}
             cadence={cadence}
             browBlink={browBlink}
+            // The same rule as the lean below, and this panel's oldest one: the
+            // extreme is the frame that fails. A brow box judged at the default
+            // travel tells you nothing about the box, only about the setting — and
+            // the setting is the one thing on this page that is not a property of
+            // the artwork. Whatever survives here survives anywhere the live
+            // slider can be dragged to.
+            browLift={BROW_LIFT_MAX}
             tilt={tilting ? TILT_DEMO : TILT_OFF}
             // Leaned as far as the live page's slider goes, never at its default.
             // The panel's own rule, applied to a second movement: the extreme is

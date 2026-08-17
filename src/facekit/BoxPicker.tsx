@@ -1,7 +1,7 @@
 import { useRef } from 'react';
 import { CANVAS_EDGE } from './imageModels';
-import { clampBox, type Box, type Boxes } from './kit';
-import type { BoxId } from './slots';
+import { browHeadroom, clampBox, type BrowBox, type Boxes } from './kit';
+import { isBrow, type BoxId } from './slots';
 
 /**
  * Drag a rectangle over the mouth, and another over the eyes.
@@ -52,7 +52,16 @@ interface BoxPickerProps {
    * drag is the cheap way to make that impossible.
    */
   locked?: boolean;
-  onChange: (region: BoxId, box: Box) => void;
+  /**
+   * Takes a `BrowBox` rather than a `Box`, which every `Box` already is.
+   *
+   * The wider of the two types, because one of the drags here reports a
+   * measurement that only brow boxes carry, and the alternative was a cast at the
+   * call site to say so. Nothing stops a mouth box arriving with a `headroom` on
+   * it as far as the types are concerned; what stops it is that only a brow box is
+   * ever given the line to drag.
+   */
+  onChange: (region: BoxId, box: BrowBox) => void;
 }
 
 export default function BoxPicker({ base, boxes, active, locked, onChange }: BoxPickerProps) {
@@ -61,15 +70,22 @@ export default function BoxPicker({ base, boxes, active, locked, onChange }: Box
   /**
    * Turns a pointer drag into a box change.
    *
-   * `handle` is null when the whole box is being moved, or a corner when it is
-   * being resized. Both run off the same pointer capture so a fast drag that
-   * leaves the rectangle — or leaves the window — keeps its grip instead of
-   * dropping the box half-moved.
+   * `handle` is null when the whole box is being moved, a corner when it is being
+   * resized, or `headroom` for the line inside a brow box. All of them run off the
+   * same pointer capture so a fast drag that leaves the rectangle — or leaves the
+   * window — keeps its grip instead of dropping the box half-moved.
+   *
+   * The headroom drag is the odd one out and is here rather than in a component of
+   * its own for exactly that reason: it does not change the rectangle at all, it
+   * changes a number measured inside it. Everything else about the interaction —
+   * the capture, the canvas scale, the closure over the box the drag started on —
+   * is identical, and a second copy of that would be a second place for the scale
+   * arithmetic to be subtly wrong.
    */
   const startDrag = (
     event: React.PointerEvent,
     region: BoxId,
-    handle: null | 'nw' | 'ne' | 'sw' | 'se',
+    handle: null | 'nw' | 'ne' | 'sw' | 'se' | 'headroom',
   ) => {
     event.preventDefault();
     event.stopPropagation();
@@ -89,6 +105,24 @@ export default function BoxPicker({ base, boxes, active, locked, onChange }: Box
 
       if (!handle) {
         onChange(region, clampBox({ ...box, x: box.x + dx, y: box.y + dy }));
+        return;
+      }
+
+      /*
+        Clamped to the box rather than to the canvas, and not run through
+        clampBox, which knows about rectangles and would have nothing to say
+        about this. Zero is allowed and means what it says: no clear forehead, so
+        this brow does not rise. That is a legitimate answer for a portrait with
+        a fringe, and it is reachable by dragging rather than only by removing the
+        box — which would have been the difference between "this brow holds still"
+        and "this brow is not configured".
+      */
+      if (handle === 'headroom') {
+        const line = browHeadroom(box) + dy;
+        onChange(region, {
+          ...box,
+          headroom: Math.round(Math.min(box.height, Math.max(0, line))),
+        });
         return;
       }
 
@@ -166,6 +200,31 @@ export default function BoxPicker({ base, boxes, active, locked, onChange }: Box
               {style.name}
               {isActive && locked && <span className="text-slate-500"> · locked</span>}
             </span>
+
+            {/*
+              The travel line, on brow boxes only.
+
+              What it marks is the top of the brow stroke, so the band above it is
+              the clear forehead the brow rises into — and that band, rather than
+              a fraction of the box, is what the lift is capped at. See BrowBox in
+              kit.ts for why the box height was the wrong number for this.
+
+              Drawn dashed and its grab area three times its own thickness,
+              because the thing being placed is a few canvas pixels from the mark
+              it has to sit against: a solid hairline over a drawn brow is hard to
+              tell from the brow, and a one-pixel target on a box this size is a
+              target nobody hits on the first try.
+            */}
+            {draggable && isBrow(region) && (
+              <div
+                onPointerDown={(event) => startDrag(event, region, 'headroom')}
+                title="Drag to the top of the brow. Everything above this line is forehead the brow can rise into, and it is what caps how far the brow travels — take it to the bottom of the box for no lift at all."
+                className="absolute -left-0.5 -right-0.5 h-2 -translate-y-1/2 cursor-ns-resize"
+                style={{ top: `${(browHeadroom(box) / box.height) * 100}%` }}
+              >
+                <div className={`absolute inset-x-0 top-1/2 border-t border-dashed ${style.ring}`} />
+              </div>
+            )}
 
             {draggable &&
               (['nw', 'ne', 'sw', 'se'] as const).map((handle) => (

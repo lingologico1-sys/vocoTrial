@@ -27,6 +27,31 @@ export interface Box {
 }
 
 /**
+ * A brow's rectangle, plus the one thing a rectangle cannot say.
+ *
+ * `headroom` is the clear forehead above the brow, in base pixels, measured down
+ * from the box's own top edge to the top of the brow stroke. It is how far that
+ * brow is allowed to rise, and it exists because the height of the box was
+ * standing in for this and getting it wrong in both directions.
+ *
+ * The box height was never the travel. A brow box is authored deep — plain
+ * forehead above, the last clear row of skin below — so its height is the sum of
+ * three unrelated things: the forehead the brow can move into, the brow itself,
+ * and the clean skin under it that gets stretched up to fill the gap. Taking a
+ * third of that sum was a guess that the brow sits in the middle, and a portrait
+ * whose brow sits low in a deep box was refused travel it plainly had. One line
+ * dragged to the top of the brow separates the three and says which is which.
+ *
+ * Optional, and absent is not an error: every kit authored before this has none,
+ * and falls back to the guess (see `browHeadroom`). Nothing about a drawn brow
+ * needs migrating — the measurement is of the base image, which has not changed,
+ * so the honest thing is to keep using the guess until someone drags the line.
+ */
+export interface BrowBox extends Box {
+  headroom?: number;
+}
+
+/**
  * The rectangles, with the one optional member spelled out.
  *
  * The three regions are required: a slot is cropped to each of them, and a kit
@@ -46,8 +71,31 @@ export interface Box {
  * inert data rather than a thing to clean up.
  */
 export interface Boxes extends Record<Region, Box> {
-  browLeft?: Box;
-  browRight?: Box;
+  browLeft?: BrowBox;
+  browRight?: BrowBox;
+}
+
+/**
+ * How far this brow may rise, in base pixels.
+ *
+ * The measurement when there is one, and the old guess when there is not. The
+ * guess is half the box height rather than the third it used to be, and the
+ * change is deliberate rather than incidental: a third was chosen when the lift
+ * asking for it was 3 units, and it capped the default box at 2.9 pixels of
+ * travel on a 160-pixel stage. Every kit already authored would have met the new
+ * lift with the old ceiling and appeared not to have changed at all, which is the
+ * failure this whole exercise is about. Half is still a guess and still
+ * conservative — a box drawn as the guidance asks, with the brow low and the
+ * forehead above, has more than half its height clear.
+ *
+ * Clamped to the box, which `clampBox` has already done for anything that reached
+ * here through a drag. Repeated because this function is also handed boxes that
+ * did not: a manifest in public/faces is hand-edited JSON, and a headroom taller
+ * than its own rectangle would otherwise reach the cap as the most generous answer
+ * available rather than as the nonsense it is.
+ */
+export function browHeadroom(box: BrowBox): number {
+  return Math.min(box.height, box.headroom ?? box.height / 2);
 }
 
 export interface FaceKit {
@@ -182,17 +230,27 @@ export function defaultBoxes(): Boxes {
  * guessed brow box does nothing at all until the face speaks, and then slides a
  * rectangle of forehead around for reasons nobody chose. Placing it is a press.
  *
- * Deep rather than snug, because the height is the travel budget — the lift is
- * capped at a third of it — and because the top of the box wants to be up in
- * plain forehead where a seam has nothing to catch on.
+ * Deep rather than snug, because the top of the box wants to be up in plain
+ * forehead where a seam has nothing to catch on, and because the forehead inside
+ * it is what the brow has to move into.
+ *
+ * The opening `headroom` is half the height, which is deliberately the same
+ * number `browHeadroom` guesses when there is none — so a box placed today and a
+ * box placed before the line existed start in exactly the same place, and the only
+ * difference between them is that this one has a line to drag. It is stated rather
+ * than left absent because absent means "this kit predates the measurement", and a
+ * box being placed for the first time today is not that. A line drawn at a visible
+ * starting position is also how anyone finds out it is there.
  */
-export function defaultBrowBox(which: BrowId): Box {
+export function defaultBrowBox(which: BrowId): BrowBox {
   const edge = CANVAS_EDGE;
+  const height = Math.round(edge * 0.055);
   return {
     x: Math.round(edge * (which === 'browLeft' ? 0.35 : 0.53)),
     y: Math.round(edge * 0.29),
     width: Math.round(edge * 0.12),
-    height: Math.round(edge * 0.055),
+    height,
+    headroom: Math.round(height / 2),
   };
 }
 
@@ -220,8 +278,9 @@ export function defaultBoxSize(id: BoxId): { width: number; height: number } {
  * a box from its top-left corner slides it off the eye it was placed on and
  * makes the owner re-place a box they never asked to have resized.
  */
-export function resizeAbout(box: Box, size: { width: number; height: number }): Box {
+export function resizeAbout<T extends Box>(box: T, size: { width: number; height: number }): T {
   return clampBox({
+    ...box,
     x: box.x + (box.width - size.width) / 2,
     y: box.y + (box.height - size.height) / 2,
     width: size.width,
@@ -244,16 +303,42 @@ export function newKit(name: string, base: string): FaceKit {
   };
 }
 
-/** Keeps a box on the canvas and above a size the drag handles can survive. */
-export function clampBox(box: Box): Box {
+/**
+ * Keeps a box on the canvas and above a size the drag handles can survive.
+ *
+ * Generic, and spreading the box it was given rather than building a fresh one
+ * from four fields. That is not tidiness: this runs on every frame of every drag,
+ * so a rectangle rebuilt from its own corners is a rectangle that silently loses
+ * anything else it was carrying. A brow's `headroom` would have survived being
+ * placed and vanished the first time the box was nudged, which is the kind of bug
+ * that looks like the feature never worked.
+ *
+ * And having carried it, this is also the place that has to keep it inside the
+ * rectangle, because this is the only place the height changes. A measurement of
+ * the space above a brow cannot outlive being told the box is shorter than the
+ * measurement — and the failure is worse than nonsense, it is *permissive*: a
+ * headroom at or past the bottom edge reads as a box that is clear forehead all
+ * the way down, which is the largest travel the cap can grant. Dragging the north
+ * handle down over the line would have quietly maximised the very number it was
+ * shrinking. Pulled along with the edge instead, so the line stays on the last row
+ * the box still contains and the number never says more than the rectangle does.
+ *
+ * Left absent when it was absent, which the conditional spread is doing rather
+ * than defaulting: absent is the load-bearing state — it means this kit predates
+ * the measurement and wants the guess. See `browHeadroom`.
+ */
+export function clampBox<T extends Box>(box: T): T {
   const min = 48;
   const width = Math.min(CANVAS_EDGE, Math.max(min, Math.round(box.width)));
   const height = Math.min(CANVAS_EDGE, Math.max(min, Math.round(box.height)));
+  const { headroom } = box as BrowBox;
   return {
+    ...box,
     width,
     height,
     x: Math.min(CANVAS_EDGE - width, Math.max(0, Math.round(box.x))),
     y: Math.min(CANVAS_EDGE - height, Math.max(0, Math.round(box.y))),
+    ...(headroom === undefined ? {} : { headroom: Math.min(headroom, height) }),
   };
 }
 

@@ -13,12 +13,14 @@ import {
 } from './imageModels';
 import {
   KIT_FORMAT,
+  browHeadroom,
   defaultBoxSize,
   defaultBrowBox,
   newKit,
   patchFilename,
   resizeAbout,
   type Box,
+  type BrowBox,
   type FaceKit as Kit,
 } from './kit';
 import {
@@ -486,17 +488,27 @@ export default function FaceKit() {
    * the type system cannot narrow: `isFreeBox` answers a question about
    * behaviour, not about which member of the union `region` is.
    */
-  const placeFreeBox = (id: BoxId): Box | null => {
+  const placeFreeBox = (id: BoxId): BrowBox | null => {
     if (!isBrow(id)) return null;
 
     // A brow placed second starts at the size of the brow placed first, at the
     // default position for its own side. The size is the part that was work —
     // finding the depth that clears the rim and still holds a lift — and doing
     // that work twice on a symmetric face is the thing worth sparing.
+    //
+    // The travel line comes across with it, and only here. It is the same
+    // argument as the size and a weaker version of it: how much forehead sits
+    // above a brow is very nearly the same on both sides of one portrait, whereas
+    // the *rim* below is what runs diagonally and is why these are two boxes at
+    // all. Copied at placement rather than kept following, because unlike a size
+    // this one is cheap to correct and there is no second question about whether
+    // the owner has since chosen it — a line at the wrong height is visibly at the
+    // wrong height, sitting on the brow it is meant to be touching.
     const partner = partnerBox(id);
     const other = partner ? kit?.boxes[partner] : undefined;
     const box = defaultBrowBox(id);
-    return other ? resizeAbout(box, other) : box;
+    if (!other) return box;
+    return { ...resizeAbout(box, other), headroom: browHeadroom(other) };
   };
 
   /**
@@ -531,7 +543,7 @@ export default function FaceKit() {
    * geometry and its right to follow are settled at pointer-down and cannot
    * flicker part way through a resize as the page re-renders under it.
    */
-  const moveBox = (which: BoxId, box: Box) => {
+  const moveBox = (which: BoxId, box: BrowBox) => {
     const was = kit?.boxes[which];
     const resized = was ? was.width !== box.width || was.height !== box.height : false;
     const partner = partnerBox(which);
@@ -864,16 +876,18 @@ export default function FaceKit() {
                     <p className="text-xs text-slate-500">
                       Not a mask and not a crop — no generator ever sees this box, so it
                       never locks and the glasses are never at risk. Cover the brow, give it
-                      plenty of plain forehead <em>above</em> (the height is the travel budget:
-                      the lift is capped at a third of it), and end it on the last clear row of
-                      skin <em>below</em> the brow and above the spectacle rim — that bottom row
-                      is what gets stretched up to fill the gap the brow leaves. There is one
+                      plenty of plain forehead <em>above</em>, and end it on the last clear row
+                      of skin <em>below</em> the brow and above the spectacle rim — that bottom
+                      row is what gets stretched up to fill the gap the brow leaves. Then drag
+                      the dashed line onto the <em>top of the brow</em>: the band above it is
+                      the forehead this brow rises into, and it is what caps the travel. Take
+                      the line to the bottom of the box and this brow holds still. There is one
                       box per brow because a rim runs diagonally, so the row that is clear on
                       one side is already frame on the other. Where a rim or a fringe leaves no
                       clear row at all, leave the box unplaced. The second brow is placed at the
-                      size of the first and keeps following it, so only its <em>position</em>
-                      needs the diagonal thought — until you size it yourself, after which it
-                      holds what you gave it.
+                      size of the first, and with its line at the same height, so only its{' '}
+                      <em>position</em> needs the diagonal thought — until you size it yourself,
+                      after which it holds what you gave it.
                     </p>
                   </>
                 ) : (

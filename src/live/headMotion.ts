@@ -434,7 +434,7 @@ export const MOTION_CADENCES: Array<{ id: MotionCadence; label: string; hint: st
   {
     id: 'phrase',
     label: 'Every phrase',
-    hint: 'The same movement, following the arc of the whole sentence rather than the syllables in it. One unhurried lean per phrase. Still moves whenever there is sound.',
+    hint: 'The head follows the arc of the whole sentence rather than the syllables in it — one unhurried lean per phrase. The brows take the arc as a pose and keep the syllables on top of it, so they rise while there is speaking to do and dip back toward rest on the unstressed words. Still moves whenever there is sound.',
   },
   {
     id: 'gesture',
@@ -454,6 +454,114 @@ export const MOTION_CADENCES: Array<{ id: MotionCadence; label: string; hint: st
  */
 const PHRASE_ATTACK = 0.25;
 const PHRASE_RELEASE = 0.9;
+
+/**
+ * What the phrase envelope actually reaches on speech, and what is left over.
+ *
+ * Two measured facts, and the pair of them is why the brows spent months looking
+ * like they did not move. Everything above treats `phrase` as a 0-to-1 fraction
+ * and it is nothing of the sort. Run an ordinary sentence — mixed stress, a comma,
+ * a full stop — through MouthAnalyser and then through the constants above, and
+ * the envelope lives between 0.26 and 0.78 while there is speaking to do. It
+ * cannot reach 1 and is not supposed to: a 0.9s release cannot fall between
+ * syllables 0.25s apart.
+ *
+ * The damning figure is not the ceiling, though. It is that the mean across that
+ * sentence is 0.57 — *74% of the envelope's own peak*. A signal whose average is
+ * three quarters of its maximum is not a movement, it is an offset with a wobble
+ * on it. For the head that is exactly right and exactly what was asked for: one
+ * unhurried lean that arrives and stays for the sentence. For the brows it meant
+ * they rose once per turn and then sat there.
+ *
+ * So the envelope is read against its own ceiling rather than against 1, and the
+ * *residual* — how far this syllable sits above or below the phrase around it —
+ * becomes the second signal. Measured on the same sentence it runs from -0.55 to
+ * +0.81, which is a great deal more range than the envelope has and is the whole
+ * reason it is worth reading: the syllables were never missing from the audio,
+ * only from the brows.
+ *
+ * Both are properties of the constants above and of speech, so they move only if
+ * PHRASE_ATTACK or PHRASE_RELEASE moves. Neither is a tuning knob, and both were
+ * wrong on the first attempt: guessed at 0.65 and 0.4 from arithmetic rather than
+ * measured through the shipping analyser, which understated the residual by half
+ * and made the beat hot enough to put the brows on the floor for 30% of every
+ * sentence — the per-syllable twitch this cadence exists to remove, reintroduced
+ * by the thing meant to enrich it. Measure these; do not derive them.
+ */
+const PHRASE_FULL = 0.75;
+const BEAT_FULL = 0.8;
+
+/**
+ * How a brow divides that between holding a pose and marking a syllable.
+ *
+ * The brows' reading of `phrase` is not the head's, and this is where the two
+ * channels part company. A head following the arc of a sentence is the whole of
+ * what that cadence promised, and it delivered it. The same treatment left the
+ * brows parked: on the measured sentence, at the lift and the cap that shipped,
+ * they sat between 0.6 and 1.9 pixels and moved 1.3 of them across four seconds
+ * of speech. A brow raised a pixel and a half for the length of a turn is not an
+ * expression, it is a face mildly surprised by everything.
+ *
+ * The fix is to keep both signals rather than to choose between them. The plateau
+ * is the pose — brows up while there is speaking to do — and the beat is the
+ * syllable riding on top of it, signed, so an unstressed word pulls the brow back
+ * *down* toward where the artwork drew it. That is what a real brow does under
+ * emphasis, and it is the whole of what "up and down" requires: no crop travels
+ * below its box, because the sum is clamped at zero and zero is the drawn
+ * position.
+ *
+ * Weighted seven to three, and the weighting is the part that had to be measured
+ * rather than reasoned about. The pose is what says *speaking* and the beat is
+ * what says *this word*, so the pose has to dominate — at six to four the brow
+ * reached the floor on 6% of speaking frames and the accent stopped reading as an
+ * accent, because a beat that can travel the whole range is not a beat, it is the
+ * `syllable` cadence with extra steps. At seven to three the brow rides between
+ * 0.15 and 0.78 of the lift and never touches bottom while the voice is going:
+ * 0.7 to 3.7 pixels at the default, moving 3.0 of them. Against the 1.3 above,
+ * and with the dips now landing on the unstressed words rather than at the ends
+ * of turns.
+ *
+ * The two sum to 1, so the lift a caller asks for is what a stressed syllable at
+ * the top of a loud phrase would reach. Approached rather than promised — the two
+ * peaks need not coincide, and 0.78 is as close as that sentence gets. Stated
+ * plainly because the alternative is what went wrong here twice: a ceiling nobody
+ * reaches, quietly keeping a quarter of every raise.
+ */
+const BROW_PLATEAU = 0.7;
+const BROW_BEAT = 0.3;
+
+/**
+ * How far a kit's brows travel at full lift, in head units, as a range.
+ *
+ * A slider for the reason DEFAULT_TILT_ROLL is one, and the argument is stronger
+ * here because it has already been lost twice. This number was 1.8, and was
+ * raised to 3 on the finding that 1.8 units is 1.4 pixels of travel on the stage
+ * that draws it — below the size of the thing drawing it, which is what "the
+ * brows do not appear to move" looks like from the inside. The raise did not land
+ * either, because the driver above was quietly keeping a third of it, and nobody
+ * could tell which of the two was wrong from a constant in a file.
+ *
+ * For scale, in the units that decide it: the live stage draws this 200-unit head
+ * at 160 pixels, so a unit is 0.8 pixels.
+ *
+ *   3u   2.4px   what shipped, of which 1.9px was ever reached
+ *   6u   4.8px   the default below, of which 3.7px is reached
+ *  12u   9.6px   the ceiling, and further than most portraits have forehead for
+ *
+ * Six is also about what anatomy asks for: a real brow raise runs five to ten
+ * millimetres on a head two hundred tall, which is three to five percent of it,
+ * and 6 of 200 units is three. The old 3u was one and a half — subliminal by
+ * construction, whatever the driver did with it.
+ *
+ * The ceiling is not a round number either. Past about 12 units the crop's top
+ * edge is travelling further above its box than any brow box on a portrait with
+ * a fringe has clear forehead to spare, so the cap in Face.tsx would be doing all
+ * the deciding and the slider would stop responding — a control that goes dead in
+ * its last third is worse than one that stops there.
+ */
+export const DEFAULT_BROW_LIFT = 6;
+export const BROW_LIFT_MIN = 0;
+export const BROW_LIFT_MAX = 12;
 
 /** One movement's shape, in seconds: up, held, down. */
 interface Envelope {
@@ -496,6 +604,14 @@ const BROW_FLASH: Envelope = { attack: 0.09, hold: 0.14, release: 0.34 };
  * Under a full lift because a blink is not an emphasis. It is the movement a
  * face makes while waiting, and the moment it competes with the one the voice
  * asks for, the voice has stopped being what drives the face.
+ *
+ * Which is exactly what had happened, unnoticed, for as long as this existed. The
+ * share is measured against the *nominal* lift, and speaking only ever reached
+ * 0.64 of that — so 0.7 was not a restrained fraction of the voice's movement, it
+ * was larger than the largest lift any sentence produced. The one brow movement
+ * with no cause but a blink was the biggest one on the face. It reads as under a
+ * full lift again now that a stressed syllable gets to 0.78, and that ordering is
+ * the thing to preserve if either number is touched: see BROW_PLATEAU.
  */
 const BROW_FLASH_LIFT = 0.7;
 
@@ -610,7 +726,16 @@ function smooth(t: number): number {
 /** What the head and brows are doing this frame, as multipliers on MOTION. */
 export interface Performance {
   head: number;
-  /** Never negative: a brow at rest is already as low as that face's brow goes. */
+  /**
+   * Never negative, and now guaranteed rather than merely observed.
+   *
+   * A brow at rest is already as low as that face's brow goes — zero is the
+   * position the artwork was drawn in, not a midpoint. This used to be true for
+   * free, every signal feeding it being non-negative. It is now true because it
+   * is clamped: under `phrase` the brows carry a signed per-syllable beat that
+   * genuinely asks to go below rest, and what it gets instead is the drawn
+   * position. See BROW_PLATEAU for why the downward half is worth having anyway.
+   */
   brow: number;
   /**
    * The tilt, as a share of whatever angle the face is set to — and signed,
@@ -853,8 +978,31 @@ export class HeadPerformer {
 
     const head =
       cadence === 'syllable' ? level : cadence === 'phrase' ? this.phrase : headGesture;
+    /*
+      The brows take the same three cadences and read the middle one differently,
+      which is the one place these two channels disagree about what a setting
+      means. Under `syllable` and `gesture` they are already getting the whole of
+      a signal — the raw loudness, or a self-contained envelope — and there is
+      nothing for a plateau to add. Under `phrase` the head wants the arc and the
+      brows want the arc *and* the syllables on it. See BROW_PLATEAU.
+    */
     const spoken =
-      cadence === 'syllable' ? level : cadence === 'phrase' ? this.phrase : browGesture;
+      cadence === 'syllable'
+        ? level
+        : cadence === 'phrase'
+          ? // Clamped at both ends, and the lower clamp is load-bearing rather
+            // than defensive: the beat is signed, so an unstressed syllable early
+            // in a phrase asks for a negative lift. Zero is where the artwork
+            // drew the brow, and no brow goes below its own drawing.
+            Math.max(
+              0,
+              Math.min(
+                1,
+                BROW_PLATEAU * Math.min(1, this.phrase / PHRASE_FULL) +
+                  BROW_BEAT * ((level - this.phrase) / BEAT_FULL),
+              ),
+            )
+          : browGesture;
 
     // The louder of the two rather than their sum, and it matters most in the
     // case that looks harmless: a blink landing mid-phrase. Summed, the brows go
