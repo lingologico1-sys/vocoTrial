@@ -50,8 +50,12 @@ interface SpeakingFaceProps {
   browBlink?: boolean;
   /** Which moments close the lips. See PRESS_TRIGGERS in headMotion.ts. */
   press?: readonly PressTrigger[];
-  /** Whether the mic is hearing a voice. Only the `reply` press reads it. */
+  /** Whether the mic is hearing a voice. The `reply` press and the nod read it. */
   heard?: boolean;
+  /** Whether the head may nod while it does. See DEFAULT_LISTEN_NOD. */
+  listenNod?: boolean;
+  /** How far it dips, in head units. See DEFAULT_NOD_DEPTH. */
+  nodDepth?: number;
   /** How far the brows travel, in head units. Switchable mid-call, like the lean. */
   browLift?: number;
   /** Which events may lean the head sideways. See TILT_TRIGGERS. */
@@ -83,6 +87,8 @@ export default function SpeakingFace({
   browBlink,
   press,
   heard,
+  listenNod,
+  nodDepth,
   browLift,
   tilt,
   tiltRoll,
@@ -177,6 +183,8 @@ export default function SpeakingFace({
       browBlink={browBlink}
       press={press}
       heard={heard}
+      listenNod={listenNod}
+      nodDepth={nodDepth}
       browLift={browLift}
       tilt={tilt}
       tiltRoll={tiltRoll}

@@ -6,6 +6,8 @@ import {
   DEFAULT_BROW_LIFT,
   DEFAULT_CADENCE,
   DEFAULT_HEAD_MOTION,
+  DEFAULT_LISTEN_NOD,
+  DEFAULT_NOD_DEPTH,
   DEFAULT_PRESS_TRIGGERS,
   DEFAULT_TILT_ROLL,
   DEFAULT_TILT_TRIGGERS,
@@ -127,12 +129,28 @@ interface FaceProps {
   /**
    * Whether the microphone is hearing a voice. See `heard` on CueInput.
    *
-   * Only the press reads it, and only the `reply` half of the press. Defaulting
-   * to false is what keeps the kit page's preview from pressing its lips at a
-   * microphone that is not open — the same defence `speaking` makes for the
-   * tilt, owed to the same page.
+   * Two things read it: the `reply` half of the press, and the nod, which reads
+   * nothing else at all. Defaulting to false is what keeps the kit page's
+   * preview from pressing its lips or nodding at a microphone that is not open —
+   * the same defence `speaking` makes for the tilt, owed to the same page, and
+   * the reason neither feature has to be switched off there by hand.
    */
   heard?: boolean;
+  /**
+   * Whether the head may nod while `heard` is true and the face is silent.
+   *
+   * See DEFAULT_LISTEN_NOD. It has no effect on any preview, for the reason
+   * directly above: nothing there is ever heard.
+   */
+  listenNod?: boolean;
+  /**
+   * How far it dips when one lands, in head units. See DEFAULT_NOD_DEPTH.
+   *
+   * Does not affect the overscan, and unlike the tilt's angle it does not have
+   * to be kept from affecting it — the whole of this range already fits inside
+   * the margin the picture is drawn with. See NOD_DEPTH_MAX.
+   */
+  nodDepth?: number;
   /**
    * How far the brows travel at full lift, in head units. See DEFAULT_BROW_LIFT.
    *
@@ -213,6 +231,8 @@ export default function Face({
   browBlink = true,
   press = DEFAULT_PRESS_TRIGGERS,
   heard = false,
+  listenNod = DEFAULT_LISTEN_NOD,
+  nodDepth = DEFAULT_NOD_DEPTH,
   browLift = DEFAULT_BROW_LIFT,
   tilt = DEFAULT_TILT_TRIGGERS,
   tiltRoll = DEFAULT_TILT_ROLL,
@@ -222,7 +242,13 @@ export default function Face({
   mouthRef,
 }: FaceProps) {
   const [blinking, setBlinking] = useState(false);
-  const [perf, setPerf] = useState<Performance>({ head: 0, brow: 0, tilt: 0, press: 0 });
+  const [perf, setPerf] = useState<Performance>({
+    head: 0,
+    brow: 0,
+    tilt: 0,
+    press: 0,
+    nod: 0,
+  });
   const timers = useRef<number[]>([]);
   /**
    * Built once, and reachable from both effects below rather than owned by the
@@ -245,10 +271,10 @@ export default function Face({
    * face finding its feet cannot be used for the one thing it exists for, which
    * is flipping between two schedules on the same sentence.
    */
-  const latest = useRef({ level, cadence, browBlink, press, heard, tilt, speaking });
+  const latest = useRef({ level, cadence, browBlink, press, heard, tilt, speaking, listenNod });
   useEffect(() => {
-    latest.current = { level, cadence, browBlink, press, heard, tilt, speaking };
-  }, [level, cadence, browBlink, press, heard, tilt, speaking]);
+    latest.current = { level, cadence, browBlink, press, heard, tilt, speaking, listenNod };
+  }, [level, cadence, browBlink, press, heard, tilt, speaking, listenNod]);
 
   /**
    * Questions and handovers, handed to the performer as they arrive.
@@ -323,6 +349,7 @@ export default function Face({
         speaking: latest.current.speaking,
         heard: latest.current.heard,
         press: latest.current.press,
+        nod: latest.current.listenNod,
       });
       // Returning the identical object when nothing has moved is what keeps a
       // silent face cheap: between flashes this loop costs one callback a frame
@@ -337,7 +364,8 @@ export default function Face({
         Math.abs(current.head - next.head) < 1e-4 &&
         Math.abs(current.brow - next.brow) < 1e-4 &&
         Math.abs(current.tilt - next.tilt) < 1e-4 &&
-        Math.abs(current.press - next.press) < 1e-4
+        Math.abs(current.press - next.press) < 1e-4 &&
+        Math.abs(current.nod - next.nod) < 1e-4
           ? current
           : next,
       );
@@ -380,7 +408,20 @@ export default function Face({
    * theoretical.
    */
   const roll = perf.head * travel.roll + perf.tilt * tiltRoll;
-  const move = `translate(0 ${-perf.head * travel.rise}) rotate(${roll} ${PIVOT_X} ${PIVOT_Y})`;
+  /*
+    Both vertical movements on one term, which they can share because they cannot
+    disagree: `head` is the agent's own loudness and `nod` only fires while the
+    agent is silent, so at most one of the two is ever non-zero. Summed all the
+    same rather than chosen between — a conditional here would be asserting that
+    disjointness a second time, in the one place it would fail silently if it
+    ever stopped holding.
+
+    The signs differ because the channels do. A positive `head` lifts, so it is
+    negated into SVG's downward y; `nod` spent its sign at definition and is
+    always a dip, so it is not. See the nod block in headMotion.ts.
+  */
+  const lift = perf.nod * nodDepth - perf.head * travel.rise;
+  const move = `translate(0 ${lift}) rotate(${roll} ${PIVOT_X} ${PIVOT_Y})`;
   /**
    * The two channels `hold` takes over, resolved once for both faces below.
    *

@@ -82,6 +82,10 @@ interface StageProps {
   press?: readonly PressTrigger[];
   /** Whether the mic is hearing a voice. See `heard` on CueInput. */
   heard?: boolean;
+  /** Whether the head nods while it does. See DEFAULT_LISTEN_NOD in headMotion.ts. */
+  listenNod?: boolean;
+  /** How far it dips, in head units. See DEFAULT_NOD_DEPTH in headMotion.ts. */
+  nodDepth?: number;
   /** How far the brows travel, in head units. See DEFAULT_BROW_LIFT in headMotion.ts. */
   browLift?: number;
   /** Which events may lean the head sideways. See TILT_TRIGGERS in headMotion.ts. */
@@ -116,6 +120,8 @@ export default function Stage({
   browBlink,
   press,
   heard,
+  listenNod,
+  nodDepth,
   browLift,
   tilt,
   tiltRoll,
@@ -217,6 +223,8 @@ export default function Stage({
               browBlink={browBlink}
               press={press}
               heard={heard}
+              listenNod={listenNod}
+              nodDepth={nodDepth}
               browLift={browLift}
               tilt={tilt}
               tiltRoll={tiltRoll}

@@ -264,6 +264,146 @@ export const TILT_ROLL_MAX = MOTION.swing.roll;
  */
 
 /**
+ * The listener's nod — the third answer to the question the idle sway asked.
+ *
+ * The two above it both move the head while the *face* has something to do: the
+ * swing rides the voice, the tilt fires on a question or a handover. Between
+ * those moments the head still does nothing, and "those moments" is a smaller
+ * share of a conversation than it sounds. For most of a call the user is talking
+ * and this face is a photograph with working eyelids.
+ *
+ * That gap is not a gap in the schedules, it is a gap in what was ever measured.
+ * Every channel in this file except the press reads the *agent's* loudness, and
+ * the agent's loudness is zero for the whole of the user's turn — so the head has
+ * no input at all during the one stretch a real listener is most obviously doing
+ * something. What a real listener is most obviously doing is nodding. It is the
+ * commonest visual backchannel there is by a distance, ahead of the lean and far
+ * ahead of anything the brows do.
+ *
+ * It clears the sway's bar on the sway's own terms. The cause is not merely
+ * present, it is the loudest thing in the room: somebody is talking to this face.
+ * `heard` already says so, debounced, and already arrives every frame for the
+ * press to take an edge off it.
+ *
+ * What it does *not* do is follow the user's syllables, and that is a choice
+ * rather than a shortcut. It could — MicCapture measures the input's energy
+ * already and throws the number away — but a backchannel nod is not phase-locked
+ * to the speaker the way the swing is locked to the agent. It arrives every few
+ * seconds on the listener's own clock, which is the blink's argument once more,
+ * and the cheap version is worth finding wrong before the expensive one is built.
+ * If this reads as arbitrary against a real voice, that is the finding, and the
+ * level is the thing to reach for.
+ */
+
+/**
+ * Down, and only down.
+ *
+ * A nod is a pitch about the neck and a portrait cannot pitch, which is the wall
+ * `rise` already hit and settled: on flat artwork a vertical translate is what a
+ * nod looks like. The face's emphasis uses the same move, so these are one
+ * movement asked for by two different things rather than two inventions.
+ *
+ * The direction is not symmetric, so the value is unsigned. A nod dips from rest
+ * and returns to it; it does not pass above rest on the way. Up first reads as a
+ * greeting or as being addressed rather than as agreement, and an overshoot
+ * between dips reads as a bounce. So `nod` on Performance runs 0 to 1 meaning
+ * *how far down* — alone among these channels in having spent its sign at the
+ * point of definition rather than carrying one.
+ */
+
+/**
+ * How far it dips at full depth, in head units, as a range.
+ *
+ * The ceiling is 4, which is MOTION.rise's own travel, and the coincidence is
+ * not borrowed for tidiness: it is the largest downward translate the shipping
+ * OVERSCAN still covers. Measured with requiredOverscan below rather than
+ * guessed — 4 units down under a full lean wants the picture drawn at 1.0819
+ * against the 1.1 it is drawn at, leaving 1.8 units of clearance, within a
+ * whisker of the 2.2 the emphatic swing leaves. Raising this past 4 means
+ * raising OVERSCAN with it.
+ *
+ * For scale, in the units that decide it: the live stage draws this 200-unit
+ * head at 160 pixels, so a unit is 0.8 of a pixel.
+ *
+ *   3u   2.4px   the default below
+ *   4u   3.2px   the ceiling, and the whole of what the emphasis travels
+ *
+ * The default sits near the top of a short range, on the lesson this file has
+ * now learned from both directions — the brows shipped at 1.4px and could not be
+ * seen, the tilt shipped at 4.9px and was too much. The tilt's argument for
+ * staying small does not transfer: that one is a posture with a lateral slide
+ * that gives it away, and this is a gesture with nothing to give away.
+ */
+export const DEFAULT_NOD_DEPTH = 3;
+export const NOD_DEPTH_MIN = 0;
+export const NOD_DEPTH_MAX = 4;
+
+/**
+ * On, which is the opposite of how the tilt shipped and for the press's reason.
+ *
+ * DEFAULT_TILT_TRIGGERS holds two of three back because the open question there
+ * is frequency, and three leans at once is a face that cannot keep still. There
+ * is no such question here: one gesture, one trigger, firing only while somebody
+ * is talking to the face. What is worth learning is whether a nodding face reads
+ * as listening, and nobody learns that from a box they have to find and tick.
+ */
+export const DEFAULT_LISTEN_NOD = true;
+
+/**
+ * One dip, in seconds, and how many of them a nod is made of.
+ *
+ * A little over three a second, which is about where real nodding sits, and two
+ * or three per firing. The count is diced rather than fixed for the reason the
+ * blink's gap is jittered, with one turn of the screw: this is the only gesture
+ * here that repeats *within itself*, so it is the only one with a rhythm of its
+ * own available to give it away. A listener who always nods exactly twice is a
+ * metronome with a face.
+ *
+ * Two dips comes to 0.64s, which is GESTURE's duration to within a frame. That
+ * envelope's comment calls itself "roughly a nod"; this is the guess checked
+ * against the thing it was guessing at.
+ */
+const NOD_BOB = 0.32;
+const NOD_BOBS_MIN = 2;
+const NOD_BOBS_MAX = 3;
+
+/**
+ * How deep the last dip is against the first, as a share of it.
+ *
+ * Real nods run down rather than repeating at strength, and the tail is most of
+ * what separates a nod from a bounce.
+ *
+ * Stepped per dip rather than faded across the firing, which is the difference
+ * between this reading as stated and reading as nearly so. Faded, the depth is
+ * already coming down while the first dip is on its way to its peak, and the
+ * peak lands at 0.91 of what the caller asked for — the exact fault BROW_PLATEAU
+ * had to be measured to find, a ceiling nobody reaches, quietly keeping a tenth
+ * of every setting. Stepped, the change happens where the value is zero anyway,
+ * so there is nothing to smooth and the first dip is the depth on the slider.
+ */
+const NOD_DECAY = 0.65;
+
+/**
+ * How long the head refuses to nod again, in seconds.
+ *
+ * Longer than the head's own 2.5 and shorter than the brows' 7. Backchannels
+ * come every few seconds in real listening and this is the middle of that, taken
+ * from the start of one nod rather than from its end — so the quiet between two
+ * runs about three seconds at two dips, with the usual jitter on it.
+ */
+const NOD_GAP = 3.5;
+
+/**
+ * How long somebody has to have been talking before the first nod, in seconds.
+ *
+ * `heard` goes true on the first syllable, and a face that nods on the first
+ * syllable is not agreeing with anything — it has not been told anything yet.
+ * Held off by about a word, which also spends nothing on the one-word answers
+ * that a tutor's questions mostly get.
+ */
+const NOD_ONSET = 0.8;
+
+/**
  * Where the picture turns.
  *
  * Low and centred — down at the base of the neck, which is where a real head is
@@ -293,6 +433,10 @@ export const PIVOT_Y = 180;
  * corner of the frame is uncovered and a wedge of panel shows through on every
  * stressed syllable. Raising the swing angle means raising this too. The pair
  * are one setting wearing two names, and only one of them fails loudly.
+ *
+ * The nod spends from the same margin in the other direction, and is capped so
+ * that it fits: 4 units down wants 1.0819 and leaves 1.8 units spare, which is
+ * where NOD_DEPTH_MAX comes from rather than from anything about nodding.
  *
  * Applied to the group rather than to the base image, so the mouth patches, the
  * lids and the brow crops scale with the picture they are registered to. Scaling
@@ -380,9 +524,17 @@ const OVERSCAN_MARGIN = 0.02;
 export const TILT_OVERSCAN =
   Math.ceil(
     (Math.max(
-      ...Object.values(MOTION).map((travel) =>
+      ...Object.values(MOTION).flatMap((travel) => [
         requiredOverscan(travel.roll + TILT_ROLL_MAX, travel.rise),
-      ),
+        // And the nod, which translates the other way and is the one channel
+        // that can land *during* a lean — a listening tilt and a listening nod
+        // answer the same moment. It does not move the answer today: the lean's
+        // lever arm dominates both translates, and the worst case comes out at
+        // 1.1583 against the lift's 1.1531, which is the same 1.18 once the
+        // margin and the rounding have had it. Included anyway, so that raising
+        // NOD_DEPTH_MAX cannot quietly uncover a corner.
+        requiredOverscan(travel.roll + TILT_ROLL_MAX, -NOD_DEPTH_MAX),
+      ]),
     ) +
       OVERSCAN_MARGIN) *
       100,
@@ -619,8 +771,51 @@ const BROW_FLASH: Envelope = { attack: 0.09, hold: 0.14, release: 0.34 };
  * with no cause but a blink was the biggest one on the face. It reads as under a
  * full lift again now that a stressed syllable gets to 0.78, and that ordering is
  * the thing to preserve if either number is touched: see BROW_PLATEAU.
+ *
+ * All of which is reasoning about the wrong case, and the paragraph above is
+ * left standing because the error is instructive rather than because it is
+ * wrong. Every figure in it compares the flash against *speech* — is it under a
+ * full lift, does it compete with what the voice asks for, is it smaller than a
+ * stressed syllable. But the frames where the flash is the whole of what the
+ * brow does are the frames with no speech in them at all, and against silence
+ * none of those comparisons say anything. Worse, they are the frames where the
+ * flash is least likely to be hidden: `brow` takes the louder of the two, so
+ * while a sentence is running this mostly disappears under the pose, and the
+ * moment the sentence stops it is the only thing on the face.
+ *
+ * So the number that was tuned is the one that is hardly ever seen. What is seen
+ * is 0.7 of a full lift arriving in 90ms on a face that is otherwise perfectly
+ * still — and an isolated brow raise is not a neutral movement. It means
+ * something: surprise, recognition, a greeting. Fired every eight seconds at
+ * nothing, it is BROW_FLASH_CHANCE's own complaint about reacting to something
+ * you cannot see, at half the rate that comment rejected rather than at none.
  */
 const BROW_FLASH_LIFT = 0.7;
+
+/**
+ * And how far one lifts them with nobody speaking, which is the case that
+ * matters.
+ *
+ * A quarter, against the speaking 0.7, and it is meant to sit near the edge of
+ * visibility rather than comfortably above it. The job of this movement when the
+ * face is silent is not to be a brow raise — it is to stop the blink reading as
+ * a shutter closing on a photograph. A real brow travels a millimetre or so with
+ * an ordinary blink and nobody watching could tell you it happened; they could
+ * tell you the blink looked wrong without it.
+ *
+ * At the default travel that is 1.5 units, 1.2 pixels on the live stage. This
+ * file has called that figure invisible twice, and both times it was right and
+ * about something else: a brow *gesture* at 1.2px is a gesture nobody can see,
+ * and a brow *accompanying a blink* at 1.2px is doing exactly what it should.
+ * The two share a slider and want opposite things from it, which is why they no
+ * longer share a constant.
+ *
+ * Latched when the flash fires rather than read per frame — see `flashLift`. A
+ * turn beginning halfway through a flash would otherwise step the brow from a
+ * quarter to seven tenths between two frames, which is the one way this can
+ * produce a movement nothing accounts for.
+ */
+const BROW_FLASH_LIFT_IDLE = 0.25;
 
 /**
  * How many blinks carry one, as a probability.
@@ -678,6 +873,8 @@ const TILT_LOCKOUT = 5;
  *  - `reply` is the face reacting to being answered. It fires when the mic first
  *    hears a voice with the agent silent, so the lips close as the user starts
  *    talking rather than as the tutor stops. See `heard` on CueInput.
+ *  - `waiting` is the odd one, and the only movement on this face that happens
+ *    with nobody talking at all. See WAIT_ONSET.
  *
  * The pair reads very differently and only one of them is about attention.
  * `turn` is self-directed: the mouth getting ready to use itself, which is
@@ -692,7 +889,7 @@ const TILT_LOCKOUT = 5;
  * swallowed, so the pair costs at most one press per exchange either way — it
  * changes which end of the user's turn gets the gesture, not how much there is.
  */
-export type PressTrigger = 'turn' | 'reply';
+export type PressTrigger = 'turn' | 'reply' | 'waiting';
 
 /**
  * Both, which is the opposite of how the tilt shipped and for a reason.
@@ -705,7 +902,43 @@ export type PressTrigger = 'turn' | 'reply';
  * short enough for it to matter. What the second box buys is *which* moment,
  * and there is nothing to learn from withholding it.
  */
-export const DEFAULT_PRESS_TRIGGERS: readonly PressTrigger[] = ['turn', 'reply'];
+export const DEFAULT_PRESS_TRIGGERS: readonly PressTrigger[] = ['turn', 'reply', 'waiting'];
+
+/**
+ * How long nobody has to have said anything before the lips move on their own,
+ * and how long between them after that, in seconds.
+ *
+ * This is the idle sway's question a third time, and it is the first time the
+ * answer has been anything but no. The sway lost because a head has no reason to
+ * move on its own; the blink survives because eyes need blinking whatever else
+ * is going on. A lip press is on the blink's side of that line rather than the
+ * head's — lips dry, part, and get re-seated, and a mouth that closes and
+ * settles while its owner waits is doing maintenance rather than performing
+ * patience. Nothing has to be happening in the conversation for it to be honest.
+ *
+ * It also inherits PRESS's own exemption, which is what makes it admissible at
+ * all: this gesture travels *toward* closed, and a mouth that shuts cannot be
+ * read as a mouth trying to speak. The rule against idle mouth movement stands
+ * and this is the same one exception, now claimed twice.
+ *
+ * The onset is four seconds because turn-taking is faster than that. The gap
+ * between the tutor finishing and the user answering is a second or two, and it
+ * already has a tilt landing in it; four seconds of nothing is not a handover,
+ * it is a learner who is stuck — which is both the moment worth having a face
+ * for and the moment there is least else on screen. Fourteen seconds between
+ * them makes this comfortably the rarest thing the face does: the blink is four,
+ * the flash eight, the nod three and a half. Both are jittered like every other
+ * schedule here.
+ *
+ * Unlike the second trigger, this one *is* a frequency change and not merely a
+ * choice of moment — DEFAULT_PRESS_TRIGGERS' argument that ticking two costs no
+ * more than ticking one does not extend to it, because it fires in a state
+ * neither of the others can reach. It ships on anyway. The thing worth learning
+ * is whether a waiting face should move at all, and that is not learned from a
+ * box nobody ticks.
+ */
+const WAIT_ONSET = 4;
+const WAIT_GAP = 14;
 
 export const PRESS_TRIGGERS: Array<{ id: PressTrigger; label: string; hint: string }> = [
   {
@@ -717,6 +950,11 @@ export const PRESS_TRIGGERS: Array<{ id: PressTrigger; label: string; hint: stri
     id: 'reply',
     label: 'As you answer',
     hint: 'Closes the lips when your microphone first hears you with the tutor silent, about a quarter of a second into your first word. The face registering that you have started, rather than waiting to be told the turn is over.',
+  },
+  {
+    id: 'waiting',
+    label: 'While waiting',
+    hint: 'Closes them once every fourteen seconds or so through a silence nobody is filling — after four seconds of it, so an ordinary gap between turns never gets one. The only thing this face does with no conversation to hang it on, and the rarest movement on it.',
   },
 ];
 
@@ -887,6 +1125,10 @@ const BROW_LOCKOUT = 7;
  */
 const LOCKOUT_JITTER = 0.4;
 
+/** That jitter applied to a duration, since four schedules now want it. */
+const jittered = (seconds: number) =>
+  seconds * (1 - LOCKOUT_JITTER + Math.random() * 2 * LOCKOUT_JITTER);
+
 /** Frame-rate independent approach, as in visemes.ts. */
 function ease(dt: number, tau: number): number {
   return 1 - Math.exp(-dt / tau);
@@ -933,6 +1175,21 @@ export interface Performance {
    * far along the way to it the lips have got. See PRESS.
    */
   press: number;
+  /**
+   * How far the head is dipped for a listener's nod, 0 to 1, and 0 for the whole
+   * of any turn this face is taking.
+   *
+   * Unsigned where `tilt` is signed, and the asymmetry belongs to the gestures
+   * rather than to this interface: a lean has no natural side and a nod has a
+   * natural direction. See the nod block above.
+   *
+   * Deliberately not folded into `head`, which it can never overlap with anyway.
+   * That number is multiplied by MOTION[motion], so under `swing` a nod routed
+   * through it would come out as a roll — and a nod that leans sideways is not a
+   * nod. No switch about how the head carries *speech* has any business changing
+   * what agreement looks like.
+   */
+  nod: number;
 }
 
 /** What the caller knows about the moment that the loudness cannot tell it. */
@@ -974,6 +1231,14 @@ export interface CueInput {
   heard: boolean;
   /** Which moments close the lips. Empty is that feature off. See PressTrigger. */
   press: readonly PressTrigger[];
+  /**
+   * Whether the head may nod while the microphone hears a voice.
+   *
+   * A boolean where the tilt and the press take sets, because there is one
+   * moment this can fire on and no second candidate to weigh it against. See
+   * DEFAULT_LISTEN_NOD.
+   */
+  nod: boolean;
 }
 
 /**
@@ -1025,7 +1290,7 @@ class Channel {
     if (trigger && this.locked === 0 && this.since >= this.span) {
       this.since = 0;
       this.justStarted = true;
-      this.locked = this.lockout * (1 - LOCKOUT_JITTER + Math.random() * 2 * LOCKOUT_JITTER);
+      this.locked = jittered(this.lockout);
     }
 
     const { attack, hold, release } = this.shape;
@@ -1033,6 +1298,52 @@ class Channel {
     if (this.since < attack) return smooth(this.since / attack);
     if (this.since < attack + hold) return 1;
     return 1 - smooth((this.since - attack - hold) / release);
+  }
+}
+
+/**
+ * The nod's own channel, because a nod is not one movement with three phases.
+ *
+ * Channel above plays an Envelope — up, held, down — which is the shape of every
+ * other gesture here and the wrong shape for this one. A nod repeats inside
+ * itself, and the repetition is the signal: one dip is a flinch, and it is the
+ * second that means yes. No choice of attack, hold and release expresses that,
+ * so this keeps the interface and throws the shape away.
+ *
+ * A raised cosine rather than a sine, which is what makes the dips *dips*. It
+ * leaves rest and returns to it with zero slope at both ends and never crosses
+ * it, so the head settles at neutral between nods with nothing to taper and no
+ * upward overshoot to account for. The length varies per firing because the dip
+ * count does; the rate does not.
+ */
+class NodChannel {
+  /** Seconds since this fired. Level with `span` means nothing is playing. */
+  private since = 0;
+  private locked = 0;
+  /** Zero until the first nod, which is what makes a fresh channel idle. */
+  private span = 0;
+  private bobs = 0;
+
+  advance(dt: number, trigger: boolean): number {
+    this.since += dt;
+    this.locked = Math.max(0, this.locked - dt);
+
+    if (trigger && this.locked === 0 && this.since >= this.span) {
+      this.bobs = NOD_BOBS_MIN + Math.floor(Math.random() * (NOD_BOBS_MAX - NOD_BOBS_MIN + 1));
+      this.span = this.bobs * NOD_BOB;
+      this.since = 0;
+      this.locked = jittered(NOD_GAP);
+    }
+
+    if (this.since >= this.span) return 0;
+
+    // Which dip is being drawn, and how deep that one goes. The step lands on a
+    // multiple of NOD_BOB, which is exactly where the cosine below is at rest —
+    // so a change of depth is never visible as a change of position. See
+    // NOD_DECAY.
+    const dip = Math.floor(this.since / NOD_BOB);
+    const depth = this.bobs > 1 ? 1 - ((1 - NOD_DECAY) * dip) / (this.bobs - 1) : 1;
+    return (depth * (1 - Math.cos((2 * Math.PI * this.since) / NOD_BOB))) / 2;
   }
 }
 
@@ -1055,6 +1366,7 @@ export class HeadPerformer {
   private readonly flashChannel = new Channel(BROW_FLASH);
   private readonly tiltChannel = new Channel(TILT, TILT_LOCKOUT);
   private readonly pressChannel = new Channel(PRESS, PRESS_LOCKOUT);
+  private readonly nodChannel = new NodChannel();
   /**
    * Whether a turn was running last frame, so the press can take the rising edge.
    *
@@ -1081,8 +1393,40 @@ export class HeadPerformer {
    * better failure than spending it on silence.
    */
   private wasHeard = false;
+  /**
+   * Seconds the user has been talking without a break, for NOD_ONSET.
+   *
+   * Reset rather than paused whenever that stops being true, so the delay is
+   * asked of every turn afresh: somebody who says two words, stops, and starts
+   * again has begun a new thing to agree with, and the second start deserves the
+   * same beat of listening before the head answers it.
+   */
+  private listeningFor = 0;
+  /**
+   * Seconds nobody at all has been talking, and the reading of it at which the
+   * next waiting press is due.
+   *
+   * A deadline rather than a countdown, so the onset and the gap can differ
+   * without a second clock: the first is due at WAIT_ONSET and each one after it
+   * pushes the mark another WAIT_GAP out. Reset together the moment anybody
+   * speaks, which is what makes the four seconds mean four seconds of *this*
+   * silence rather than four seconds accumulated across a conversation.
+   */
+  private waitingFor = 0;
+  private waitPressDue = 0;
   /** Set by `blinked`, spent by the next `read`. */
   private flashPending = false;
+  /**
+   * How far the flash on screen is lifting, fixed when it fired.
+   *
+   * Latched for `tiltSide`'s reason: the value depends on something that can
+   * change while the movement is playing. A brow flash outlasts its blink by
+   * four hundred milliseconds and a turn can begin inside that window, so read
+   * per frame this would step from BROW_FLASH_LIFT_IDLE to BROW_FLASH_LIFT
+   * between two frames — a brow jumping on the first sound of a sentence, which
+   * is a movement the sentence did not ask for and cannot explain.
+   */
+  private flashLift = BROW_FLASH_LIFT_IDLE;
   /** Set by `heardQuestion` and `yielded`, spent by the next `read`. */
   private questionPending = false;
   private yieldPending = false;
@@ -1179,7 +1523,12 @@ export class HeadPerformer {
     // Advanced every frame like the two above, and spent whether or not it
     // fires, so a blink cannot be banked while the envelope is already busy and
     // cashed in a second later with nothing to explain it.
-    const flash = this.flashChannel.advance(dt, this.flashPending) * BROW_FLASH_LIFT;
+    const flashing = this.flashChannel.advance(dt, this.flashPending);
+    // Fixed on the frame it fires, and only there. See `flashLift`.
+    if (this.flashChannel.started) {
+      this.flashLift = cue.speaking ? BROW_FLASH_LIFT : BROW_FLASH_LIFT_IDLE;
+    }
+    const flash = flashing * this.flashLift;
     this.flashPending = false;
 
     // The lips, closing at whichever edge of the turn is ticked. Both edges are
@@ -1190,6 +1539,28 @@ export class HeadPerformer {
     const replyStarting = cue.heard && !this.wasHeard;
     this.wasSpeaking = cue.speaking;
     this.wasHeard = cue.heard;
+    /*
+      And the third moment, which is the absence of the other two. Run whether or
+      not its box is ticked, for the reason every other schedule here is: ticking
+      it mid-call must not cash in a silence that began a minute ago.
+
+      Note that the deadline is pushed forward when it comes due rather than when
+      a press actually results. The two differ only if PRESS_LOCKOUT were to
+      swallow one, which at fourteen seconds against two it cannot — but spending
+      the moment either way is the rule the flash and the tilt already follow, and
+      the failure it prevents is the same one: a gesture banked during a silence
+      and produced later, with nothing left to account for it.
+    */
+    const waiting = !cue.speaking && !cue.heard;
+    if (!waiting) {
+      this.waitingFor = 0;
+    } else {
+      if (this.waitingFor === 0) this.waitPressDue = jittered(WAIT_ONSET);
+      this.waitingFor += dt;
+    }
+    const waitPressing = waiting && this.waitingFor >= this.waitPressDue;
+    if (waitPressing) this.waitPressDue = this.waitingFor + jittered(WAIT_GAP);
+
     const wantsPress = (id: PressTrigger) => cue.press.includes(id);
     /*
       `reply` is gated on the agent being silent, and the gate is not merely
@@ -1203,8 +1574,27 @@ export class HeadPerformer {
     */
     const pressing =
       (turnStarting && wantsPress('turn')) ||
-      (replyStarting && !cue.speaking && wantsPress('reply'));
+      (replyStarting && !cue.speaking && wantsPress('reply')) ||
+      (waitPressing && wantsPress('waiting'));
     const press = this.pressChannel.advance(dt, pressing) * PRESS_DEPTH;
+
+    /*
+      The nod, on the one conjunction that means somebody is talking *to* this
+      face. Both halves carry weight. `heard` is the cause the idle sway never
+      had, and `!speaking` is what stops the face nodding along with itself — a
+      microphone hears the tutor through the speakers, and echo cancellation only
+      removes most of it. That is the gate `reply` already stands behind, which
+      is why this needs no defence of its own.
+
+      Note what is *not* here: no lockout of its own beyond the channel's, and no
+      thinning by dice. The tilt and the brow flash are both rationed because
+      they fire on moments that recur inside a turn, and this one fires on a
+      state that lasts as long as somebody is talking. Its frequency is NOD_GAP
+      and nothing else decides it.
+    */
+    const listening = cue.heard && !cue.speaking;
+    this.listeningFor = listening ? this.listeningFor + dt : 0;
+    const nod = this.nodChannel.advance(dt, cue.nod && this.listeningFor >= NOD_ONSET);
 
     // The gap detector. Runs whether or not `hesitation` is ticked, so that
     // ticking it mid-call does not inherit a pause that started a minute ago —
@@ -1274,6 +1664,6 @@ export class HeadPerformer {
     // asking for more, which is the correct thing for the smaller movement to do.
     const brow = Math.max(spoken, flash);
 
-    return { head, brow, tilt: leaning * this.tiltSide, press };
+    return { head, brow, tilt: leaning * this.tiltSide, press, nod };
   }
 }

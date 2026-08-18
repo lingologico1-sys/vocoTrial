@@ -18,11 +18,15 @@ import {
   DEFAULT_BROW_LIFT,
   DEFAULT_CADENCE,
   DEFAULT_HEAD_MOTION,
+  DEFAULT_LISTEN_NOD,
+  DEFAULT_NOD_DEPTH,
   DEFAULT_PRESS_TRIGGERS,
   DEFAULT_TILT_ROLL,
   DEFAULT_TILT_TRIGGERS,
   HEAD_MOTIONS,
   MOTION_CADENCES,
+  NOD_DEPTH_MAX,
+  NOD_DEPTH_MIN,
   PRESS_TRIGGERS,
   TILT_ROLL_MAX,
   TILT_ROLL_MIN,
@@ -69,7 +73,7 @@ const BUBBLE_SENTENCES = 2;
  * without the bump, the only people still seeing the old value are the ones who
  * used the page enough to have an opinion. Bump it when a default moves.
  */
-const PREFS_KEY = 'vocotrial.live.v6';
+const PREFS_KEY = 'vocotrial.live.v7';
 
 interface Prefs {
   language: string;
@@ -82,6 +86,8 @@ interface Prefs {
   browLift: number;
   tilt: TiltTrigger[];
   tiltRoll: number;
+  listenNod: boolean;
+  nodDepth: number;
   roundness: RoundnessMode;
 }
 
@@ -228,6 +234,13 @@ export default function LiveTrial() {
   // value you are comparing against a memory.
   const [tiltRoll, setTiltRoll] = useState<number>(prefs.tiltRoll ?? DEFAULT_TILT_ROLL);
 
+  // The head's one movement during the user's turn. Stored like the rest, and
+  // absent from anybody's saved prefs until they touch it — which is what the
+  // `??` gives it, and the reason shipping this on does not need PREFS_KEY
+  // bumped: there is no stale value for the new default to lose to.
+  const [listenNod, setListenNod] = useState<boolean>(prefs.listenNod ?? DEFAULT_LISTEN_NOD);
+  const [nodDepth, setNodDepth] = useState<number>(prefs.nodDepth ?? DEFAULT_NOD_DEPTH);
+
   const [status, setStatus] = useState<SessionStatus>('idle');
   const [detail, setDetail] = useState<string | null>(null);
   const [muted, setMuted] = useState(false);
@@ -366,6 +379,8 @@ export default function LiveTrial() {
           browLift,
           tilt,
           tiltRoll,
+          listenNod,
+          nodDepth,
           roundness,
         } satisfies Prefs),
       );
@@ -383,6 +398,8 @@ export default function LiveTrial() {
     browLift,
     tilt,
     tiltRoll,
+    listenNod,
+    nodDepth,
     roundness,
   ]);
 
@@ -593,6 +610,8 @@ export default function LiveTrial() {
           browBlink={browBlink}
           press={press}
           heard={heard}
+          listenNod={listenNod}
+          nodDepth={nodDepth}
           browLift={browLift}
           tilt={tilt}
           tiltRoll={tiltRoll}
@@ -883,6 +902,51 @@ export default function LiveTrial() {
                 />
                 <span className="w-10 text-right font-mono text-slate-300">
                   {tiltRoll.toFixed(1)}°
+                </span>
+              </label>
+            )}
+          </div>
+
+          {/*
+            The one movement on this panel that happens while the tutor is not
+            talking, which is why it sits under Tilt rather than beside Direction.
+            Those rows are about how the head carries a voice; this is about what
+            it does when there is no voice to carry. Same shape as the row above —
+            what fires the movement, and beside it how far the movement goes.
+          */}
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+            <span className="w-16 shrink-0 text-xs text-slate-500">Nod</span>
+            <label
+              title="Dips the head two or three times while your microphone hears you, every few seconds. The commonest thing a listener does, and the only movement on this panel that happens during your half of the conversation — untick it to see how still the face is while you talk."
+              className="flex cursor-help items-center gap-2 text-sm text-slate-300"
+            >
+              <input
+                type="checkbox"
+                checked={listenNod}
+                onChange={(event) => setListenNod(event.target.checked)}
+                className="accent-sky-500"
+              />
+              While you talk
+            </label>
+
+            {listenNod && (
+              <label
+                title="How far the head dips. The range stops where the framing does — a deeper nod would lift the top edge of the picture out of frame — and unlike the lean above, the whole of it is meant to be usable."
+                className="flex min-w-[11rem] flex-1 cursor-help items-center gap-2 text-xs text-slate-500"
+              >
+                Depth
+                <input
+                  type="range"
+                  min={NOD_DEPTH_MIN}
+                  max={NOD_DEPTH_MAX}
+                  step={0.5}
+                  value={nodDepth}
+                  onChange={(event) => setNodDepth(Number(event.target.value))}
+                  className="flex-1 accent-sky-500"
+                />
+                {/* As a share of the head's height, for the brow travel's reason. */}
+                <span className="w-10 text-right font-mono text-slate-300">
+                  {(nodDepth / 2).toFixed(1)}%
                 </span>
               </label>
             )}
