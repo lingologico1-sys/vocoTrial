@@ -160,21 +160,32 @@ export const IMAGE_MODELS: ImageModelChoice[] = [
     // image in about forty-seven seconds, the slowest of the four and the most
     // expensive.
   },
-  {
-    key: 'gemini-image-flash',
-    provider: 'gemini',
-    label: 'Gemini 2.5 Flash Image (Nano Banana)',
-    short: 'flash',
-    id: 'gemini-2.5-flash-image',
-    masked: false,
-    usdPerImage: 0.039,
-    // Confirmed twice over: an image in about eleven seconds on AI Studio, and
-    // a generateContent probe on Vertex after the move. Worth knowing that
-    // PanelForge's own Flash entry names a different model on this same project
-    // (gemini-3.1-flash-image), which also exists here — a candidate to add if
-    // this rig ever wants a third Gemini image model to compare.
-  },
 ];
+
+/*
+ * Gemini 2.5 Flash Image (gemini-2.5-flash-image, $0.039) was here and is not
+ * any more, and the reason is worth keeping because it is not a reason the
+ * price list could have shown.
+ *
+ * It could not draw teeth. Not once in a run of attempts across the poses that
+ * show any — it returned a full grin where the prompt asked for a strip, or a
+ * scalloped row of separate teeth where TEETH_BAND asks in four clauses for one
+ * unbroken white shape. Which is a fair summary of what it was cheap for: it
+ * reads the sentence about the mouth and not the four sentences constraining
+ * how the mouth is drawn, and the whole of this page's method is those four
+ * sentences. A model that ignores them is not a cheaper way to get a kit, it is
+ * a slot that gets judged and rejected at leisure, and it went on being offered
+ * long after it had stopped being a candidate anyone would pick.
+ *
+ * So the comparison this page runs is no longer Pro against Flash. Nothing else
+ * changes: the ids in the Vertex notes below are historical, and the observation
+ * that Flash was served by seven regional hosts while Pro is served by none is
+ * still the best explanation for why Pro exhausts first.
+ *
+ * If a third Gemini image model is ever wanted, gemini-3.1-flash-image exists on
+ * this same project — PanelForge's Flash entry names it — and is a different
+ * model from the one removed here. It has not been tried against these prompts.
+ */
 
 export function findImageModel(key: string): ImageModelChoice | undefined {
   return IMAGE_MODELS.find((model) => model.key === key);

@@ -227,12 +227,17 @@ const REGION_TABS: { id: BoxId; label: string }[] = [
  *
  * Once one provider had won every slot outright, "one picker per provider"
  * stopped describing a useful comparison — the open question became which
- * *Gemini* to spend on, and the old shape could not express that. Both slots now
- * choose from the whole list, so Pro against Flash, Gemini against OpenAI, or a
- * model against itself are all sayable.
+ * *Gemini* to spend on, and the old shape could not express that. Both slots
+ * choose from the whole list, so Gemini against OpenAI, or a model against
+ * itself, are equally sayable.
+ *
+ * B named Flash outright until Flash was removed for being unable to draw teeth
+ * — see the note in imageModels.ts. It is derived rather than named now, which
+ * is what A always was: the defaults follow the list, so removing a model from
+ * the list is the whole of removing it.
  */
 const DEFAULT_A = defaultImageModelKey('gemini');
-const DEFAULT_B = 'gemini-image-flash';
+const DEFAULT_B = defaultImageModelKey('openai');
 
 /**
  * The ellipsis a busy button wears, carrying the attempt number once there has

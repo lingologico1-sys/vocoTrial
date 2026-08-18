@@ -264,6 +264,22 @@ const MOUTH_STYLE = [
  * as the whole mouth inflating rather than as a jaw opening — a real mouth
  * drops its jaw without moving the corners much, and saying so is cheaper than
  * regenerating until one happens to comply.
+ *
+ * EE was exempted from it for two rounds and is back under it, which is worth
+ * recording because the argument for exempting it was a good one. A real /i/
+ * does open by pulling the corners apart, and VISEMES.ee is the widest shape in
+ * the drawn table, so letting the art spread looked like making the art honest.
+ * What came back was a grin — twice, once from asking for width in two places
+ * at once and once after that was reduced to bare permission. A generator given
+ * any licence over the corners spends all of it.
+ *
+ * The licence was not needed in any case. It was introduced to separate ee from
+ * fv, and what separates them turned out to be the dark strip under the teeth
+ * and the thickness of the lower lip, neither of which has anything to do with
+ * width. Three words of this clause were also doing quiet work that the
+ * replacement dropped: *thickness*. Freed of it, ee redrew its lips thinner
+ * than every other pose in the kit, which is exactly the "lips don't shape
+ * well" that sent the pose back for a third time.
  */
 const CORNERS_FIXED = [
   'Keep the lips the same colour, thickness and line weight as the original, and',
@@ -289,34 +305,6 @@ const MBP_COMPRESSES = [
   'slightly with the compression, but the mouth does not slide, tilt or grow.',
 ].join(' ');
 
-/**
- * The spreading exemption, for the pose named after it.
- *
- * CORNERS_FIXED was written against a jaw drop that inflated the whole mouth,
- * and it is right about every pose that opens by dropping a jaw. EE does not:
- * it opens by pulling the corners apart, which is the one thing that sentence
- * forbids. Held under it, EE could only comply by becoming a small parted mouth
- * with teeth in it — which is what it became, and which is indistinguishable
- * from `fv` drawn the same way. The width is also what the drawn fallback
- * already does: VISEMES.ee is the widest shape in the table.
- *
- * What is still held is the direction. A spread mouth gets wider *without*
- * getting taller, so the height is fixed here in the place the width was.
- *
- * Written as permission and not as an instruction, which is the correction the
- * first version needed. Saying "the corners draw back and apart" here while the
- * prompt also asked for an opening that "reaches wider than the closed mouth
- * did" put the same demand in twice, and the pose came back wide enough to read
- * as a grin. One statement, and a hedged one: the exemption exists to stop
- * CORNERS_FIXED forcing EE into a small parted mouth, not to make width the
- * point of the pose. What actually separates it from `fv` is the dark strip.
- */
-const EE_SPREADS = [
-  'Keep the lips the same colour and line weight as the original, and keep the',
-  'mouth centred exactly where it is: the corners may draw back a little, so the',
-  'mouth ends up slightly — not dramatically — wider than it began, but it does',
-  'not slide, tilt, stretch into a smile or a grin, or grow taller.',
-].join(' ');
 
 /**
  * How teeth are drawn, on the poses that show any.
@@ -370,8 +358,7 @@ const JAW_DROPS = [
 
 const MOUTH_NOTE = [CORNERS_FIXED, MOUTH_STYLE, FACE_FIXED].join(' ');
 const MBP_NOTE = [MBP_COMPRESSES, MOUTH_STYLE, FACE_FIXED].join(' ');
-/** Teeth, and the corners free to spread. EE only — see EE_SPREADS. */
-const EE_NOTE = [EE_SPREADS, MOUTH_STYLE, TEETH_BAND, FACE_FIXED].join(' ');
+const TEETH_NOTE = [CORNERS_FIXED, MOUTH_STYLE, TEETH_BAND, FACE_FIXED].join(' ');
 /** The one pose that both shows teeth and thins a lip. */
 const FV_NOTE = [MBP_COMPRESSES, MOUTH_STYLE, TEETH_BAND, FACE_FIXED].join(' ');
 const OPEN_NOTE = [CORNERS_FIXED, MOUTH_STYLE, TEETH_BAND, JAW_DROPS].join(' ');
@@ -467,8 +454,8 @@ export const SLOTS: Slot[] = [
     label: 'Spread (EE)',
     region: 'mouth',
     prompt: mouth(
-      'Part the lips into a long, shallow slot, as when saying "ee". The jaw barely moves: the whole opening is at least four times as wide as it is tall, and no taller than the upper lip is thick. The upper teeth show as one simple white band along the top of the opening, and directly below that band lies a narrow dark strip running the full width of the opening — clearly shorter from top to bottom than the white band above it, a dark line rather than a cavity. The lower lip keeps its full natural thickness and is not drawn back, tucked or thinned. The result has to be plainly distinguishable from teeth resting on the lip, because that dark strip separates the teeth from the lower lip along the whole width; and from a wide open mouth, because the opening is a shallow slot with no rounding to it, showing no tongue and no lower teeth.',
-      EE_NOTE,
+      'Part the lips into a shallow slot, as when saying "ee". The jaw barely moves: the opening is at least four times as wide as it is tall, and its whole height is no more than the thickness of the upper lip. The upper teeth show as one simple white band along the top of the opening, and directly below that band lies a narrow dark strip running the full width of the opening — clearly shorter from top to bottom than the white band above it, a dark line rather than a cavity. Both lips keep their full natural thickness and their existing shape, and the lower lip is not drawn back, tucked or thinned. The result has to be plainly distinguishable from teeth resting on the lip, because that dark strip separates the teeth from the lower lip along the whole width; and from a wide open mouth, because the opening is a shallow slot with no rounding to it, showing no tongue and no lower teeth.',
+      TEETH_NOTE,
     ),
   },
   {
