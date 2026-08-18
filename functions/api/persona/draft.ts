@@ -45,6 +45,13 @@ function trimmed(value: unknown): string | undefined {
   return text.length > REASON_LIMIT ? `${text.slice(0, REASON_LIMIT)}…` : text;
 }
 
+interface Usage {
+  promptTokenCount?: number;
+  candidatesTokenCount?: number;
+  /** Set by Vertex when part of the prompt was served from an implicit cache. */
+  cachedContentTokenCount?: number;
+}
+
 /**
  * What the call cost, from what Vertex says it used.
  *
@@ -54,10 +61,17 @@ function trimmed(value: unknown): string | undefined {
  * exclude and admit to excluding. Here the number is reported, so a kit's
  * `spentUsd` can absorb this call honestly instead of quietly missing it.
  *
- * Zero when the field is absent, which is the safe direction for a total that
- * describes itself as a floor.
+ * Cached input is priced at the full rate anyway, which is deliberate and is
+ * the only place in this app a figure is allowed to read high. Vertex discounts
+ * tokens it served from an implicit cache, but by a factor this code has no
+ * confirmed number for, and inventing one would put a made-up discount into a
+ * running total. Paying the sticker price for them overstates a draft by a
+ * fraction of a cent and leaves the kit's total the floor it claims to be,
+ * since the image generations either side of it exclude their input entirely.
+ *
+ * Zero when the fields are absent, which is the same safe direction.
  */
-function costUsd(usage: { promptTokenCount?: number; candidatesTokenCount?: number } | undefined) {
+function costUsd(usage: Usage | undefined) {
   const input = usage?.promptTokenCount ?? 0;
   const output = usage?.candidatesTokenCount ?? 0;
   return (
@@ -107,12 +121,26 @@ export async function onRequestPost(
       method: 'POST',
       headers: { 'x-goog-api-key': key, 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        // THE PICTURE GOES FIRST, and it is the one ordering decision here.
+        //
+        // Redrafting is the normal way this route is used: the same portrait
+        // goes up again with the prompt reworded, because comparing wordings is
+        // what the editable prompt is for. Implicit caching keys on a matching
+        // *prefix*, so with the text first every reworded draft invalidates the
+        // image behind it and pays for the expensive half twice. Image first
+        // and the portrait is the shared prefix, which is the only arrangement
+        // where a second draft can be cheaper than the first.
+        //
+        // Free to arrange and not guaranteed to fire: a hit also needs the
+        // prefix to clear the model's minimum, and a 1024px square lands near
+        // it rather than safely past it. `cached` in the reply is how you find
+        // out whether it did, rather than assuming either way.
         contents: [
           {
             role: 'user',
             parts: [
-              { text: body.prompt.trim() },
               { inline_data: { mime_type: 'image/png', data: rawBase64(body.image) } },
+              { text: body.prompt.trim() },
             ],
           },
         ],
@@ -162,7 +190,7 @@ export async function onRequestPost(
 
   const answer = (await upstream.json()) as {
     promptFeedback?: { blockReason?: string };
-    usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number };
+    usageMetadata?: Usage;
     candidates?: {
       finishReason?: string;
       content?: { parts?: { text?: string }[] };
@@ -186,5 +214,11 @@ export async function onRequestPost(
     return json({ error: `${PERSONA_MODEL.label} declined: ${reason}`, code: 'upstream', reason }, 502);
   }
 
-  return json({ text, usd: costUsd(answer.usageMetadata) });
+  // The cached count travels so a hit is observable rather than assumed. It is
+  // reported, not billed on — see costUsd.
+  return json({
+    text,
+    usd: costUsd(answer.usageMetadata),
+    cached: answer.usageMetadata?.cachedContentTokenCount ?? 0,
+  });
 }

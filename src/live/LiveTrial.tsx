@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Mic, MicOff, PhoneOff, Radio, SlidersHorizontal, User } from 'lucide-react';
 import { startGeminiSession } from '../realtime/gemini';
 import { findModel } from '../realtime/models';
 import { LANGUAGES, defaultLanguageCode, findLanguage } from '../realtime/languages';
 import { lastUsedKey, listPresets, rememberPreset, renderPreset } from '../realtime/presets';
-import { withPersona } from '../realtime/instructions';
+import { MAX_INSTRUCTIONS, withPersona } from '../realtime/instructions';
 import { VOICES } from '../realtime/settings';
 import type { AudioTap, SessionStatus, TranscriptDelta, VoiceSession } from '../realtime/types';
 import type { FaceKit } from '../facekit/kit';
@@ -534,13 +534,58 @@ export default function LiveTrial() {
     return () => clearInterval(timer);
   }, [status]);
 
+  /**
+   * What this page would actually send, kept where it can be looked at.
+   *
+   * Composed here rather than inside `connect` so the length can be checked
+   * before the button is pressed instead of by the Worker after it. The server
+   * still enforces the ceiling — it has to, it is the only side that can — but
+   * its refusal arrives as "instructions are limited to 8000 characters" about
+   * a box nobody typed 8000 characters into, because the overflow is the sum of
+   * two things chosen on different pages. Adding up in the browser is what lets
+   * the message name both halves.
+   */
+  const composed = useMemo(
+    () =>
+      withPersona(
+        renderPreset(presetKey, findLanguage(language) ?? LANGUAGES[0]),
+        persona ? kit?.persona : undefined,
+      ),
+    [presetKey, language, persona, kit],
+  );
+
+  /**
+   * The preset's own length, measured rather than derived.
+   *
+   * It is what the composition would have been with no persona, and the honest
+   * way to get it is to render the preset again — subtracting the persona and a
+   * constant for the wrapper would put a number here that goes quietly wrong the
+   * first time that prose is edited in the other file. Rendering a string twice
+   * costs nothing worth protecting.
+   */
+  const presetChars = useMemo(
+    () => renderPreset(presetKey, findLanguage(language) ?? LANGUAGES[0]).length,
+    [presetKey, language],
+  );
+  const tooLong = composed.length > MAX_INSTRUCTIONS;
+
   const connect = async () => {
     setTurns([]);
     setDetail(null);
     setMuted(false);
     queue.current.discard();
 
-    const choice = findLanguage(language) ?? LANGUAGES[0];
+    // Refused here rather than at the socket. Nothing is spent either way — the
+    // Worker checks this before it mints anything — but a call that fails at
+    // connect looks like the model being unreachable, which is the wrong thing
+    // to go and debug.
+    if (tooLong) {
+      setStatus('error');
+      setDetail(
+        `That prompt and this persona come to ${composed.length} characters together, and a session takes ${MAX_INSTRUCTIONS}. Shorten the prompt (${presetChars}), shorten the background on faceKit, or switch the persona off.`,
+      );
+      return;
+    }
 
     const handlers = {
       onStatus: (next: SessionStatus, message?: string) => {
@@ -599,10 +644,7 @@ export default function LiveTrial() {
         // prompt cannot go stale against a face swapped since — and composed
         // by a function that leaves the preset's own text untouched, which is
         // what makes a persona-on run comparable with a persona-off one.
-        instructions: withPersona(
-          renderPreset(presetKey, choice),
-          persona ? kit?.persona : undefined,
-        ),
+        instructions: composed,
         // Absent rather than empty when nothing is picked: the Worker drops a
         // blank, but sending one at all reads as a choice nobody made.
         settings: voice ? { voice } : {},
@@ -1308,7 +1350,7 @@ export default function LiveTrial() {
             <button
               type="button"
               onClick={connect}
-              disabled={busy}
+              disabled={busy || tooLong}
               className="flex w-full items-center justify-center gap-2 rounded-lg bg-sky-600 px-4 py-3 text-sm font-medium hover:bg-sky-500 disabled:opacity-50"
             >
               <Mic size={16} />
@@ -1316,6 +1358,23 @@ export default function LiveTrial() {
             </button>
           )}
         </div>
+
+        {/*
+          Said before the button is pressed as well as after, because the two
+          answer different questions: the disabled button asks why it will not
+          dial, and `connect` still refuses in case it is reached another way.
+          Both name the same two numbers — this is the only screen either half
+          of the sum is visible on.
+        */}
+        {tooLong && !live && (
+          <p className="rounded-lg border border-amber-700/70 bg-amber-950/20 px-3 py-2 text-xs text-amber-300">
+            This prompt and this persona come to{' '}
+            <span className="tabular-nums">{composed.length}</span> characters together, and a
+            session takes {MAX_INSTRUCTIONS}. The prompt is{' '}
+            <span className="tabular-nums">{presetChars}</span> of it. Shorten it on tutorBench,
+            shorten the background on faceKit, or switch the persona off above.
+          </p>
+        )}
 
         <div>
           <button

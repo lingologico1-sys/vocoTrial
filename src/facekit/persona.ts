@@ -101,8 +101,10 @@ export function emptyPersona(): Persona {
  *
  * The rates are list prices per million tokens, read on the date below, and
  * they are used for real rather than for decoration: the route bills from the
- * token counts Vertex reports, so a kit's `spentUsd` stays a floor of the same
- * kind the image models keep rather than quietly missing this call.
+ * token counts Vertex reports, so a kit's `spentUsd` absorbs this call instead
+ * of quietly missing it. It does not model the discount Vertex gives on cached
+ * input — see costUsd in the route for why a made-up factor would be worse than
+ * paying the sticker price on a fraction of a cent.
  */
 export const PERSONA_MODEL = {
   id: 'gemini-2.5-flash',
@@ -171,6 +173,16 @@ Reply with JSON only, in this shape:
 export interface Drafted {
   text: string;
   usd: number;
+  /**
+   * How much of the prompt Vertex served from an implicit cache, in tokens.
+   *
+   * Reported rather than acted on. The route sends the portrait ahead of the
+   * wording so that redrafting the same face can hit a cache at all, and this
+   * is the only way to see whether it did — a number that stays at zero across
+   * two drafts of one portrait means the arrangement is not buying anything on
+   * this model, which is worth knowing before anyone builds on it.
+   */
+  cached: number;
 }
 
 /**
@@ -195,7 +207,11 @@ export async function draftPersona(image: string, prompt: string): Promise<Draft
     throw new Error(body?.error ?? `The draft failed (${response.status})`);
   }
 
-  return { text: body.text, usd: typeof body.usd === 'number' ? body.usd : 0 };
+  return {
+    text: body.text,
+    usd: typeof body.usd === 'number' ? body.usd : 0,
+    cached: typeof body.cached === 'number' ? body.cached : 0,
+  };
 }
 
 /**

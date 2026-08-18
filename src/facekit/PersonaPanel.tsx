@@ -49,6 +49,15 @@ export default function PersonaPanel({
   const [prompt, setPrompt] = useState<string | null>(null);
   const [drafting, setDrafting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /**
+   * What the last draft cost and how much of it was cached.
+   *
+   * Session-only, and not on the kit: the kit already carries the money in
+   * `spentUsd`, and this is here to answer a question about the *arrangement*
+   * rather than about the artwork — whether sending the portrait ahead of the
+   * wording buys anything on a redraft. Nothing depends on it. See Drafted.
+   */
+  const [last, setLast] = useState<{ usd: number; cached: number } | null>(null);
 
   const persona = kit.persona;
   const spoken = findLanguage(language)?.label ?? 'the target language';
@@ -67,8 +76,9 @@ export default function PersonaPanel({
     setDrafting(true);
     setError(null);
     try {
-      const { text, usd } = await draftPersona(kit.base, wording);
+      const { text, usd, cached } = await draftPersona(kit.base, wording);
       const written = parseDraft(text, persona?.voice);
+      setLast({ usd, cached });
       // Spent whether or not the words are kept, exactly as a generated patch
       // is counted whether or not it is chosen: a total that only counted the
       // keepers would be a lie in the direction that flatters the page.
@@ -226,6 +236,15 @@ export default function PersonaPanel({
       <p className="text-xs text-slate-500">
         Spent on this kit, including any drafts:{' '}
         <span className="tabular-nums">{money(kit.spentUsd)}</span>
+        {last && (
+          <>
+            {' '}
+            · last draft {money(last.usd)}, priced at the full rate
+            {last.cached > 0
+              ? ` even though ${last.cached} tokens of it came from cache`
+              : ', nothing served from cache'}
+          </>
+        )}
       </p>
     </section>
   );
