@@ -869,8 +869,9 @@ export default function LiveTrial() {
 
           {offered.length === 0 && (
             <p className="pb-1 text-[11px] text-slate-500">
-              No finished faces in the shared library. Save one from faceKit and mark it
-              ready, and it appears here on every browser signed in to this site.
+              No faces on offer from the shared library. Save one from faceKit with
+              &ldquo;Show in liveTrial&rdquo; ticked, and it appears here on every browser
+              signed in to this site.
             </p>
           )}
         </fieldset>

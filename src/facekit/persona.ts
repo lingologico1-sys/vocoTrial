@@ -94,10 +94,12 @@ export function emptyPersona(): Persona {
  * well and none does distinctively, so a picker would be a knob with nothing to
  * learn from it.
  *
- * UNVERIFIED, in exactly the sense imageModels.ts means it: the id has not yet
- * been seen to return text on this account's Vertex key. Nothing here can check
- * it — the keys live only in Cloudflare, so a draft that works is the first
- * proof. Clear the flag once one has, and not because it looks right.
+ * VERIFIED, in exactly the sense imageModels.ts means it: the id has been seen
+ * to return text on this account's Vertex key. Nothing here could check it —
+ * the keys live only in Cloudflare — so the proof was a draft that worked, on
+ * 2026-08-18, and not that the id looked right. The flag stays rather than
+ * going, because it is the answer to a question the next model id will raise
+ * again, and `false` is a claim about this one rather than an absence.
  *
  * The rates are list prices per million tokens, read on the date below, and
  * they are used for real rather than for decoration: the route bills from the
@@ -109,7 +111,7 @@ export function emptyPersona(): Persona {
 export const PERSONA_MODEL = {
   id: 'gemini-2.5-flash',
   label: 'Gemini 2.5 Flash',
-  unverified: true,
+  unverified: false,
   usdPerMillionInput: 0.3,
   usdPerMillionOutput: 2.5,
   ratesReadOn: '2026-08-18',

@@ -1551,7 +1551,7 @@ export default function FaceKit() {
                 a class, and it goes up with the save rather than separately.
               */}
               <label
-                title="Until this is ticked the face is a draft — saved, editable from anywhere, and kept out of liveTrial's picker."
+                title="Ticked, this face is offered in liveTrial's picker. Unticked it is a draft — saved and editable from any browser, but not put in front of anyone."
                 className="flex items-center gap-1.5 text-sm text-slate-400"
               >
                 <input
@@ -1560,7 +1560,7 @@ export default function FaceKit() {
                   onChange={(event) => setReadyFlag(event.target.checked)}
                   className="h-3.5 w-3.5 rounded border-slate-700 bg-slate-900"
                 />
-                Ready to wear
+                Show in liveTrial
               </label>
               <button
                 type="button"
@@ -1598,7 +1598,7 @@ export default function FaceKit() {
               Every face there is, readable from any browser signed in to this site. Tap one
               to open it for editing — the artwork comes back from the library, so it works
               on a laptop that never authored it. A face stays a draft, and out of
-              liveTrial&apos;s picker, until it is marked ready.
+              liveTrial&apos;s picker, until you show it.
             </p>
             <ul className="flex flex-wrap gap-3">
               {published.map((face) => {
@@ -1655,14 +1655,14 @@ export default function FaceKit() {
                       }
                       title={
                         draft
-                          ? 'Marks this face ready, so liveTrial offers it'
-                          : 'Puts this face back to a draft, out of liveTrial’s picker'
+                          ? 'Shows this face in liveTrial’s picker'
+                          : 'Hides it again. It stays saved, and editable from any browser.'
                       }
                       className={`text-[10px] underline-offset-4 hover:underline ${
                         draft ? 'text-amber-500' : 'text-slate-600'
                       }`}
                     >
-                      {draft ? 'draft · mark ready' : 'ready · make draft'}
+                      {draft ? 'draft · show' : 'shown · hide'}
                     </button>
                     <br />
                     {/*

@@ -101,7 +101,7 @@ export default function PersonaPanel({
       <div className="flex flex-wrap items-end justify-between gap-3">
         <h2 className="text-sm font-medium text-slate-300">Who they are</h2>
         <p className="text-xs text-slate-500">
-          Prompt text, not artwork. It travels with the face when you publish, and liveTrial can
+          Prompt text, not artwork. It travels with the face when you save, and liveTrial can
           switch it off — which is the point of keeping it out of the prompt itself.
         </p>
       </div>
@@ -138,8 +138,8 @@ export default function PersonaPanel({
           </select>
           <span className="block text-slate-600">
             Adopted by liveTrial when you switch to this face, and overridable there. Worth setting
-            if the paragraph states an age or a gender: the voice is the half of the character this
-            page cannot show you.
+            if the background states an age or a gender: the voice is the half of the character
+            this page cannot show you.
           </span>
         </label>
       </div>
@@ -217,19 +217,12 @@ export default function PersonaPanel({
         />
         <p className="mt-1">
           Editable for the same reason the slot prompts and the tutor prompts are: what a wording
-          produces is the thing being compared. Not saved — it steers one generation, and the
-          paragraph is what lasts. Changing the language above rewrites it until you edit it
-          yourself.
+          produces is the thing being compared. What you type here is not kept — this prompt
+          steers one draft and is then done with, and the thing that lasts is what the draft
+          writes into Name, Voice and Background above. Changing the language rewrites this box
+          until you edit it, after which it stops rewriting and the wording is yours.
         </p>
       </details>
-
-      {PERSONA_MODEL.unverified && (
-        <p className="text-xs text-amber-400/80">
-          The drafting model id has not yet been confirmed by a call that returned text on this
-          account&rsquo;s key. A draft that works is the proof — clear the flag in persona.ts once
-          one has.
-        </p>
-      )}
 
       {error && <p className="text-xs text-rose-300">{error}</p>}
 
