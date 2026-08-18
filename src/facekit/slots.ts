@@ -302,12 +302,20 @@ const MBP_COMPRESSES = [
  *
  * What is still held is the direction. A spread mouth gets wider *without*
  * getting taller, so the height is fixed here in the place the width was.
+ *
+ * Written as permission and not as an instruction, which is the correction the
+ * first version needed. Saying "the corners draw back and apart" here while the
+ * prompt also asked for an opening that "reaches wider than the closed mouth
+ * did" put the same demand in twice, and the pose came back wide enough to read
+ * as a grin. One statement, and a hedged one: the exemption exists to stop
+ * CORNERS_FIXED forcing EE into a small parted mouth, not to make width the
+ * point of the pose. What actually separates it from `fv` is the dark strip.
  */
 const EE_SPREADS = [
   'Keep the lips the same colour and line weight as the original, and keep the',
-  'mouth centred exactly where it is: the corners draw back and apart so that',
-  'the mouth ends up slightly wider than it began, but it does not grow taller,',
-  'slide or tilt.',
+  'mouth centred exactly where it is: the corners may draw back a little, so the',
+  'mouth ends up slightly — not dramatically — wider than it began, but it does',
+  'not slide, tilt, stretch into a smile or a grin, or grow taller.',
 ].join(' ');
 
 /**
@@ -435,6 +443,15 @@ export const SLOTS: Slot[] = [
    *
    * Neither one is a shading detail — they are the two largest shapes in the
    * patch — and either alone is enough to tell the poses apart in motion.
+   *
+   * The dark is a *strip*, and that qualification is load-bearing. Asked for
+   * "a clear dark opening" with nothing said about its height, ee came back as
+   * a tall rounded cavity — separated from fv, certainly, but by then halfway
+   * to aa, and a mouth that opens that far on every "ee" reads as shouting. So
+   * the height is pinned against a shape already in the picture, the way the
+   * teeth are described as a band rather than as teeth: shorter than the white
+   * above it, no taller than the upper lip is thick. A proportion the generator
+   * can measure off its own output beats an adjective it has to interpret.
    */
   {
     id: 'fv',
@@ -450,7 +467,7 @@ export const SLOTS: Slot[] = [
     label: 'Spread (EE)',
     region: 'mouth',
     prompt: mouth(
-      'Spread the lips into a wide, shallow slot, as when saying "ee". Compared with a relaxed closed mouth, the corners draw back and apart so the opening reaches wider than the closed mouth did, while the jaw stays almost closed, so the slot is much wider than it is tall. The upper teeth show as one simple white band along the top of the opening, and directly below that band there is a clear dark opening running the full width of the mouth, because the mouth is genuinely parted. The lower lip keeps its full natural thickness and is not drawn back, tucked or thinned. The result has to be plainly distinguishable from teeth resting on the lip: a dark opening separates the teeth from the lower lip along the whole width.',
+      'Part the lips into a long, shallow slot, as when saying "ee". The jaw barely moves: the whole opening is at least four times as wide as it is tall, and no taller than the upper lip is thick. The upper teeth show as one simple white band along the top of the opening, and directly below that band lies a narrow dark strip running the full width of the opening — clearly shorter from top to bottom than the white band above it, a dark line rather than a cavity. The lower lip keeps its full natural thickness and is not drawn back, tucked or thinned. The result has to be plainly distinguishable from teeth resting on the lip, because that dark strip separates the teeth from the lower lip along the whole width; and from a wide open mouth, because the opening is a shallow slot with no rounding to it, showing no tongue and no lower teeth.',
       EE_NOTE,
     ),
   },
