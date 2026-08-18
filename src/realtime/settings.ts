@@ -118,17 +118,39 @@ const isNativeAudio = (model: ModelChoice) => model.key === 'gemini-native-audio
  * Exported because liveTrial offers the voice on its own, outside the settings
  * panel: that page spends its screen on the character rather than on the knobs,
  * and which voice the character has is part of the character.
+ *
+ * WHERE THE (m)/(f) COMES FROM
+ *
+ * Not from Google. The docs give each voice an adjective — Puck is "upbeat",
+ * Charon "informative", Kore "firm", Aoede "breezy" — and no gender field, on
+ * either surface, in any response. So the letters here are what the voices
+ * sound like, agreed across every third-party listing that bothers to say and
+ * confirmed by ear, and they are a hint to whoever is picking rather than a
+ * property the API will ever confirm.
+ *
+ * Worth having anyway, because it is the first thing anybody wants to know and
+ * the names give nothing away: seven of the eight are Greek or Norse figures
+ * most people have not met, and the eighth is misleading — Zephyr was a wind
+ * god and the voice is a woman's. Guessing from mythology gets that one wrong.
+ *
+ * The letter lives in the label and never in the value: the wire carries the
+ * bare name, so a re-lettering here cannot invalidate a saved pick.
  */
-export const VOICES: SettingOption[] = [
-  'Puck',
-  'Charon',
-  'Kore',
-  'Fenrir',
-  'Aoede',
-  'Leda',
-  'Orus',
-  'Zephyr',
-].map((name) => ({ value: name, label: name }));
+const VOICE_NAMES: Array<[name: string, sex: 'm' | 'f']> = [
+  ['Puck', 'm'],
+  ['Charon', 'm'],
+  ['Kore', 'f'],
+  ['Fenrir', 'm'],
+  ['Aoede', 'f'],
+  ['Leda', 'f'],
+  ['Orus', 'm'],
+  ['Zephyr', 'f'],
+];
+
+export const VOICES: SettingOption[] = VOICE_NAMES.map(([name, sex]) => ({
+  value: name,
+  label: `${name} (${sex})`,
+}));
 
 export const SETTING_FIELDS: SettingField[] = [
   {
