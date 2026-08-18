@@ -630,20 +630,28 @@ export type MotionCadence = 'syllable' | 'phrase' | 'gesture';
  */
 export const DEFAULT_CADENCE: MotionCadence = 'phrase';
 
-export const MOTION_CADENCES: Array<{ id: MotionCadence; label: string; hint: string }> = [
+export const MOTION_CADENCES: Array<{
+  id: MotionCadence;
+  label: string;
+  summary: string;
+  hint: string;
+}> = [
   {
     id: 'syllable',
     label: 'Every syllable',
+    summary: 'Head and brows move on every stressed syllable.',
     hint: 'What shipped: head and brows follow the loudness of the current frame, so they move on each stressed syllable — four or five times in an ordinary sentence.',
   },
   {
     id: 'phrase',
     label: 'Every phrase',
+    summary: 'One lean per phrase, with the brows holding the arc as a pose.',
     hint: 'The head follows the arc of the whole sentence rather than the syllables in it — one unhurried lean per phrase. The brows take the arc as a pose and keep the syllables on top of it, so they rise while there is speaking to do and dip back toward rest on the unstressed words. Still moves whenever there is sound.',
   },
   {
     id: 'gesture',
     label: 'Occasional',
+    summary: 'Still for most of a sentence, then one move on its loudest moment.',
     hint: 'Still for most of a sentence, then one definite move on its loudest moment, then locked out for a few seconds — the brows for much longer. The blink’s schedule, applied to the head.',
   },
 ];
@@ -910,8 +918,8 @@ const TILT_LOCKOUT = 5;
 /**
  * Which moments close the lips, offered as a set for TILT_TRIGGERS' reason.
  *
- * Both are the same gesture on the same channel, and they differ only in whose
- * turn is beginning:
+ * All three are the same gesture on the same channel. Two of them differ only
+ * in whose turn is beginning; the third has no turn to sit beside at all:
  *
  *  - `turn` is the original, and it is the face's own preparation. It fires on
  *    the rising edge of `speaking` — the window between the transport queueing
@@ -922,18 +930,25 @@ const TILT_LOCKOUT = 5;
  *  - `waiting` is the odd one, and the only movement on this face that happens
  *    with nobody talking at all. See WAIT_ONSET.
  *
- * The pair reads very differently and only one of them is about attention.
- * `turn` is self-directed: the mouth getting ready to use itself, which is
- * honest and says nothing about the listener. `reply` is the one that looks like
- * noticing — a mouth that shuts the moment somebody else starts is a mouth
- * declining the floor, and that is the whole content of the gesture.
+ * `turn` and `reply` read very differently and only one of them is about
+ * attention. `turn` is self-directed: the mouth getting ready to use itself,
+ * which is honest and says nothing about the listener. `reply` is the one that
+ * looks like noticing — a mouth that shuts the moment somebody else starts is a
+ * mouth declining the floor, and that is the whole content of the gesture.
  *
- * Ticking both does not press twice as often, which is worth knowing before
+ * Ticking that pair does not press twice as often, which is worth knowing before
  * reading it as a frequency setting. The two moments bracket the user's turn:
  * `reply` at the start of it, `turn` at the end when the answer comes back. A
  * short exchange puts them inside PRESS_LOCKOUT of each other and the second is
  * swallowed, so the pair costs at most one press per exchange either way — it
  * changes which end of the user's turn gets the gesture, not how much there is.
+ *
+ * `waiting` is outside that argument rather than a third term in it, and the
+ * distinction is why the page states the lockout for the pair alone. It fires in
+ * a silence neither of the others can reach, on WAIT_GAP rather than on
+ * anybody's turn, so it is the one box here that genuinely adds movement instead
+ * of relocating it. See the note on WAIT_ONSET, which makes the same point from
+ * the other end.
  */
 export type PressTrigger = 'turn' | 'reply' | 'waiting';
 
@@ -995,7 +1010,7 @@ export const PRESS_TRIGGERS: Array<{ id: PressTrigger; label: string; hint: stri
   {
     id: 'reply',
     label: 'As you answer',
-    hint: 'Closes the lips when your microphone first hears you with the tutor silent, about a quarter of a second into your first word. The face registering that you have started, rather than waiting to be told the turn is over.',
+    hint: 'Closes the lips when your microphone first hears you with the tutor silent, about an eighth of a second into your first word. The face registering that you have started, rather than waiting to be told the turn is over.',
   },
   {
     id: 'waiting',

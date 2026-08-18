@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Mic, MicOff, PhoneOff, Radio, SlidersHorizontal, User } from 'lucide-react';
 import { startGeminiSession } from '../realtime/gemini';
 import { findModel } from '../realtime/models';
@@ -59,6 +59,68 @@ import { tailSentences } from './text';
 
 /** The only model this page runs. It is the thing being tried out. */
 const MODEL_KEY = 'gemini-native-audio';
+
+/**
+ * "a, b and c" — for summaries assembled from whichever boxes are ticked.
+ *
+ * Generated rather than written down, which is the point: a summary that is
+ * composed from the live setting cannot fall out of step with it, and the one
+ * defect this panel actually shipped was a sentence that said "the two" while
+ * three boxes were ticked. Anything stating a count here should compute it.
+ */
+function listing(parts: string[]): string {
+  if (parts.length <= 1) return parts.join('');
+  return `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
+}
+
+/**
+ * A row's reasoning, folded away until it is asked for.
+ *
+ * The prose under this panel is several times the height of the controls it
+ * explains, and none of it is padding — every tilt trigger produces the
+ * identical lean, so a reader who skips the text cannot tell from the face
+ * which one fired, and the settings teach nothing. Deleting it was never the
+ * fix. What was wrong is that all of it arrived at once, in one weight, with
+ * nothing tying a paragraph to the row that owned it.
+ *
+ * So the argument folds and the summary stays: one line saying what the row is
+ * doing as it stands, and a control for the reader who wants to know why. The
+ * summary is the part that has to be true at a glance, which is why the ones
+ * built from ticked boxes are composed by `listing` rather than written out.
+ *
+ * Open state is per instance and deliberately not persisted. It is a reading
+ * aid rather than a setting, and a panel that remembered which of its three
+ * arguments you had unfolded last week would be restoring clutter.
+ */
+function Why({ summary, children }: { summary: ReactNode; children?: ReactNode }) {
+  const [open, setOpen] = useState(false);
+
+  // No control at all when there is nothing behind it — an empty row still gets
+  // its summary, and a "Why?" that opened onto nothing would be a broken
+  // promise rather than a small one.
+  if (!children) {
+    return <p className="text-xs leading-relaxed text-slate-500">{summary}</p>;
+  }
+
+  return (
+    <div className="text-xs leading-relaxed text-slate-500">
+      <p className="flex flex-wrap items-baseline gap-x-2">
+        <span>{summary}</span>
+        <button
+          type="button"
+          onClick={() => setOpen((current) => !current)}
+          aria-expanded={open}
+          className="shrink-0 text-slate-400 underline decoration-dotted underline-offset-2 transition-colors hover:text-slate-200"
+        >
+          {open ? 'Less' : 'Why?'}
+        </button>
+      </p>
+      {open && (
+        <div className="mt-1.5 space-y-1 border-l border-slate-800 pl-3">{children}</div>
+      )}
+    </div>
+  );
+}
 
 /** As tutorBench: audio bills per second of connection, so a forgotten tab costs. */
 const IDLE_TIMEOUT_MS = 90_000;
@@ -856,12 +918,14 @@ export default function LiveTrial() {
             measurement describes, this decides what is measured.
           */}
           <div className="mt-2 flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-slate-800/70 pt-2">
-            <span className="shrink-0 text-xs text-slate-500">Lips</span>
+            <span className="shrink-0 text-xs text-slate-500">Rounding</span>
             {ROUNDNESS_MODES.map((option) => (
               <label
                 key={option.id}
-                title={option.hint}
-                className="flex cursor-help items-center gap-2 text-sm text-slate-300"
+                title={roundness === option.id ? undefined : option.hint}
+                className={`flex items-center gap-2 text-sm text-slate-300 ${
+                  roundness === option.id ? '' : 'cursor-help'
+                }`}
               >
                 <input
                   type="radio"
@@ -881,6 +945,13 @@ export default function LiveTrial() {
             against real audio — and the person flipping it is the only one who
             can check them.
           */}
+          <p className="mt-1.5 text-xs leading-relaxed text-slate-500">
+            The lips are read from the sound rather than from the words, and one number carries
+            it: how dark or bright the vowel is. That alone is right about English, which rounds
+            only its back vowels — dark and rounded travel together there. The second measurement
+            is a second opinion for the vowels that are front and rounded at once, which one
+            number leaves stranded in the middle.
+          </p>
           <p className="mt-1.5 text-xs leading-relaxed text-slate-500">
             {ROUNDNESS_MODES.find((option) => option.id === roundness)?.hint} The thresholds
             behind the second measurement are reasoned from formant tables and checked against
@@ -936,8 +1007,10 @@ export default function LiveTrial() {
             {MOTION_CADENCES.map((option) => (
               <label
                 key={option.id}
-                title={option.hint}
-                className="flex cursor-help items-center gap-2 text-sm text-slate-300"
+                title={cadence === option.id ? undefined : option.hint}
+                className={`flex items-center gap-2 text-sm text-slate-300 ${
+                  cadence === option.id ? '' : 'cursor-help'
+                }`}
               >
                 <input
                   type="radio"
@@ -963,8 +1036,10 @@ export default function LiveTrial() {
             {TILT_TRIGGERS.map((option) => (
               <label
                 key={option.id}
-                title={option.hint}
-                className="flex cursor-help items-center gap-2 text-sm text-slate-300"
+                title={tilt.includes(option.id) ? undefined : option.hint}
+                className={`flex items-center gap-2 text-sm text-slate-300 ${
+                  tilt.includes(option.id) ? '' : 'cursor-help'
+                }`}
               >
                 <input
                   type="checkbox"
@@ -1035,7 +1110,7 @@ export default function LiveTrial() {
 
             {listenNod && (
               <label
-                title="How far the head dips. The range stops where the framing does — a deeper nod would lift the top edge of the picture out of frame — and unlike the lean above, the whole of it is meant to be usable."
+                title="How far the head dips, as a share of the head's own height. The range stops where the framing does — a deeper nod would lift the top edge of the picture out of frame — and unlike the lean above, the whole of it is meant to be usable."
                 className="flex min-w-[11rem] flex-1 cursor-help items-center gap-2 text-xs text-slate-500"
               >
                 Depth
@@ -1049,8 +1124,8 @@ export default function LiveTrial() {
                   className="flex-1 accent-sky-500"
                 />
                 {/* As a share of the head's height, for the brow travel's reason. */}
-                <span className="w-10 text-right font-mono text-slate-300">
-                  {(nodDepth / 2).toFixed(1)}%
+                <span className="w-24 text-right font-mono text-slate-300">
+                  {(nodDepth / 2).toFixed(1)}% of head
                 </span>
               </label>
             )}
@@ -1080,7 +1155,7 @@ export default function LiveTrial() {
             </label>
 
             <label
-              title="How far the brows travel at their fullest. A kit only gets as much of this as its brow boxes say there is clear forehead for, so a portrait with a low fringe will stop responding partway up — that is the picture's answer, not the slider's. Drag it to nothing to hear the same sentence with the brows held still."
+              title="How far the brows travel at their fullest, as a share of the head's own height. A kit only gets as much of this as its brow boxes say there is clear forehead for, so a portrait with a low fringe will stop responding partway up — that is the picture's answer, not the slider's. Drag it to nothing to hear the same sentence with the brows held still."
               className="flex min-w-[11rem] flex-1 cursor-help items-center gap-2 text-xs text-slate-500"
             >
               Travel
@@ -1100,8 +1175,8 @@ export default function LiveTrial() {
                 this stage, on the kit page's zoomed panel, and on whatever size
                 the face is drawn at next.
               */}
-              <span className="w-10 text-right font-mono text-slate-300">
-                {(browLift / 2).toFixed(1)}%
+              <span className="w-24 text-right font-mono text-slate-300">
+                {(browLift / 2).toFixed(1)}% of head
               </span>
             </label>
           </div>
@@ -1123,12 +1198,14 @@ export default function LiveTrial() {
             slider to offer but that mistake.
           */}
           <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
-            <span className="w-16 shrink-0 text-xs text-slate-500">Lips</span>
+            <span className="w-16 shrink-0 text-xs text-slate-500">Closing</span>
             {PRESS_TRIGGERS.map((option) => (
               <label
                 key={option.id}
-                title={option.hint}
-                className="flex cursor-help items-center gap-2 text-sm text-slate-300"
+                title={press.includes(option.id) ? undefined : option.hint}
+                className={`flex items-center gap-2 text-sm text-slate-300 ${
+                  press.includes(option.id) ? '' : 'cursor-help'
+                }`}
               >
                 <input
                   type="checkbox"
@@ -1152,10 +1229,11 @@ export default function LiveTrial() {
             cadences differ in a way their labels cannot carry: two of them are
             distinguished by how *often* they move rather than by how they look
             in any one frame, which is exactly what you cannot see by hovering.
+            The summary carries that much; the hint behind it carries the rest.
           */}
-          <p className="text-xs leading-relaxed text-slate-500">
-            {MOTION_CADENCES.find((option) => option.id === cadence)?.hint}
-          </p>
+          <Why summary={MOTION_CADENCES.find((option) => option.id === cadence)?.summary}>
+            <p>{MOTION_CADENCES.find((option) => option.id === cadence)?.hint}</p>
+          </Why>
 
           {/*
             Spelled out for the cadence's reason and one sharper than it. These
@@ -1164,12 +1242,18 @@ export default function LiveTrial() {
             is which moment it lands on. Watching without knowing what is ticked
             tells you nothing at all.
           */}
-          <div className="space-y-1 text-xs leading-relaxed text-slate-500">
-            {tilt.length === 0 ? (
-              <p>
-                No tilt. The head moves only with the loudness of the voice, which is what shipped.
-              </p>
-            ) : (
+          <Why
+            summary={
+              tilt.length === 0
+                ? 'No tilt. The head moves only with the loudness of the voice, which is what shipped.'
+                : `Leaning on ${listing(
+                    TILT_TRIGGERS.filter((option) => tilt.includes(option.id)).map((option) =>
+                      option.label.toLowerCase(),
+                    ),
+                  )}.`
+            }
+          >
+            {tilt.length > 0 && (
               <>
                 {TILT_TRIGGERS.filter((option) => tilt.includes(option.id)).map((option) => (
                   <p key={option.id}>
@@ -1185,7 +1269,7 @@ export default function LiveTrial() {
                 )}
               </>
             )}
-          </div>
+          </Why>
 
           {/*
             The tilt's argument, owed harder. Two moments, one identical
@@ -1194,34 +1278,44 @@ export default function LiveTrial() {
             the last line is here because the most likely reaction to ticking
             both boxes is to wonder whether anything happened.
           */}
-          <div className="space-y-1 text-xs leading-relaxed text-slate-500">
-            {press.length === 0 ? (
-              <p>No press. The mouth moves only with the sound of the tutor’s own voice.</p>
-            ) : (
+          <Why
+            summary={
+              press.length === 0
+                ? 'No press. The mouth moves only with the sound of the tutor’s own voice.'
+                : `Closing ${listing(
+                    PRESS_TRIGGERS.filter((option) => press.includes(option.id)).map((option) =>
+                      option.label.toLowerCase(),
+                    ),
+                  )}.`
+            }
+          >
+            {press.length > 0 && (
               <>
                 {PRESS_TRIGGERS.filter((option) => press.includes(option.id)).map((option) => (
                   <p key={option.id}>
                     <span className="text-slate-400">{option.label}:</span> {option.hint}
                   </p>
                 ))}
-                {press.length > 1 && (
+                {press.includes('turn') && press.includes('reply') && (
                   <p>
-                    The two sit at either end of your turn and share one lockout of about two
-                    seconds, so a short exchange gets one press rather than both — ticking the
-                    second changes which end of your turn the face reacts at, not how often it
-                    reacts.
+                    Before speaking and As you answer sit at either end of your turn and share one
+                    lockout of about two seconds, so a short exchange gets one press rather than
+                    both — ticking the second changes which end of your turn the face reacts at,
+                    not how often it reacts.
+                    {press.includes('waiting') &&
+                      ' While waiting is outside that pair rather than a third member of it: it fires in a silence neither of them can reach, so it is the one box here that adds movement instead of moving it.'}
                   </p>
                 )}
                 <p>
-                  Expect this to be subtle to the point of deniability. Both poses it moves between
-                  are a closed mouth, and on the kit shipped with the app they differ by under a
-                  tenth of the pixels in the mouth — a fifth of what changing a vowel does. If you
-                  cannot see it, that is the artwork rather than the setting, and the kit page’s
-                  motion panel is where to find out which.
+                  Expect this to be subtle to the point of deniability. The two poses it moves
+                  between are both a closed mouth, and on the kit shipped with the app they differ
+                  by under a tenth of the pixels in the mouth — a fifth of what changing a vowel
+                  does. If you cannot see it, that is the artwork rather than the setting, and the
+                  kit page’s motion panel is where to find out which.
                 </p>
               </>
             )}
-          </div>
+          </Why>
         </fieldset>
 
         <div className="flex items-center gap-3 rounded-lg border border-slate-800 px-4 py-2.5">
