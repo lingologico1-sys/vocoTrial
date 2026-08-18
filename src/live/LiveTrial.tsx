@@ -4,6 +4,7 @@ import { startGeminiSession } from '../realtime/gemini';
 import { findModel } from '../realtime/models';
 import { LANGUAGES, defaultLanguageCode, findLanguage } from '../realtime/languages';
 import { lastUsedKey, listPresets, rememberPreset, renderPreset } from '../realtime/presets';
+import { VOICES } from '../realtime/settings';
 import type { AudioTap, SessionStatus, TranscriptDelta, VoiceSession } from '../realtime/types';
 import type { FaceKit } from '../facekit/kit';
 import { loadBundledKit } from '../facekit/bundled';
@@ -77,6 +78,7 @@ const PREFS_KEY = 'vocotrial.live.v7';
 
 interface Prefs {
   language: string;
+  voice: string;
   driver: MouthDriver;
   lookaheadMs: number;
   motion: HeadMotion;
@@ -199,6 +201,18 @@ export default function LiveTrial() {
    */
   const [presets] = useState(listPresets);
   const [presetKey, setPresetKey] = useState(lastUsedKey);
+  /**
+   * Which prebuilt voice the tutor speaks in. Empty means Google's default,
+   * which is a third state rather than a synonym for whichever name that
+   * happens to be today — see settings.ts — so an untouched picker sends no
+   * voice field at all rather than pinning one.
+   *
+   * The only session setting this page offers. It belongs here and not with the
+   * rest of the knobs on tutorBench because it is not a knob you tune once and
+   * hold constant: the voice is half of who is on screen, and the face beside
+   * it is the whole point of the page.
+   */
+  const [voice, setVoice] = useState<string>(prefs.voice ?? '');
   // Scheduled by default: it is the better mouth, and reactive is kept beside
   // it as the thing to compare against rather than the thing to start from.
   const [driver, setDriver] = useState<MouthDriver>(prefs.driver ?? 'scheduled');
@@ -370,6 +384,7 @@ export default function LiveTrial() {
         PREFS_KEY,
         JSON.stringify({
           language,
+          voice,
           driver,
           lookaheadMs,
           motion,
@@ -389,6 +404,7 @@ export default function LiveTrial() {
     }
   }, [
     language,
+    voice,
     driver,
     lookaheadMs,
     motion,
@@ -544,6 +560,9 @@ export default function LiveTrial() {
       lastActivity.current = Date.now();
       const started = await startGeminiSession(handlers, MODEL_KEY, language, {
         instructions: renderPreset(presetKey, choice),
+        // Absent rather than empty when nothing is picked: the Worker drops a
+        // blank, but sending one at all reads as a choice nobody made.
+        settings: voice ? { voice } : {},
       });
       session.current = started;
       setTap(started.tap ?? null);
@@ -917,7 +936,7 @@ export default function LiveTrial() {
           <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
             <span className="w-16 shrink-0 text-xs text-slate-500">Nod</span>
             <label
-              title="Dips the head two or three times while your microphone hears you, every few seconds. The commonest thing a listener does, and the only movement on this panel that happens during your half of the conversation — untick it to see how still the face is while you talk."
+              title="Dips the head once as you finish speaking — about half a second after your last word, which is when the microphone is sure you have stopped. The only movement on this panel that answers something you did. It used to nod every few seconds while you talked, which is what real listeners do and was distracting to be on the other end of."
               className="flex cursor-help items-center gap-2 text-sm text-slate-300"
             >
               <input
@@ -926,7 +945,7 @@ export default function LiveTrial() {
                 onChange={(event) => setListenNod(event.target.checked)}
                 className="accent-sky-500"
               />
-              While you talk
+              As you finish
             </label>
 
             {listenNod && (
@@ -1149,6 +1168,27 @@ export default function LiveTrial() {
               {LANGUAGES.map((choice) => (
                 <option key={choice.code} value={choice.code} className="bg-slate-900">
                   {choice.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="flex flex-1 items-center gap-2 rounded-lg border border-slate-800 px-3 py-2">
+            <span className="text-[11px] uppercase tracking-wide text-slate-500">Voice</span>
+            <select
+              value={voice}
+              onChange={(event) => setVoice(event.target.value)}
+              disabled={live || busy}
+              className="flex-1 bg-transparent text-sm text-slate-200 outline-none disabled:opacity-40"
+            >
+              {/* Fixed in the setup frame, like the language beside it, so both
+                  are locked for the length of a call rather than live. */}
+              <option value="" className="bg-slate-900">
+                Google default
+              </option>
+              {VOICES.map((option) => (
+                <option key={option.value} value={option.value} className="bg-slate-900">
+                  {option.label}
                 </option>
               ))}
             </select>

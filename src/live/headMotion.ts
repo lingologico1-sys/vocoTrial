@@ -285,14 +285,31 @@ export const TILT_ROLL_MAX = MOTION.swing.roll;
  * `heard` already says so, debounced, and already arrives every frame for the
  * press to take an edge off it.
  *
- * What it does *not* do is follow the user's syllables, and that is a choice
- * rather than a shortcut. It could — MicCapture measures the input's energy
- * already and throws the number away — but a backchannel nod is not phase-locked
- * to the speaker the way the swing is locked to the agent. It arrives every few
- * seconds on the listener's own clock, which is the blink's argument once more,
- * and the cheap version is worth finding wrong before the expensive one is built.
- * If this reads as arbitrary against a real voice, that is the finding, and the
- * level is the thing to reach for.
+ * All of which is true and was not enough, because it settles *whether* the face
+ * may nod and says nothing about how often. This first ran as a backchannel: a
+ * dip every three or four seconds for as long as the microphone heard anybody,
+ * on the reasoning that real listeners nod throughout and on their own clock
+ * rather than on the speaker's. Both halves of that are correct about people and
+ * the result was distracting to talk to.
+ *
+ * The reason is worth keeping, because it is not a reason about nodding. A real
+ * listener's backchannels are *earned* — they land on the clause that finished,
+ * the point that was made, the word the speaker leaned on — and a face that
+ * cannot hear any of that is not nodding along, it is nodding regardless. Every
+ * dip is then a claim to have followed something, and the claim is false a few
+ * times a sentence. Sparseness does not fix it, only a different moment does.
+ *
+ * So there is one moment now, and it is the one moment the audio can actually
+ * locate: the user stops. `heard` going false is a fact rather than an inference,
+ * and the gesture it carries — a nod as somebody finishes speaking — is the one
+ * acknowledgement that means the same thing whether or not the listener
+ * understood a word. See `finished` in `read`.
+ *
+ * The syllable-driven version is still the interesting unbuilt thing, and this
+ * has changed what it would be for. It would not be a denser backchannel; it
+ * would be the only way to nod at the right *place* in a sentence rather than at
+ * its end. That is a much larger claim than the level alone can support, and
+ * this one moment is worth living with first.
  */
 
 /**
@@ -325,16 +342,24 @@ export const TILT_ROLL_MAX = MOTION.swing.roll;
  * For scale, in the units that decide it: the live stage draws this 200-unit
  * head at 160 pixels, so a unit is 0.8 of a pixel.
  *
- *   3u   2.4px   the default below
+ * 1.5u   1.2px   the default below
+ *   3u   2.4px   what shipped, when there was one of these every few seconds
  *   4u   3.2px   the ceiling, and the whole of what the emphasis travels
  *
- * The default sits near the top of a short range, on the lesson this file has
- * now learned from both directions — the brows shipped at 1.4px and could not be
- * seen, the tilt shipped at 4.9px and was too much. The tilt's argument for
- * staying small does not transfer: that one is a posture with a lateral slide
- * that gives it away, and this is a gesture with nothing to give away.
+ * The default shipped at 3 and has been halved, and the two changes are one
+ * change: a movement that happens repeatedly has to be small enough to be
+ * ignored, and a movement that happens once has to be small enough not to be
+ * *answered*. A deep nod at the end of a sentence is agreement — it says the
+ * answer was right — and this face has no idea whether it was. Shallow, the
+ * same gesture says only that the turn was received, which is the whole of what
+ * a microphone entitles it to claim.
+ *
+ * The range is untouched, because the range was measured and only the default
+ * was ever taste. That is DEFAULT_TILT_ROLL's history repeating exactly: shipped
+ * too large, found too large on the first real call, moved without narrowing
+ * what the slider can reach.
  */
-export const DEFAULT_NOD_DEPTH = 3;
+export const DEFAULT_NOD_DEPTH = 1.5;
 export const NOD_DEPTH_MIN = 0;
 export const NOD_DEPTH_MAX = 4;
 
@@ -343,29 +368,34 @@ export const NOD_DEPTH_MAX = 4;
  *
  * DEFAULT_TILT_TRIGGERS holds two of three back because the open question there
  * is frequency, and three leans at once is a face that cannot keep still. There
- * is no such question here: one gesture, one trigger, firing only while somebody
- * is talking to the face. What is worth learning is whether a nodding face reads
- * as listening, and nobody learns that from a box they have to find and tick.
+ * is no such question left here: one gesture, one trigger, one firing per answer.
+ * Frequency was the open question when this shipped and the answer came back on
+ * the first call, which is what the box being ticked bought.
  */
 export const DEFAULT_LISTEN_NOD = true;
 
 /**
  * One dip, in seconds, and how many of them a nod is made of.
  *
- * A little over three a second, which is about where real nodding sits, and two
- * or three per firing. The count is diced rather than fixed for the reason the
- * blink's gap is jittered, with one turn of the screw: this is the only gesture
- * here that repeats *within itself*, so it is the only one with a rhythm of its
- * own available to give it away. A listener who always nods exactly twice is a
- * metronome with a face.
+ * A little over three a second, which is about where real nodding sits, and one
+ * or two per firing. It was two or three while this repeated, on the argument
+ * that a single dip reads thin — which is true of a backchannel and false of an
+ * acknowledgement. Repeated dips are emphasis, and emphasis at the end of an
+ * answer is the same overclaim the depth above was halved for: three dips is a
+ * face that thought the answer was excellent.
+ *
+ * The count is still diced, though the reason has thinned with it. It used to be
+ * that this was the one gesture here with a rhythm of its own to give away; now
+ * that it fires once an answer, the variation is doing no more than what the
+ * lockout jitter does everywhere else, and costs as little.
  *
  * Two dips comes to 0.64s, which is GESTURE's duration to within a frame. That
  * envelope's comment calls itself "roughly a nod"; this is the guess checked
  * against the thing it was guessing at.
  */
 const NOD_BOB = 0.32;
-const NOD_BOBS_MIN = 2;
-const NOD_BOBS_MAX = 3;
+const NOD_BOBS_MIN = 1;
+const NOD_BOBS_MAX = 2;
 
 /**
  * How deep the last dip is against the first, as a share of it.
@@ -386,22 +416,38 @@ const NOD_DECAY = 0.65;
 /**
  * How long the head refuses to nod again, in seconds.
  *
- * Longer than the head's own 2.5 and shorter than the brows' 7. Backchannels
- * come every few seconds in real listening and this is the middle of that, taken
- * from the start of one nod rather than from its end — so the quiet between two
- * runs about three seconds at two dips, with the usual jitter on it.
+ * This set the cadence when the nod repeated. It is a guard now, and the thing
+ * it guards against is the one way a single-firing nod can still come out in a
+ * run: `heard` falls after 600ms of quiet, and a learner assembling a sentence in
+ * a language they are unsure of goes quiet for longer than that several times
+ * inside one answer. Each of those looks exactly like finishing.
+ *
+ * Nothing available here can tell a hesitation from an ending — the tutor's own
+ * pause detector has the same problem and solves it with `speaking`, which says
+ * nothing about the user. So this does not try. It caps the damage instead: at
+ * most one nod every three and a half seconds, whatever the microphone thinks
+ * happened, which turns a stutter into a single acknowledgement landing slightly
+ * early rather than into a face nodding through somebody's sentence.
  */
 const NOD_GAP = 3.5;
 
 /**
- * How long somebody has to have been talking before the first nod, in seconds.
+ * How much talking earns one, in seconds.
  *
- * `heard` goes true on the first syllable, and a face that nods on the first
- * syllable is not agreeing with anything — it has not been told anything yet.
- * Held off by about a word, which also spends nothing on the one-word answers
- * that a tutor's questions mostly get.
+ * Not an onset delay any more — the nod lands at the end now, so this is a
+ * question about whether there was an answer at all rather than about when to
+ * start.
+ *
+ * The figure is set by VOICE_RELEASE_MS rather than by anything about speech, and
+ * that is the only thing worth knowing about it. A single loud chunk — a cough, a
+ * chair, a knock on the desk — holds `heard` true for the whole 600ms of that
+ * release and then drops it, which is an utterance and a completion as far as
+ * anything here can see. Any threshold at or under 0.6 is therefore satisfied by
+ * noise. This sits far enough above it to need real speech under the release, and
+ * no further: a one-word answer is most of what a tutor's questions get back, and
+ * those are exactly the answers worth acknowledging.
  */
-const NOD_ONSET = 0.8;
+const NOD_MIN_SPEECH = 0.8;
 
 /**
  * Where the picture turns.
@@ -1394,12 +1440,13 @@ export class HeadPerformer {
    */
   private wasHeard = false;
   /**
-   * Seconds the user has been talking without a break, for NOD_ONSET.
+   * Seconds the user has been talking without a break, for NOD_MIN_SPEECH.
    *
-   * Reset rather than paused whenever that stops being true, so the delay is
-   * asked of every turn afresh: somebody who says two words, stops, and starts
-   * again has begun a new thing to agree with, and the second start deserves the
-   * same beat of listening before the head answers it.
+   * Reset rather than paused the moment that stops being true, which is what
+   * makes it a measure of *this* answer rather than of how much talking the call
+   * has had. It is read on the frame it is cleared on — see `finished` — so the
+   * order of those two statements in `read` is load-bearing rather than
+   * incidental.
    */
   private listeningFor = 0;
   /**
@@ -1579,22 +1626,29 @@ export class HeadPerformer {
     const press = this.pressChannel.advance(dt, pressing) * PRESS_DEPTH;
 
     /*
-      The nod, on the one conjunction that means somebody is talking *to* this
-      face. Both halves carry weight. `heard` is the cause the idle sway never
-      had, and `!speaking` is what stops the face nodding along with itself — a
-      microphone hears the tutor through the speakers, and echo cancellation only
-      removes most of it. That is the gate `reply` already stands behind, which
-      is why this needs no defence of its own.
+      The nod, on the falling edge of somebody talking to this face rather than
+      on the state of it. `listening` is the same conjunction `reply` presses on
+      and it is still both halves that matter — `heard` is the cause the idle
+      sway never had, and `!speaking` keeps the face from answering the echo of
+      its own voice through the speakers.
 
-      Note what is *not* here: no lockout of its own beyond the channel's, and no
-      thinning by dice. The tilt and the brow flash are both rationed because
-      they fire on moments that recur inside a turn, and this one fires on a
-      state that lasts as long as somebody is talking. Its frequency is NOD_GAP
-      and nothing else decides it.
+      `finished` is the edge, and it is taken before the clock is cleared, which
+      is the whole trick: on the frame `listening` goes false, `listeningFor`
+      still holds the length of the answer that just ended, so the test and the
+      reset can be the same statement's two halves. It is true for exactly one
+      frame, which is what makes this fire once per answer rather than once per
+      frame of silence.
+
+      The second `!cue.speaking` is not the first one restated. `listening` can go
+      false two ways: the user stopped, or the tutor started over the top of them.
+      Only the first is an answer ending. Barging in produces the identical edge
+      and must not produce a nod — a face that nods at the moment it starts
+      talking is agreeing with itself.
     */
     const listening = cue.heard && !cue.speaking;
+    const finished = !listening && !cue.speaking && this.listeningFor >= NOD_MIN_SPEECH;
     this.listeningFor = listening ? this.listeningFor + dt : 0;
-    const nod = this.nodChannel.advance(dt, cue.nod && this.listeningFor >= NOD_ONSET);
+    const nod = this.nodChannel.advance(dt, cue.nod && finished);
 
     // The gap detector. Runs whether or not `hesitation` is ticked, so that
     // ticking it mid-call does not inherit a pause that started a minute ago —

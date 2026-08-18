@@ -114,8 +114,12 @@ const isNativeAudio = (model: ModelChoice) => model.key === 'gemini-native-audio
  * Gemini's prebuilt Live voices. The full catalogue is longer for the
  * half-cascade model, but these eight are the set both models share — and a
  * voice one model does not carry fails the setup rather than falling back.
+ *
+ * Exported because liveTrial offers the voice on its own, outside the settings
+ * panel: that page spends its screen on the character rather than on the knobs,
+ * and which voice the character has is part of the character.
  */
-const VOICES: SettingOption[] = [
+export const VOICES: SettingOption[] = [
   'Puck',
   'Charon',
   'Kore',

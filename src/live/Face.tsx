@@ -137,10 +137,10 @@ interface FaceProps {
    */
   heard?: boolean;
   /**
-   * Whether the head may nod while `heard` is true and the face is silent.
+   * Whether the head may nod once as the user finishes speaking.
    *
    * See DEFAULT_LISTEN_NOD. It has no effect on any preview, for the reason
-   * directly above: nothing there is ever heard.
+   * directly above: nothing there is ever heard, so nothing there ever stops.
    */
   listenNod?: boolean;
   /**
