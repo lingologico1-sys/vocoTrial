@@ -255,7 +255,7 @@ export async function onRequestPost(
   // else the answer would be the 401 we already have, at the cost of a
   // subrequest each. A 429 counts as taking the key: it got past authentication
   // to reach a quota check, and its models are the ones most worth listing.
-  const ids = IMAGE_MODELS.filter((model) => model.provider === 'gemini').map((model) => model.id);
+  const ids = IMAGE_MODELS.map((model) => model.id);
   const results = await Promise.all(
     hosts.map(async ({ region, probe }) => {
       const reachable = probe.status === 404 || probe.status === 429;

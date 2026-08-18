@@ -7,9 +7,10 @@ import { isBrow, type BoxId } from './slots';
  * Drag a rectangle over the mouth, and another over the eyes.
  *
  * One interaction doing two jobs, which is why it is worth a component. The
- * rectangle is the mask sent to a provider that takes one, *and* it is the crop
- * every result is cut down to, *and* it is where the patch lands when the face
- * is assembled. Placing it by eye against the actual portrait beats writing
+ * rectangle is the crop every result is cut down to, *and* it is where the
+ * patch lands when the face is assembled. It was a third thing until recently —
+ * the mask sent to a provider that took one — and no model on the list takes
+ * one now. Placing it by eye against the actual portrait beats writing
  * coordinates into a manifest and reloading to see whether they were right.
  *
  * Boxes are held in canvas pixels and drawn as percentages, so the picker is

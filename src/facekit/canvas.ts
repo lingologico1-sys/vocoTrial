@@ -9,9 +9,10 @@ import type { Box } from './kit';
  * down to the slot's box and drawn onto the *original* base here, in the
  * browser. Outside that box the kit is bit-identical to the base — not because
  * a provider promised to leave it alone, but because those pixels were never
- * replaced. Both providers regenerate the entire frame on every call, mask or
- * no mask, and at sixty frames a second the difference between "almost
- * unchanged" and "unchanged" is the difference between a face and a shimmer.
+ * replaced. The generator regenerates the entire frame on every call — as did
+ * the masked one that used to sit beside it, mask or no mask — and at sixty
+ * frames a second the difference between "almost unchanged" and "unchanged" is
+ * the difference between a face and a shimmer.
  *
  * Three things happen on the way in, in this order, and each fixes a distinct
  * failure you can see with your own eyes if you turn it off:
@@ -111,8 +112,8 @@ async function hasAlpha(src: string, box?: Box): Promise<boolean> {
  * Puts an opaque backdrop behind a cut-out portrait, for sending only.
  *
  * A portrait with no background is a shape these models handle badly. Nothing
- * in either provider's contract says what happens to the alpha channel of an
- * input image, and what they do with it in practice is decide: the frame comes
+ * in the provider's contract says what happens to the alpha channel of an
+ * input image, and what it does with it in practice is decide: the frame comes
  * back opaque either way, so somewhere in there the transparency was resolved
  * against a colour nobody chose. Resolved against black — which is the common
  * choice — the model is looking at a face lit from nothing, and it returns a
@@ -173,20 +174,13 @@ export async function clipToBase(patch: string, base: string, box: Box): Promise
   return ctx.canvas.toDataURL('image/png');
 }
 
-/**
- * The mask OpenAI's edit endpoint wants: transparent where it may paint.
- *
- * Inverted from the intuition most people bring to it — the hole is the
- * subject, not the protection. Everything outside the box is opaque black,
- * which is the instruction to leave it be.
+/*
+ * maskFor(box) was here — the mask OpenAI's edit endpoint wanted, transparent
+ * where the model was allowed to paint and opaque black everywhere else. It
+ * went with the models that took one; `git log` has it if a masked provider is
+ * ever added back. Nothing below changes in that event: the crop was never the
+ * mask's understudy, for the reason at the top of this file.
  */
-export function maskFor(box: Box): string {
-  const ctx = context(CANVAS_EDGE, CANVAS_EDGE);
-  ctx.fillStyle = '#000';
-  ctx.fillRect(0, 0, CANVAS_EDGE, CANVAS_EDGE);
-  ctx.clearRect(box.x, box.y, box.width, box.height);
-  return ctx.canvas.toDataURL('image/png');
-}
 
 /**
  * Cuts a box out of a generated result, having first put it on the same grid.

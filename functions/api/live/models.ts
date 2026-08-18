@@ -87,9 +87,12 @@ export async function onRequestPost(
   }
 
   // Whatever the pickers offer today, plus the spellings worth discovering.
+  // The image list is taken whole because every entry on it is a Vertex one; a
+  // model from anywhere else would 404 here and read as a wrong id. Filter it
+  // again if that ever stops being true — see the foot of imageModels.ts.
   const live = [...MODELS.map((model) => model.id), ...LIVE_CANDIDATES];
   const image = [
-    ...IMAGE_MODELS.filter((model) => model.provider === 'gemini').map((model) => model.id),
+    ...IMAGE_MODELS.map((model) => model.id),
     ...IMAGE_CANDIDATES,
   ];
 

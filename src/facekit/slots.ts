@@ -19,7 +19,10 @@ export type SlotId = Viseme | 'eyeLeftClosed' | 'eyeRightClosed';
  * glasses, and a generator asked to close the eyes inside it will cheerfully
  * restyle the frames on the way past — observed, on this very portrait, coming
  * back with black frames in place of pale olive ones, despite the prompt saying
- * not to and input_fidelity being set.
+ * not to — and, when that was observed, despite `input_fidelity` being set as
+ * well, which was the strongest keep-what-is-already-there lever either provider
+ * offered. It was not enough, which is why the fix below is a crop and not a
+ * better sentence.
  *
  * Two boxes sitting inside the lenses fix that by construction rather than by
  * asking nicely: if the frame is outside the crop, a frame the model ruined is
@@ -211,11 +214,13 @@ function lashClause(lashes: LashStyle): string {
 /**
  * Shared by both eye slots, and asking for *both* eyes on purpose.
  *
- * A masked provider paints only inside the one box it was given, so the other
- * eye is untouched and the instruction costs nothing. An unmasked one redraws
- * the whole face, and asking for both means whichever box is then cropped out
- * contains a closed eye. One prompt that is correct under either regime beats
- * two that each assume one.
+ * The model redraws the whole face — nothing on this path takes a mask any
+ * more — so asking for both means whichever box is then cropped out contains a
+ * closed eye. It cost nothing under the masked providers that used to be
+ * offered here either: they painted only inside the box they were given, so the
+ * other eye went untouched and the second clause was simply unread. One prompt
+ * correct under either regime beat two that each assumed one, and what is left
+ * is the half that still applies.
  */
 const eyesClosedPrompt = (lashes: LashStyle): string =>
   [

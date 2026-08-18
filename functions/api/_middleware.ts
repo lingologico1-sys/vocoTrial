@@ -26,12 +26,16 @@
 
 import { readToken, tokenIsValid } from './auth/_cookie';
 
+/*
+ * `OPENAI_API_KEY` was here. Nothing reads it now: OpenAI Realtime went first,
+ * leaving face-kit image generation as its only consumer, and the GPT Image
+ * models went with the rest of that branch — see the foot of
+ * src/facekit/imageModels.ts. Declaring a variable nothing reads invites the
+ * next person to wire something to it, so it is declared nowhere; the secret
+ * can be deleted from the dashboard at leisure, since an unread secret costs
+ * nothing but confusion.
+ */
 export interface GateEnv {
-  /**
-   * Face-kit image generation only, since OpenAI Realtime was removed — see
-   * functions/api/image/generate.ts. No voice path reads it any more.
-   */
-  OPENAI_API_KEY?: string;
   /** Vertex AI key (GCP billing), primary then fallback — see _vertex.ts. */
   GEMINI_API_KEY?: string;
   GEMINI_API_KEY2?: string;

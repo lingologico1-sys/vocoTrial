@@ -3,28 +3,26 @@ import { type GateEnv, json } from '../_middleware';
 import { VERTEX_KEY_NAMES, vertexGenerateContentUrl, vertexKey } from '../_vertex';
 
 /**
- * Generates one face-kit patch, on whichever provider was asked for.
+ * Generates one face-kit patch, on whichever model was asked for.
  *
  * Unlike the realtime routes, this one carries the payload rather than minting
  * a credential and stepping out of the way. That is the right trade here: image
  * generation is request/response on a timescale of seconds, so proxying costs
- * nothing a user can feel, and it keeps both keys server-side by construction —
+ * nothing a user can feel, and it keeps the key server-side by construction —
  * the same property functions/api/session/* exists to preserve.
  *
- * The two providers are asked for the same thing in very different shapes:
+ * One shape now, where there were two. Gemini takes JSON with the image inline
+ * and no mask at all, and is steered by the prompt alone; it runs on Vertex AI
+ * rather than AI Studio, which changes the URL, the key and the meter but not
+ * the payload — see _vertex.ts. The OpenAI branch that used to sit beside it
+ * took multipart with a real mask and painted inside it, and is gone along with
+ * the models that used it; see the foot of facekit/imageModels.ts.
  *
- *  - OpenAI takes multipart with a real mask image, and paints inside it.
- *  - Gemini takes JSON with the image inline and no mask at all, and is steered
- *    by the prompt alone. It runs on Vertex AI now rather than AI Studio, which
- *    changes the URL, the key and the meter but not the payload — see _vertex.ts.
- *
- * Neither difference reaches the browser as anything more than a flag, because
- * neither result is trusted whole: the client crops every result to the slot's
- * box and composites it onto the untouched base itself. See facekit/canvas.ts
- * for why that is not belt-and-braces but the actual mechanism.
+ * The absent mask reaches the browser as nothing at all, because no result is
+ * trusted whole either way: the client crops every result to the slot's box and
+ * composites it onto the untouched base itself. See facekit/canvas.ts for why
+ * that is not belt-and-braces but the actual mechanism.
  */
-
-const OPENAI_EDITS_URL = 'https://api.openai.com/v1/images/edits';
 
 /**
  * A ceiling on what the browser may push through here, in base64 characters.
@@ -40,7 +38,6 @@ interface GenerateBody {
   model?: unknown;
   prompt?: unknown;
   image?: unknown;
-  mask?: unknown;
   imageFirst?: unknown;
 }
 
@@ -48,13 +45,6 @@ interface GenerateBody {
 function rawBase64(value: string): string {
   const comma = value.indexOf(',');
   return value.startsWith('data:') && comma !== -1 ? value.slice(comma + 1) : value;
-}
-
-function toBytes(base64: string): Uint8Array {
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return bytes;
 }
 
 type Attempt =
@@ -124,63 +114,6 @@ function googleRetryDelayMs(body: unknown): number | undefined {
 }
 
 /**
- * OpenAI's image edit, with the mask deciding where it may paint.
- *
- * `input_fidelity` is the parameter that matters for this job: it asks the
- * model to hold on to the input's own detail rather than re-imagining it, which
- * is the difference between the same illustrated character and her cousin. It
- * goes only to models flagged for it in imageModels.ts, because a parameter an
- * endpoint does not recognise fails the whole request rather than being
- * ignored — and a wrong guess there is indistinguishable from a wrong model id.
- */
-async function generateOpenAi(
-  model: ImageModelChoice,
-  key: string,
-  prompt: string,
-  image: Uint8Array,
-  mask: Uint8Array | null,
-): Promise<Attempt> {
-  const form = new FormData();
-  form.append('model', model.id);
-  form.append('prompt', prompt);
-  form.append('n', '1');
-  form.append('image', new Blob([image], { type: 'image/png' }), 'base.png');
-  if (mask) form.append('mask', new Blob([mask], { type: 'image/png' }), 'mask.png');
-  if (model.highFidelity) form.append('input_fidelity', 'high');
-
-  const upstream = await fetch(OPENAI_EDITS_URL, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${key}` },
-    body: form,
-  });
-
-  if (!upstream.ok) {
-    return {
-      ok: false,
-      status: upstream.status,
-      detail: await upstream.text(),
-      retryAfterMs: retryAfterHeader(upstream),
-    };
-  }
-
-  const body = (await upstream.json()) as { data?: { b64_json?: string }[] };
-  const b64 = body.data?.[0]?.b64_json;
-  if (!b64) return { ok: false, status: 502, detail: 'no image in response' };
-
-  return { ok: true, image: b64 };
-}
-
-/** OpenAI's classification of a failure, without the message that may quote us. */
-function openAiReason(detail: string): string | undefined {
-  try {
-    const parsed = JSON.parse(detail) as { error?: { code?: string; type?: string } };
-    return trimmed(parsed.error?.code) ?? trimmed(parsed.error?.type);
-  } catch {
-    return undefined;
-  }
-}
-
-/**
  * Gemini's image edit: the picture and the instruction as two parts of one turn.
  *
  * There is no mask to send, so the prompt is carrying the whole burden of "and
@@ -209,9 +142,6 @@ async function generateGemini(
    * the turn they are read in. The page can send it both ways and put the two
    * results side by side, which is the only argument this repo accepts about a
    * generated picture. See `imageFirst` in FaceKit.tsx.
-   *
-   * Gemini only. OpenAI's edit endpoint takes multipart with named fields, so
-   * there is no order to choose and nothing here that would carry over.
    */
   const parts = imageFirst
     ? [{ inline_data: { mime_type: 'image/png', data: image } }, { text: prompt }]
@@ -322,14 +252,10 @@ export async function onRequestPost(
   if (body.image.length > MAX_IMAGE_CHARS) {
     return json({ error: 'That image is too large to send', code: 'image_too_large' }, 413);
   }
-  if (typeof body.mask === 'string' && body.mask.length > MAX_IMAGE_CHARS) {
-    return json({ error: 'That mask is too large to send', code: 'image_too_large' }, 413);
-  }
 
-  const key = model.provider === 'openai' ? env.OPENAI_API_KEY : vertexKey(env);
+  const key = vertexKey(env);
   if (!key) {
-    const name = model.provider === 'openai' ? 'OPENAI_API_KEY' : VERTEX_KEY_NAMES;
-    return json({ error: `${name} is not configured`, code: 'no_key' }, 500);
+    return json({ error: `${VERTEX_KEY_NAMES} is not configured`, code: 'no_key' }, 500);
   }
 
   const image = rawBase64(body.image);
@@ -337,16 +263,7 @@ export async function onRequestPost(
 
   let attempt: Attempt;
   try {
-    attempt =
-      model.provider === 'openai'
-        ? await generateOpenAi(
-            model,
-            key,
-            prompt,
-            toBytes(image),
-            typeof body.mask === 'string' && body.mask ? toBytes(rawBase64(body.mask)) : null,
-          )
-        : await generateGemini(model, key, prompt, image, body.imageFirst === true);
+    attempt = await generateGemini(model, key, prompt, image, body.imageFirst === true);
   } catch (error) {
     console.error('image generate threw', model.id, error);
     return json({ error: 'The image request failed', code: 'upstream' }, 502);
@@ -357,21 +274,25 @@ export async function onRequestPost(
     // authenticated with the account's own key. The provider's own short
     // classification travels with the error instead; see the note on Attempt.
     console.error('image generate failed', model.id, attempt.status, attempt.detail);
-    const reason =
-      attempt.reason ??
-      (model.provider === 'openai' ? openAiReason(attempt.detail) : undefined);
+    const reason = attempt.reason;
     // "Declined: RESOURCE_EXHAUSTED" reads as a judgement about the picture. It
     // is not one — it is the account having nothing left for the moment, which
     // wants entirely different advice from a refusal.
     const exhausted = reason === 'RESOURCE_EXHAUSTED';
-    const other = IMAGE_MODELS.find(
-      (entry) => entry.provider === model.provider && entry.key !== model.key,
-    );
+    // Named only if there is one. Every model on the list has its own pool, so
+    // pointing at another is genuinely useful advice — but the list is one
+    // model long today, and inviting someone to "try the other model" when
+    // there is no other model sends them looking for a button that is not
+    // there. Then the only honest advice left is to wait, which is also the
+    // advice that works. See imageModels.ts.
+    const other = IMAGE_MODELS.find((entry) => entry.key !== model.key);
 
     return json(
       {
         error: exhausted
-          ? `${model.label} has no quota left for now — wait, or try ${other?.label ?? 'the other model'}, which has its own allowance.`
+          ? other
+            ? `${model.label} has no quota left for now — wait, or try ${other.label}, which has its own allowance.`
+            : `${model.label} has no quota left for now, and it is the only image model here — wait a minute or two and try again. Nothing was billed.`
           : reason
             ? `${model.label} declined: ${reason}`
             : `${model.label} could not produce that image`,

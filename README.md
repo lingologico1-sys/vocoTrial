@@ -9,8 +9,10 @@ Pages, on **Gemini Live** over a relayed WebSocket.
 > picker, `/api/session/*`, and seven settings that were OpenAI's alone —
 > speaking rate, the two VAD detectors and their sub-fields, the input
 > transcription model and its language hint, and noise reduction. `git log` is
-> the reference if it comes back. `OPENAI_API_KEY` is still live and still
-> needed: face-kit image generation uses it.
+> the reference if it comes back. **`OPENAI_API_KEY` is now read by nothing.**
+> Face-kit image generation was its last consumer and has since gone Gemini-only
+> too — see the foot of [src/facekit/imageModels.ts](src/facekit/imageModels.ts)
+> — so the secret can be deleted from the dashboard whenever convenient.
 
 ## How it fits together
 
@@ -29,7 +31,7 @@ surface is a property of each model in
 | --- | --- | --- |
 | `gemini-live-2.5-flash-native-audio` | Vertex (GCP billing) | GA there; the native-audio dialect |
 | `gemini-3.1-flash-live-preview` | AI Studio | **no Vertex build in any region** |
-| face-kit image models | Vertex | both confirmed generating |
+| `gemini-3-pro-image` (face kit) | Vertex | confirmed generating; on the **global** endpoint only |
 
 Vertex runs in **express mode**, which is what makes it usable from a Worker at
 all: it takes an API key and infers the project, with no OAuth exchange to sign.
@@ -228,7 +230,6 @@ gates the build.
 3. **Settings → Variables and Secrets**, add these **Secrets** (encrypted, not
    plain text) to Production *and* Preview:
    - `SITE_PASSWORD`
-   - `OPENAI_API_KEY` (face-kit image generation only — no voice path reads it)
    - `GEMINI_API_KEY` (Vertex AI key — see below, it is a particular kind)
    - `GEMINI_API_KEY2` (optional fallback Vertex key)
    - `GOOGLE_API_KEY` (ordinary AI Studio key, for models with no Vertex build)

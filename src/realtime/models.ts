@@ -10,9 +10,10 @@
  * Every model here is Gemini Live. There used to be a `provider` field and a
  * union to go with it, because OpenAI Realtime was offered beside these; that
  * path is gone and a one-member union is a worse description of the world than
- * no union at all. The face-kit image models keep their own provider field —
- * see src/facekit/imageModels.ts — and are unaffected: image generation still
- * runs on both.
+ * no union at all. The face-kit image models outlasted that removal by a
+ * while and have since followed it: src/facekit/imageModels.ts dropped its own
+ * provider field for the same reason, and nothing in this project calls OpenAI
+ * any more.
  *
  * Deliberately free of imports: functions/ compiles against workers-types with
  * no DOM lib, so this has to stay pure data.

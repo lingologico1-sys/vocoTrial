@@ -25,10 +25,13 @@ import { VERTEX_KEY_NAMES, vertexGenerateContentUrl, vertexKey } from '../_verte
  * in facekit/generate.ts, which is the only caller and never asks before its
  * first attempt.
  *
- * Gemini only. The probe is a Vertex behaviour, and OpenAI's 429 means
- * something different enough that guessing at an equivalent would be worse than
- * not answering — so an OpenAI model is refused here rather than approximated,
- * and the client leaves its retry path alone.
+ * A Vertex behaviour, and only that. It used to refuse anything else outright,
+ * because OpenAI's 429 means something different enough that guessing at an
+ * equivalent would be worse than not answering. Every model on the list is now
+ * a Vertex one, so the refusal has gone with them — but the reasoning is worth
+ * keeping for whoever adds a model from somewhere else: probe it here only if
+ * you have checked what its quota does at admission, and refuse it if you have
+ * not. An invented verdict is worse than none.
  */
 
 /** Invalid on purpose: routing and quota both answer before anyone reads it. */
@@ -47,9 +50,6 @@ export async function onRequestPost(
   const model = findImageModel(body.model);
   if (!model) {
     return json({ error: `Unknown model "${body.model}"`, code: 'bad_model' }, 400);
-  }
-  if (model.provider !== 'gemini') {
-    return json({ error: 'Only Gemini models can be probed', code: 'unsupported' }, 400);
   }
 
   const key = vertexKey(env);

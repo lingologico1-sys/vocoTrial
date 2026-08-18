@@ -13,12 +13,7 @@ import {
   patchDivergence,
 } from './canvas';
 import { generateBase, generatePatch } from './generate';
-import {
-  IMAGE_MODELS,
-  IMAGE_RATES_READ_ON,
-  defaultImageModelKey,
-  findImageModel,
-} from './imageModels';
+import { IMAGE_MODELS, IMAGE_RATES_READ_ON, findImageModel } from './imageModels';
 import {
   KIT_FORMAT,
   browHeadroom,
@@ -233,19 +228,21 @@ const REGION_TABS: { id: BoxId; label: string }[] = [
 /**
  * The two models the page compares, and what they start as.
  *
- * Once one provider had won every slot outright, "one picker per provider"
+ * Once one family had won every slot outright, "one picker per provider"
  * stopped describing a useful comparison — the open question became which
  * *Gemini* to spend on, and the old shape could not express that. Both slots
- * choose from the whole list, so Gemini against OpenAI, or a model against
- * itself, are equally sayable.
+ * choose from the whole list, so a model against itself is as sayable as one
+ * against another. Which is just as well, because that is what the page offers
+ * today: the list is one model long, so both slots start on the same entry and
+ * the run dedupes them into a single button.
  *
- * B named Flash outright until Flash was removed for being unable to draw teeth
- * — see the note in imageModels.ts. It is derived rather than named now, which
- * is what A always was: the defaults follow the list, so removing a model from
- * the list is the whole of removing it.
+ * Both derived rather than named — what A always was, and what B became when
+ * Flash was removed for being unable to draw teeth (see imageModels.ts). The
+ * defaults follow the list, so removing a model from the list is the whole of
+ * removing it, and the day a second one lands B starts there with no edit here.
  */
-const DEFAULT_A = defaultImageModelKey('gemini');
-const DEFAULT_B = defaultImageModelKey('openai');
+const DEFAULT_A = IMAGE_MODELS[0].key;
+const DEFAULT_B = (IMAGE_MODELS[1] ?? IMAGE_MODELS[0]).key;
 
 /**
  * The ellipsis a busy button wears, carrying the attempt number once there has
@@ -1236,7 +1233,6 @@ export default function FaceKit() {
                       {IMAGE_MODELS.map((model) => (
                         <option key={model.key} value={model.key}>
                           {model.label} — {money(model.usdPerImage)}/image
-                          {model.masked ? '' : ' (no mask)'}
                         </option>
                       ))}
                     </select>
@@ -1254,8 +1250,7 @@ export default function FaceKit() {
                 <span>
                   Send the picture before the prompt.{' '}
                   <span className="text-slate-500">
-                    Gemini only — OpenAI&rsquo;s endpoint takes named fields and has no order to
-                    choose. It is a cache question: the base is identical on every generation this
+                    It is a cache question: the base is identical on every generation this
                     kit will ever run and the instruction is what changes, so this is the only
                     arrangement where the expensive half of the request can be a reusable prefix.
                     Whether it costs anything in quality is not settled here, and the comparison

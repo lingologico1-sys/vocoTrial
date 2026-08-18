@@ -9,7 +9,7 @@ import { migrate, type FaceKit } from './kit';
  * and not as a matter of taste: a kit is eight PNGs, and a PNG base64-encoded
  * is a third larger again than the bytes it carries. One kit will not fit in
  * localStorage's five megabytes, let alone the several you want while
- * comparing two providers on the same face.
+ * comparing two models on the same face.
  *
  * Two stores, and the second is a cache rather than a home. `kits` holds what
  * this browser authored; `published` holds copies of what the shared library

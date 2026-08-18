@@ -5,11 +5,10 @@ import {
   featherPatch,
   flattenBackground,
   matchTone,
-  maskFor,
   normalise,
 } from './canvas';
 import { beginRun, type RunHandle } from './runLog';
-import { findImageModel } from './imageModels';
+import { NEUTRALISE_MODEL_KEY, findImageModel } from './imageModels';
 import { chinClearance, type MouthBox } from './kit';
 import { PREAMBLE } from './slots';
 
@@ -168,10 +167,6 @@ async function post(body: unknown, signal?: AbortSignal): Promise<{ image: strin
 type Capacity = 'exhausted' | 'available' | 'unknown';
 
 async function capacityOf(modelKey: string, signal?: AbortSignal): Promise<Capacity> {
-  // OpenAI is deliberately out of scope — the probe is a Vertex behaviour and
-  // its 429 means something else. Asking would get a 400 and prove nothing.
-  if (findImageModel(modelKey)?.provider !== 'gemini') return 'unknown';
-
   try {
     const response = await fetch('/api/image/capacity', {
       method: 'POST',
@@ -388,17 +383,12 @@ export async function generatePatch({
     // no-op otherwise. The kit keeps the cut-out either way — see the clip
     // below, which is what actually holds that promise.
     const flattened = await flattenBackground(base);
-    // Sent only where it means something. A provider steered by prompt alone
-    // is not handicapped by its absence, because the crop is what actually
-    // protects the rest of the face either way.
-    const mask = model.masked ? maskFor(box) : undefined;
 
     const { image, usd, cached } = await postWithRetry(
       {
         model: modelKey,
         prompt: `${PREAMBLE} ${instruction}`,
         image: flattened,
-        mask,
         imageFirst,
       },
       run,
@@ -439,12 +429,17 @@ export async function generatePatch({
  * The one generation that is allowed to change the whole frame, because its job
  * is to give every later patch something sane to sit on: a closed, neutral
  * mouth. Everything downstream treats whatever this returns as the original.
+ *
+ * Which is why it will only run on one model, and throws rather than
+ * substituting when asked for another. Refusing is the point: a base quietly
+ * generated on the cheaper of two models would be indistinguishable from one
+ * generated on the right model until a slot drawn over it looked wrong, and by
+ * then the kit has been paid for. See NEUTRALISE_MODEL_KEY in imageModels.ts.
  */
 export async function generateBase({
   modelKey,
   base,
   instruction,
-  box,
   label,
   imageFirst,
   signal,
@@ -452,18 +447,22 @@ export async function generateBase({
 }: GenerateArgs): Promise<{ base: string; usd: number }> {
   const model = findImageModel(modelKey);
   if (!model) throw new Error(`Unknown image model "${modelKey}"`);
+  if (modelKey !== NEUTRALISE_MODEL_KEY) {
+    const only = findImageModel(NEUTRALISE_MODEL_KEY);
+    throw new Error(
+      `The base can only be neutralised on ${only?.label ?? NEUTRALISE_MODEL_KEY}, not ${model.label}`,
+    );
+  }
 
   const run = beginRun(label, model.label);
   try {
     const flattened = await flattenBackground(base);
-    const mask = model.masked ? maskFor(box) : undefined;
 
     const { image, usd } = await postWithRetry(
       {
         model: modelKey,
         prompt: `${PREAMBLE} ${instruction}`,
         image: flattened,
-        mask,
         imageFirst,
       },
       run,
