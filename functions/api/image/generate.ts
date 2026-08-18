@@ -41,6 +41,7 @@ interface GenerateBody {
   prompt?: unknown;
   image?: unknown;
   mask?: unknown;
+  imageFirst?: unknown;
 }
 
 /** Strips the `data:image/png;base64,` prefix a canvas export carries. */
@@ -57,7 +58,7 @@ function toBytes(base64: string): Uint8Array {
 }
 
 type Attempt =
-  | { ok: true; image: string }
+  | { ok: true; image: string; cached?: number }
   | { ok: false; status: number; detail: string; reason?: string; retryAfterMs?: number };
 
 /**
@@ -192,19 +193,37 @@ async function generateGemini(
   key: string,
   prompt: string,
   image: string,
+  imageFirst: boolean,
 ): Promise<Attempt> {
+  /*
+   * WHICH PART GOES FIRST, and why it is a switch rather than a decision.
+   *
+   * Implicit caching keys on a matching prefix, and the base image is the one
+   * thing every generation on a kit sends identically — nine slots, one
+   * portrait, a different instruction each time. Image first makes that
+   * portrait a shared prefix and the instruction the only thing that varies,
+   * which is the arrangement where a cache can help; text first, as this route
+   * has always sent, puts the varying part in front and forecloses it.
+   *
+   * Not simply switched over, because these prompts are tuned and this reorders
+   * the turn they are read in. The page can send it both ways and put the two
+   * results side by side, which is the only argument this repo accepts about a
+   * generated picture. See `imageFirst` in FaceKit.tsx.
+   *
+   * Gemini only. OpenAI's edit endpoint takes multipart with named fields, so
+   * there is no order to choose and nothing here that would carry over.
+   */
+  const parts = imageFirst
+    ? [{ inline_data: { mime_type: 'image/png', data: image } }, { text: prompt }]
+    : [{ text: prompt }, { inline_data: { mime_type: 'image/png', data: image } }];
+
   const upstream = await fetch(
     vertexGenerateContentUrl(model.id),
     {
       method: 'POST',
       headers: { 'x-goog-api-key': key, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        contents: [
-          {
-            role: 'user',
-            parts: [{ text: prompt }, { inline_data: { mime_type: 'image/png', data: image } }],
-          },
-        ],
+        contents: [{ role: 'user', parts }],
         generationConfig: { responseModalities: ['IMAGE'] },
       }),
     },
@@ -238,6 +257,8 @@ async function generateGemini(
 
   const body = (await upstream.json()) as {
     promptFeedback?: { blockReason?: string };
+    /** Reported so the ordering above can be judged on evidence, not on theory. */
+    usageMetadata?: { cachedContentTokenCount?: number };
     candidates?: {
       finishReason?: string;
       content?: { parts?: { text?: string; inlineData?: { data?: string } }[] };
@@ -260,7 +281,11 @@ async function generateGemini(
     return { ok: false, status: 502, detail: JSON.stringify(body).slice(0, 2000), reason };
   }
 
-  return { ok: true, image: part.inlineData.data };
+  return {
+    ok: true,
+    image: part.inlineData.data,
+    cached: body.usageMetadata?.cachedContentTokenCount ?? 0,
+  };
 }
 
 export async function onRequestPost(
@@ -321,7 +346,7 @@ export async function onRequestPost(
             toBytes(image),
             typeof body.mask === 'string' && body.mask ? toBytes(rawBase64(body.mask)) : null,
           )
-        : await generateGemini(model, key, prompt, image);
+        : await generateGemini(model, key, prompt, image, body.imageFirst === true);
   } catch (error) {
     console.error('image generate threw', model.id, error);
     return json({ error: 'The image request failed', code: 'upstream' }, 502);
@@ -363,6 +388,14 @@ export async function onRequestPost(
   }
 
   // The rate travels with the image so the page can total a kit as it is built,
-  // rather than the browser holding a second copy of the price list.
-  return json({ image: attempt.image, model: model.key, usd: model.usdPerImage });
+  // rather than the browser holding a second copy of the price list. `cached` is
+  // reported and not priced: `usdPerImage` is a flat per-image list figure that
+  // already excludes the input's own tokens, so there is nothing here for a
+  // cache discount to come off. It is on the wire to be read, not to be billed.
+  return json({
+    image: attempt.image,
+    model: model.key,
+    usd: model.usdPerImage,
+    cached: attempt.cached ?? 0,
+  });
 }

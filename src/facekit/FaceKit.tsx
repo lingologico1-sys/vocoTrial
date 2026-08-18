@@ -68,7 +68,16 @@ import { download, zip } from './zip';
  * previews, so nothing you approve here can look better than what ships.
  */
 
-type Candidate = { modelKey: string; patch: string; full: string; usd: number };
+type Candidate = {
+  modelKey: string;
+  patch: string;
+  full: string;
+  usd: number;
+  /** Which way round the turn was sent. See `imageFirst` in the component. */
+  imageFirst: boolean;
+  /** Tokens the provider served from cache, as reported. Gemini only. */
+  cached: number;
+};
 
 /** The poses that get compared against each other. Eyes have nothing to collide with. */
 const MOUTH_SLOTS = SLOTS.filter((entry) => entry.region === 'mouth');
@@ -272,6 +281,22 @@ export default function FaceKit() {
   const [error, setError] = useState<string | null>(null);
   const [modelA, setModelA] = useState(DEFAULT_A);
   const [modelB, setModelB] = useState(DEFAULT_B);
+  /**
+   * Whether the portrait is sent before the instruction rather than after.
+   *
+   * Off by default, which is not a preference: off is the order every kit in
+   * this repo was generated under, and a comparison whose control has quietly
+   * moved is not a comparison. It is here to be switched on for one slot, next
+   * to the same slot generated with it off — see the note under the toggle.
+   *
+   * The reason to want it on is caching. The base image is identical across
+   * every generation on a kit and the instruction is what varies, so image
+   * first is the only arrangement in which the expensive half is a reusable
+   * prefix. Whether Vertex actually caches it is reported per candidate rather
+   * than assumed, and whether it costs anything in quality is what the
+   * thumbnails and the percentage are for.
+   */
+  const [imageFirst, setImageFirst] = useState(false);
   const [assembled, setAssembled] = useState<string | null>(null);
   /**
    * How far every mouth on the page sits from every mouth in the kit.
@@ -294,6 +319,22 @@ export default function FaceKit() {
    * question about a number, so the number is what gets stored.
    */
   const [distances, setDistances] = useState<Record<string, Distance[]>>({});
+
+  /**
+   * How far each candidate sits from the first one generated for its own slot.
+   *
+   * Separate from `distances`, which deliberately never measures a candidate
+   * against its own slot — two mouths that are supposed to be the same pose have
+   * nothing to say to each other there, and a caption reading "same as Rest" on
+   * a candidate for Rest would be noise. This is the case where that comparison
+   * is the entire question: run one slot twice under different conditions and
+   * the number between the two attempts is the answer.
+   *
+   * Against the first rather than pairwise, because the first is the control.
+   * Whatever was generated before you changed anything is the thing every later
+   * attempt is being asked to differ from.
+   */
+  const [fromFirst, setFromFirst] = useState<Record<string, number>>({});
   /**
    * Whether the kit holds work that has not reached the store.
    *
@@ -436,12 +477,31 @@ export default function FaceKit() {
       }
 
       if (live) setDistances(found);
+
+      // Cheap by comparison — one measurement per extra candidate, against a
+      // patch already in memory — so it rides along in the same pass rather
+      // than earning an effect and a debounce of its own.
+      const within: Record<string, number> = {};
+      for (const entry of SLOTS) {
+        const options = candidates[entry.id] ?? [];
+        const first = options[0];
+        if (!first) continue;
+        const region = kit?.boxes[entry.region];
+        if (!region) continue;
+        for (let index = 1; index < options.length; index++) {
+          within[twinKey(entry.id, index)] =
+            options[index].patch === first.patch
+              ? 0
+              : await patchDivergence(options[index].patch, first.patch, region);
+        }
+      }
+      if (live) setFromFirst(within);
     })().catch(() => undefined);
 
     return () => {
       live = false;
     };
-  }, [kit?.patches, kit?.boxes.mouth, candidates]);
+  }, [kit?.patches, kit?.boxes, kit?.boxes.mouth, candidates]);
 
   const upload = async (file: File) => {
     setError(null);
@@ -479,12 +539,17 @@ export default function FaceKit() {
         box: kit.boxes[definition.region],
         instruction: definition.prompt(kit.lashes ?? DEFAULT_LASH_STYLE),
         label: definition.label,
+        imageFirst,
         onAttempt: (attempt) => mark(key, attempt),
       });
 
+      // The ordering is recorded on the candidate rather than read off the
+      // toggle when the caption is drawn. The toggle is a live control and a
+      // thumbnail outlives it: flipping the switch after a run must not relabel
+      // the pictures already on screen as something they are not.
       setCandidates((current) => ({
         ...current,
-        [id]: [...(current[id] ?? []), { modelKey, ...result }],
+        [id]: [...(current[id] ?? []), { modelKey, imageFirst, ...result }],
       }));
       // Spent whether or not the result is kept — a rejected generation still
       // billed, and a total that only counted the keepers would be a lie in the
@@ -512,6 +577,7 @@ export default function FaceKit() {
         instruction: NEUTRALISE_BASE_PROMPT,
         box: kit.boxes.mouth,
         label: 'Neutral base',
+        imageFirst,
         onAttempt: (attempt) => mark(key, attempt),
       });
       // Patches cut from the old base no longer describe this face, so they go
@@ -1122,6 +1188,30 @@ export default function FaceKit() {
                 ))}
               </div>
 
+              <label className="flex items-start gap-2 text-xs text-slate-400">
+                <input
+                  type="checkbox"
+                  checked={imageFirst}
+                  onChange={(event) => setImageFirst(event.target.checked)}
+                  className="mt-0.5"
+                />
+                <span>
+                  Send the picture before the prompt.{' '}
+                  <span className="text-slate-500">
+                    Gemini only — OpenAI&rsquo;s endpoint takes named fields and has no order to
+                    choose. It is a cache question: the base is identical on every generation this
+                    kit will ever run and the instruction is what changes, so this is the only
+                    arrangement where the expensive half of the request can be a reusable prefix.
+                    Whether it costs anything in quality is not settled here, and the comparison
+                    has a trap in it: two attempts at one slot differ anyway, because nothing about
+                    a generation is deterministic. So run the slot <em>twice with this off</em>
+                    first — that percentage is what two attempts differ by for nothing — and only
+                    then turn it on. A third figure inside the first two says the order changed
+                    nothing; one well outside them is the finding.
+                  </span>
+                </span>
+              </label>
+
               {anyUnverified && (
                 <p className="text-xs text-amber-400/80">
                   Marked unverified: neither the model id nor the rate has yet been confirmed by a
@@ -1313,7 +1403,24 @@ export default function FaceKit() {
                             </button>
                             <figcaption className="text-[10px] text-slate-500">
                               {seen > 0 ? `${name} ${seen + 1}` : name}
+                              {candidate.imageFirst && (
+                                <span className="text-sky-400/80"> · picture first</span>
+                              )}
                             </figcaption>
+                            {/*
+                              The two numbers the comparison needs, and only on
+                              the candidates that have them. Index 0 is the
+                              control — there is nothing behind it to differ
+                              from — and a cache count of zero on a first
+                              attempt says nothing either, since there was
+                              nothing cached to hit.
+                            */}
+                            {fromFirst[twinKey(entry.id, index)] !== undefined && (
+                              <figcaption className="text-[10px] text-slate-500">
+                                {percent(fromFirst[twinKey(entry.id, index)])} from the first
+                                {candidate.cached > 0 && ` · ${candidate.cached} cached`}
+                              </figcaption>
+                            )}
                             {duplicate.length > 0 && (
                               <figcaption className="max-w-[7rem] text-[10px] text-amber-400">
                                 {sameAs(duplicate)}

@@ -29,6 +29,14 @@ export interface Generated {
   /** The provider's whole frame, kept only so the page can show its working. */
   full: string;
   usd: number;
+  /**
+   * How much of the prompt the provider served from an implicit cache, in
+   * tokens. Reported, never billed on — `usd` is a flat per-image list price
+   * that already excludes the input's tokens, so there is nothing for a cache
+   * discount to come off. It is here to answer whether sending the portrait
+   * first buys anything, which is otherwise a matter of opinion.
+   */
+  cached: number;
 }
 
 interface GenerateArgs {
@@ -47,6 +55,14 @@ interface GenerateArgs {
   instruction: string;
   /** What to call this run in the diagnostics panel. The slot's own label. */
   label: string;
+  /**
+   * Send the portrait ahead of the instruction. Gemini only — see the route.
+   *
+   * Carried as an argument rather than settled here because it is the thing
+   * being compared: the same slot, generated both ways, judged side by side on
+   * the page. Absent means the order this app has always sent.
+   */
+  imageFirst?: boolean;
   signal?: AbortSignal;
   onAttempt?: OnAttempt;
 }
@@ -103,7 +119,7 @@ export class GenerateError extends Error {
   }
 }
 
-async function post(body: unknown, signal?: AbortSignal): Promise<{ image: string; usd: number }> {
+async function post(body: unknown, signal?: AbortSignal): Promise<{ image: string; usd: number; cached: number }> {
   const response = await fetch('/api/image/generate', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -114,6 +130,7 @@ async function post(body: unknown, signal?: AbortSignal): Promise<{ image: strin
   const payload = (await response.json().catch(() => null)) as {
     image?: string;
     usd?: number;
+    cached?: number;
     error?: string;
     code?: string;
     reason?: string;
@@ -132,7 +149,11 @@ async function post(body: unknown, signal?: AbortSignal): Promise<{ image: strin
     );
   }
 
-  return { image: `data:image/png;base64,${payload.image}`, usd: payload.usd ?? 0 };
+  return {
+    image: `data:image/png;base64,${payload.image}`,
+    usd: payload.usd ?? 0,
+    cached: payload.cached ?? 0,
+  };
 }
 
 /**
@@ -262,7 +283,7 @@ async function postWithRetry(
   modelKey: string,
   signal?: AbortSignal,
   onAttempt?: OnAttempt,
-): Promise<{ image: string; usd: number }> {
+): Promise<{ image: string; usd: number; cached: number }> {
   // The schedule is chosen from the first failure and then kept, so a run does
   // not flip between timescales as the reason wobbles between attempts.
   let schedule: number[] = RETRY_DELAYS_MS;
@@ -351,6 +372,7 @@ export async function generatePatch({
   box,
   instruction,
   label,
+  imageFirst,
   signal,
   onAttempt,
 }: GenerateArgs): Promise<Generated> {
@@ -371,12 +393,13 @@ export async function generatePatch({
     // protects the rest of the face either way.
     const mask = model.masked ? maskFor(box) : undefined;
 
-    const { image, usd } = await postWithRetry(
+    const { image, usd, cached } = await postWithRetry(
       {
         model: modelKey,
         prompt: `${PREAMBLE} ${instruction}`,
         image: flattened,
         mask,
+        imageFirst,
       },
       run,
       modelKey,
@@ -400,6 +423,7 @@ export async function generatePatch({
       patch: await featherPatch(matched, box, undefined, chinClearance(box)),
       full: await normalise(image),
       usd,
+      cached,
     };
     run.succeeded(usd);
     return generated;
@@ -422,6 +446,7 @@ export async function generateBase({
   instruction,
   box,
   label,
+  imageFirst,
   signal,
   onAttempt,
 }: GenerateArgs): Promise<{ base: string; usd: number }> {
@@ -439,6 +464,7 @@ export async function generateBase({
         prompt: `${PREAMBLE} ${instruction}`,
         image: flattened,
         mask,
+        imageFirst,
       },
       run,
       modelKey,
