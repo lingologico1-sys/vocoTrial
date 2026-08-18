@@ -42,17 +42,16 @@ import {
   type BoxId,
   type SlotId,
 } from './slots';
-import { fetchSource, listPublished, publishKit, unpublishFace } from './library';
-import type { PublishedFace } from './published';
 import {
-  deleteKit,
-  listKits,
-  publishedKit,
-  saveKit,
-  selectKit,
-  selectedKit,
-  type KitRef,
-} from './store';
+  deleteFace,
+  fetchLegacyOriginal,
+  fetchOriginal,
+  listPublished,
+  publishKit,
+  setReady,
+} from './library';
+import type { PublishedFace } from './published';
+import { publishedKit, selectFace, selectedFace } from './store';
 import { download, zip } from './zip';
 
 /**
@@ -275,8 +274,18 @@ function money(usd: number): string {
 
 export default function FaceKit() {
   const [kit, setKit] = useState<Kit | null>(null);
-  const [saved, setSaved] = useState<Kit[]>([]);
-  const [inUse, setInUse] = useState<KitRef | null>(selectedKit());
+  const [inUse, setInUse] = useState<string | null>(selectedFace());
+  /**
+   * Whether the open kit is finished, as it will be saved.
+   *
+   * Session state that mirrors one field of the library's index entry rather
+   * than anything in the kit, and deliberately so: `ready` is a fact about a
+   * face's place in the library, not about its artwork, and putting it on the
+   * kit would mean it rode into the zip export and the bundled manifest, where
+   * it would mean nothing. Set when a face is opened, false for a fresh
+   * portrait, and sent with every save.
+   */
+  const [ready, setReadyFlag] = useState(false);
   const [region, setRegion] = useState<BoxId>('mouth');
   const [candidates, setCandidates] = useState<Partial<Record<SlotId, Candidate[]>>>({});
   /**
@@ -375,25 +384,18 @@ export default function FaceKit() {
    */
   const [following, setFollowing] = useState<Partial<Record<BoxId, boolean>>>({});
 
-  const refresh = useCallback(() => {
-    listKits()
-      .then(setSaved)
-      .catch(() => setSaved([]));
-  }, []);
-
-  useEffect(refresh, [refresh]);
-
   /**
-   * What the shared library holds, which is not what this browser holds.
+   * The library, which is now the only list of faces there is.
    *
-   * Kept separate from `saved` rather than merged into one list, because the
-   * two answer different questions — "what can I edit" and "what can anyone
-   * else see" — and a face can easily be in one and not the other. A kit
-   * deleted here stays published until it is unpublished; a face published from
-   * another machine is not editable from this one at all.
+   * There used to be a second one beside it — the kits this browser had
+   * authored, in IndexedDB — and the two answered different questions: "what
+   * can I edit" against "what can anyone else see". They are the same question
+   * now. A kit reaches the bucket on its first save and is editable from any
+   * browser signed in to the site, so a face this page can open and a face
+   * liveTrial can wear are one list with one entry each.
    */
   const [published, setPublished] = useState<PublishedFace[]>([]);
-  const [publishing, setPublishing] = useState(false);
+  const [saving, setSaving] = useState(false);
   /** Which library face is being fetched, if one is. Its id, so the strip can say so. */
   const [opening, setOpening] = useState<string | null>(null);
 
@@ -408,43 +410,56 @@ export default function FaceKit() {
   /**
    * Opens a library face for editing, on a browser that need not have authored it.
    *
-   * The authoring copy is what is wanted — it carries `original`, so "start
-   * again from the original" still means something — and it is the larger of
-   * the two objects, which is why it is fetched on this click rather than
-   * riding along in the listing.
+   * Two fetches, and only one of them usually costs anything. The kit comes
+   * through publishedKit, which is the same cache-checked read wearing a face
+   * makes — so a browser that already wore this one pays nothing for it here.
+   * The portrait comes separately because it lives separately: it is half the
+   * bytes, useless to anything that only wears the face, and needed on this
+   * click alone. See originalKey in published.ts.
    *
-   * Falling back to the wearable copy is not a degraded mode so much as an
-   * older one: a face published before the sources/ prefix existed has no
-   * authoring copy and never will until it is republished, which this very
-   * edit will do. Everything works except starting over from the portrait.
+   * A face the listing says has no portrait is one saved before the originals/
+   * split, and there are two of those. The ones from the window when the whole
+   * authoring copy went to sources/ still have their portrait inside it, and
+   * fetchLegacyOriginal is what gets it back; the ones older than that never
+   * had one. Either way this edit's save writes whatever was recovered under
+   * originals/, so the detour happens once per face and then stops.
    *
-   * Nothing is written to this browser's store here. The kit lands in the
-   * editor and reaches IndexedDB the same way an uploaded portrait does — on
-   * the first save — so opening a face to look at it leaves no copy behind.
+   * Nothing is written to this browser's store here beyond the read-through
+   * cache. Opening a face to look at it leaves nothing behind that wearing it
+   * would not have.
    */
-  const openPublished = useCallback(async (id: string) => {
-    setError(null);
-    setOpening(id);
-    try {
-      const source = (await fetchSource(id)) ?? (await publishedKit(id));
-      if (!source) {
-        setError('That face is in the listing but its artwork is missing');
-        return;
+  const openPublished = useCallback(
+    async (face: PublishedFace) => {
+      setError(null);
+      setOpening(face.id);
+      try {
+        const kit = await publishedKit(face.id);
+        if (!kit) {
+          setError('That face is in the listing but its artwork is missing');
+          return;
+        }
+        const original = face.hasOriginal
+          ? await fetchOriginal(face.id)
+          : await fetchLegacyOriginal(face.id);
+        setKit(original ? { ...kit, original } : kit);
+        setReadyFlag(face.ready !== false);
+        setDirty(false);
+        setCandidates({});
+        // A kit arriving from the library has boxes but no history of how they
+        // got there, so every box goes back to being judged on size.
+        setFollowing({});
+        // The editor is at the top of a page whose library sits at the bottom,
+        // and a click that changes only off-screen state is the complaint this
+        // whole button exists to answer.
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : 'That face could not be opened');
+      } finally {
+        setOpening(null);
       }
-      setKit(source);
-      // As Saved kits: a kit arriving from elsewhere has boxes but no history
-      // of how they got there, so every box goes back to being judged on size.
-      setFollowing({});
-      // The editor is at the top of a page whose library sits at the bottom,
-      // and a click that changes only off-screen state is the complaint this
-      // whole button exists to answer.
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'That face could not be opened');
-    } finally {
-      setOpening(null);
-    }
-  }, []);
+    },
+    [],
+  );
 
   // Deduplicated: picking the same model in both slots should offer one button,
   // not two identical ones side by side.
@@ -564,6 +579,9 @@ export default function FaceKit() {
       setCandidates({});
       setFollowing({});
       setDirty(false);
+      // A portrait that has just arrived has no mouths at all, so there is one
+      // honest answer to whether it is fit to wear.
+      setReadyFlag(false);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'That file could not be read');
     }
@@ -847,45 +865,59 @@ export default function FaceKit() {
     setDirty(false);
   };
 
-  const store = async () => {
-    if (!kit) return;
+  /**
+   * Saves the open kit to the library, which is the only save there is.
+   *
+   * This used to be two buttons — one writing IndexedDB, one copying the result
+   * to R2 — and the pair was a lie by the end: the local copy was the one that
+   * could not be reached from a second machine, so calling it "saved" promised
+   * something it could not keep. One button, one place, and the price of it is
+   * that a save is an upload rather than a write to disk. See publishKit for
+   * what that costs and what it does not re-send.
+   *
+   * The entry that comes back is folded into the listing rather than triggering
+   * a re-fetch of it. It is the entry the far side just wrote, so it is the
+   * authority — and it carries `hasOriginal`, which the *next* save reads to
+   * decide whether the portrait needs to go up again. Re-listing to learn what
+   * the response already said would be a request for nothing.
+   */
+  const save = async (): Promise<boolean> => {
+    if (!kit) return false;
+    setError(null);
+    setSaving(true);
     try {
-      await saveKit(kit);
+      const entry = published.find((face) => face.id === kit.id);
+      const face = await publishKit(kit, {
+        ready,
+        hasOriginal: entry?.hasOriginal === true,
+      });
+      setPublished((current) =>
+        [face, ...current.filter((other) => other.id !== face.id)].sort(
+          (a, b) => b.createdAt - a.createdAt,
+        ),
+      );
       setDirty(false);
-      refresh();
+      return true;
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'That kit could not be saved');
+      return false;
+    } finally {
+      setSaving(false);
     }
-  };
-
-  const use = async () => {
-    if (!kit) return;
-    await store();
-    const ref: KitRef = { source: 'local', id: kit.id };
-    selectKit(ref);
-    setInUse(ref);
   };
 
   /**
-   * Saves, then copies the kit into the shared library.
+   * Saves, and puts the face on in liveTrial.
    *
-   * Saved first on purpose: publishing artwork that is not also kept locally
-   * would leave the only editable copy in the page, one reload from gone. The
-   * save is the cheap half and the one that cannot be redone from the far side.
+   * Only on a save that worked. Pointing the live page at a face the library
+   * refused would leave it wearing an id nothing can serve, which is the one
+   * failure mode activeKit deliberately does not paper over.
    */
-  const share = async () => {
+  const use = async () => {
     if (!kit) return;
-    setError(null);
-    setPublishing(true);
-    try {
-      await store();
-      await publishKit(kit);
-      refreshLibrary();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'That kit could not be published');
-    } finally {
-      setPublishing(false);
-    }
+    if (!(await save())) return;
+    selectFace(kit.id);
+    setInUse(kit.id);
   };
 
   /**
@@ -1016,16 +1048,16 @@ export default function FaceKit() {
                 also the easiest to change and then close without saving.
               */}
               {/*
-                Three states, not two: a kit that has never reached the store is
-                not the same as one saved and untouched since, and calling the
-                first "saved" would be the indicator itself telling a lie.
+                Three states, not two: a kit that has never reached the library
+                is not the same as one saved and untouched since, and calling
+                the first "saved" would be the indicator itself telling a lie.
               */}
               <span className="text-xs text-slate-500">
-                {!saved.some((entry) => entry.id === kit.id)
+                {!published.some((face) => face.id === kit.id)
                   ? 'not saved yet'
                   : dirty
                     ? 'unsaved changes'
-                    : 'saved'}
+                    : 'saved to library'}
               </span>
             </div>
 
@@ -1498,30 +1530,38 @@ export default function FaceKit() {
               <button
                 type="button"
                 onClick={() => void use()}
-                className="rounded-lg bg-sky-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-sky-500"
+                disabled={saving}
+                className="rounded-lg bg-sky-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-sky-500 disabled:opacity-40"
               >
                 Save and wear in liveTrial
               </button>
               <button
                 type="button"
-                onClick={() => void store()}
-                className="rounded-lg border border-slate-700 px-3 py-1.5 text-sm text-slate-300 hover:border-slate-500"
-              >
-                Save
-              </button>
-              <button
-                type="button"
-                onClick={() => void share()}
-                disabled={publishing}
-                title="Copies this kit to the shared library, so a browser that never authored it can wear it. Publishing again replaces the shared copy."
+                onClick={() => void save()}
+                disabled={saving}
+                title="Writes this kit to the shared library, which is where it lives. Any browser signed in to this site can then open or wear it."
                 className="rounded-lg border border-slate-700 px-3 py-1.5 text-sm text-slate-300 hover:border-slate-500 disabled:opacity-40"
               >
-                {publishing
-                  ? 'Publishing…'
-                  : published.some((face) => face.id === kit.id)
-                    ? 'Republish to library'
-                    : 'Publish to library'}
+                {saving ? 'Saving…' : 'Save to library'}
               </button>
+              {/*
+                Next to the save buttons rather than up by the name, because it
+                is read at the same moment they are pressed: this is the flag
+                that decides whether the thing being saved turns up in front of
+                a class, and it goes up with the save rather than separately.
+              */}
+              <label
+                title="Until this is ticked the face is a draft — saved, editable from anywhere, and kept out of liveTrial's picker."
+                className="flex items-center gap-1.5 text-sm text-slate-400"
+              >
+                <input
+                  type="checkbox"
+                  checked={ready}
+                  onChange={(event) => setReadyFlag(event.target.checked)}
+                  className="h-3.5 w-3.5 rounded border-slate-700 bg-slate-900"
+                />
+                Ready to wear
+              </label>
               <button
                 type="button"
                 onClick={exportKit}
@@ -1542,7 +1582,7 @@ export default function FaceKit() {
               <button
                 type="button"
                 onClick={close}
-                title="Returns to the upload screen. Saved kits are not affected."
+                title="Returns to the upload screen. The library is not affected."
                 className="ml-auto text-xs text-slate-500 underline-offset-4 hover:underline"
               >
                 close kit
@@ -1551,109 +1591,120 @@ export default function FaceKit() {
           </>
         )}
 
-        {saved.length > 0 && (
-          <section className="space-y-2 border-t border-slate-800 pt-4">
-            <h2 className="text-sm font-medium text-slate-300">Saved kits</h2>
-            <ul className="flex flex-wrap gap-3">
-              {saved.map((entry) => (
-                <li key={entry.id} className="space-y-1 text-center">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setKit(entry);
-                      // A kit arriving from the store has boxes but no history
-                      // of how they got there, so every box goes back to being
-                      // judged on its size alone.
-                      setFollowing({});
-                    }}
-                    title="Open"
-                  >
-                    <img
-                      src={entry.base}
-                      alt=""
-                      className={`h-24 w-24 rounded-lg border object-cover ${
-                        inUse?.source === 'local' && inUse.id === entry.id
-                          ? 'border-sky-500'
-                          : 'border-slate-800 hover:border-slate-600'
-                      }`}
-                    />
-                  </button>
-                  <p className="max-w-24 truncate text-[11px] text-slate-400">{entry.name}</p>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      void deleteKit(entry.id).then(() => {
-                        if (inUse?.source === 'local' && inUse.id === entry.id) {
-                          selectKit(null);
-                          setInUse(null);
-                        }
-                        refresh();
-                      })
-                    }
-                    className="text-[10px] text-slate-600 underline-offset-4 hover:underline"
-                  >
-                    delete
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </section>
-        )}
-
         {published.length > 0 && (
           <section className="space-y-2 border-t border-slate-800 pt-4">
             <h2 className="text-sm font-medium text-slate-300">Shared library</h2>
             <p className="max-w-prose text-xs text-slate-500">
-              Published faces, readable from any browser signed in to this site. This is the
-              list liveTrial's picker offers. Tap one to open it for editing — the artwork
-              comes back from the library, so it works on a laptop that never authored it.
-              Republish when you are done. Unpublishing removes the shared copy and leaves
-              the kit in this browser alone.
+              Every face there is, readable from any browser signed in to this site. Tap one
+              to open it for editing — the artwork comes back from the library, so it works
+              on a laptop that never authored it. A face stays a draft, and out of
+              liveTrial&apos;s picker, until it is marked ready.
             </p>
             <ul className="flex flex-wrap gap-3">
-              {published.map((face) => (
-                <li key={face.id} className="space-y-1 text-center">
-                  {/* A button, since the authoring copy came up with the face.
-                      What opens is the library's kit, not this browser's — the
-                      two share an id and only one of them is the shared one. */}
-                  <button
-                    type="button"
-                    onClick={() => void openPublished(face.id)}
-                    disabled={opening !== null}
-                    title="Open this face for editing. Republish when you are done to replace the shared copy."
-                    className="disabled:cursor-wait"
-                  >
-                    <img
-                      src={face.thumb}
-                      alt=""
-                      className={`h-24 w-24 rounded-lg border object-cover ${
-                        opening === face.id ? 'animate-pulse ' : ''
-                      }${
-                        inUse?.source === 'published' && inUse.id === face.id
-                          ? 'border-sky-500'
-                          : 'border-slate-800 hover:border-slate-600'
+              {published.map((face) => {
+                const draft = face.ready === false;
+                return (
+                  <li key={face.id} className="space-y-1 text-center">
+                    <button
+                      type="button"
+                      onClick={() => void openPublished(face)}
+                      disabled={opening !== null}
+                      title="Open this face for editing. Save when you are done to replace what the library holds."
+                      className="disabled:cursor-wait"
+                    >
+                      <img
+                        src={face.thumb}
+                        alt=""
+                        className={`h-24 w-24 rounded-lg border object-cover ${
+                          opening === face.id ? 'animate-pulse ' : ''
+                        }${
+                          inUse === face.id
+                            ? 'border-sky-500'
+                            : 'border-slate-800 hover:border-slate-600'
+                        } ${draft ? 'opacity-60' : ''}`}
+                      />
+                    </button>
+                    <p className="max-w-24 truncate text-[11px] text-slate-400">{face.name}</p>
+                    {/*
+                      A link rather than a checkbox, and it writes straight to
+                      the index without touching the artwork — see ready.ts.
+                      Routing it through a save would mean re-uploading a kit to
+                      change one boolean, which is the difference between this
+                      click and a minute of waiting.
+                    */}
+                    <button
+                      type="button"
+                      onClick={() =>
+                        void setReady(face.id, draft)
+                          .then(() => {
+                            setPublished((current) =>
+                              current.map((other) =>
+                                other.id === face.id ? { ...other, ready: draft } : other,
+                              ),
+                            );
+                            // The open kit and its tile are the same face; letting
+                            // the checkbox disagree with the badge would make the
+                            // next save silently undo this click.
+                            if (kit?.id === face.id) setReadyFlag(draft);
+                          })
+                          .catch((cause: unknown) =>
+                            setError(
+                              cause instanceof Error ? cause.message : 'That face could not be marked',
+                            ),
+                          )
+                      }
+                      title={
+                        draft
+                          ? 'Marks this face ready, so liveTrial offers it'
+                          : 'Puts this face back to a draft, out of liveTrial’s picker'
+                      }
+                      className={`text-[10px] underline-offset-4 hover:underline ${
+                        draft ? 'text-amber-500' : 'text-slate-600'
                       }`}
-                    />
-                  </button>
-                  <p className="max-w-24 truncate text-[11px] text-slate-400">{face.name}</p>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      void unpublishFace(face.id)
-                        .then(refreshLibrary)
-                        .catch((cause: unknown) =>
-                          setError(
-                            cause instanceof Error ? cause.message : 'That face could not be removed',
-                          ),
-                        )
-                    }
-                    title="Removes the shared copy. The kit in this browser is untouched."
-                    className="text-[10px] text-slate-600 underline-offset-4 hover:underline"
-                  >
-                    unpublish
-                  </button>
-                </li>
-              ))}
+                    >
+                      {draft ? 'draft · mark ready' : 'ready · make draft'}
+                    </button>
+                    <br />
+                    {/*
+                      This deletes the artwork. It used to remove a shared copy
+                      and leave the authored kit in this browser, which is why it
+                      was a bare link and said so; there is no second copy now,
+                      so it asks first and names what is going.
+                    */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (
+                          !window.confirm(
+                            `Delete ${face.name}? The library is the only place this kit lives, so its artwork goes with it.`,
+                          )
+                        ) {
+                          return;
+                        }
+                        void deleteFace(face.id)
+                          .then(() => {
+                            setPublished((current) =>
+                              current.filter((other) => other.id !== face.id),
+                            );
+                            if (inUse === face.id) {
+                              selectFace(null);
+                              setInUse(null);
+                            }
+                          })
+                          .catch((cause: unknown) =>
+                            setError(
+                              cause instanceof Error ? cause.message : 'That face could not be deleted',
+                            ),
+                          );
+                      }}
+                      title="Deletes this face and its artwork, everywhere"
+                      className="text-[10px] text-slate-600 underline-offset-4 hover:underline"
+                    >
+                      delete
+                    </button>
+                  </li>
+                );
+              })}
             </ul>
           </section>
         )}

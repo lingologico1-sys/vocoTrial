@@ -12,7 +12,7 @@ import { hasPersona } from '../facekit/persona';
 import { loadBundledKit } from '../facekit/bundled';
 import { listPublished } from '../facekit/library';
 import type { PublishedFace } from '../facekit/published';
-import { activeKit, publishedKit, selectKit, selectedKit, type KitRef } from '../facekit/store';
+import { activeKit, publishedKit, selectFace, selectedFace } from '../facekit/store';
 import Stage from './Stage';
 import { RevealQueue } from './reveal';
 import {
@@ -368,8 +368,8 @@ export default function LiveTrial() {
    * that can change it. Nothing polls: a kit authored on /facekit is reached by
    * a link that reloads this page, and a face published from another machine
    * cannot appear mid-session either. Absent — nothing made, or the selection
-   * unpublished or deleted — leaves the drawn placeholder rather than an empty
-   * head.
+   * deleted from the library — leaves the drawn placeholder rather than an
+   * empty head.
    */
   const [kit, setKit] = useState<FaceKit | null>(null);
 
@@ -385,7 +385,7 @@ export default function LiveTrial() {
    */
   const [faces, setFaces] = useState<PublishedFace[]>([]);
   const [bundled, setBundled] = useState<FaceKit | null>(null);
-  const [chosen, setChosen] = useState<KitRef | null>(selectedKit);
+  const [chosen, setChosen] = useState<string | null>(selectedFace);
   const [swapping, setSwapping] = useState(false);
 
   /**
@@ -447,12 +447,12 @@ export default function LiveTrial() {
    * The picker is closed while a call is up, so nothing here has to reason
    * about swapping artwork out from under a face that is mid-sentence.
    */
-  const wear = useCallback(async (ref: KitRef | null) => {
+  const wear = useCallback(async (id: string | null) => {
     setSwapping(true);
     try {
-      const next = ref === null ? await loadBundledKit() : await publishedKit(ref.id);
-      selectKit(ref);
-      setChosen(ref);
+      const next = id === null ? await loadBundledKit() : await publishedKit(id);
+      selectFace(id);
+      setChosen(id);
       setKit(next);
       // Changing face is the one moment a suggested voice should win. The pick
       // being overwritten was made for the face being taken off, and the
@@ -467,6 +467,27 @@ export default function LiveTrial() {
       setSwapping(false);
     }
   }, []);
+
+  /**
+   * The faces this picker offers: the finished ones, plus whichever is on.
+   *
+   * The filter is the whole of what `ready` does. A face reaches the library
+   * the moment it is first saved, half its mouths undrawn, because the library
+   * is the only place a kit lives — so "in the library" stopped being the same
+   * question as "fit to put in front of somebody", and this is where the two
+   * come apart.
+   *
+   * The exception is not a loophole. A draft is worn from faceKit, by the
+   * person drawing it, precisely to watch it move before calling it finished;
+   * dropping it from the strip the moment they arrived here would take the worn
+   * face off the list of faces and leave a picker with nothing highlighted,
+   * which reads as a bug rather than as a rule. It is dimmed and labelled
+   * instead, and switching away from it is what removes it.
+   */
+  const offered = useMemo(
+    () => faces.filter((face) => face.ready !== false || face.id === chosen),
+    [faces, chosen],
+  );
 
   const session = useRef<VoiceSession | null>(null);
   /** Agent words waiting for the audio that carries them. See reveal.ts. */
@@ -799,22 +820,22 @@ export default function LiveTrial() {
             two calls.
           */}
           <ul className="flex flex-wrap items-start gap-3 py-1">
-            {[null, ...faces].map((face) => {
-              const ref: KitRef | null = face && { source: 'published', id: face.id };
-              const picked = face
-                ? chosen?.source === 'published' && chosen.id === face.id
-                : chosen === null;
+            {[null, ...offered].map((face) => {
+              const picked = face ? chosen === face.id : chosen === null;
               const thumb = face ? face.thumb : bundled?.base;
+              const draft = face?.ready === false;
 
               return (
                 <li key={face?.id ?? 'default'} className="space-y-1 text-center">
                   <button
                     type="button"
                     disabled={live || busy || swapping}
-                    onClick={() => void wear(ref)}
+                    onClick={() => void wear(face?.id ?? null)}
                     title={
                       face
-                        ? `Wear ${face.name}, from the shared library`
+                        ? draft
+                          ? `Wear ${face.name} — a draft, still being worked on in faceKit`
+                          : `Wear ${face.name}, from the shared library`
                         : 'The face this deployment ships with, in public/faces'
                     }
                     className="block disabled:cursor-not-allowed disabled:opacity-40"
@@ -825,7 +846,7 @@ export default function LiveTrial() {
                         alt=""
                         className={`h-16 w-16 rounded-lg border object-cover ${
                           picked ? 'border-sky-500' : 'border-slate-800 hover:border-slate-600'
-                        }`}
+                        } ${draft ? 'opacity-60' : ''}`}
                       />
                     ) : (
                       <span
@@ -840,33 +861,16 @@ export default function LiveTrial() {
                   <p className="max-w-16 truncate text-[10px] text-slate-500">
                     {face ? face.name : 'default'}
                   </p>
+                  {draft && <p className="text-[9px] uppercase tracking-wide text-amber-500">draft</p>}
                 </li>
               );
             })}
           </ul>
 
-          {/*
-            The one case the tiles above cannot show. A kit authored in this
-            browser is worn from /facekit and was never published, so none of
-            these tiles is it — and a picker with nothing highlighted reads as a
-            bug rather than as the truth. Saying which face is on costs a line
-            and removes the ambiguity.
-          */}
-          {chosen?.source === 'local' && (
+          {offered.length === 0 && (
             <p className="pb-1 text-[11px] text-slate-500">
-              Wearing {kit?.name ?? 'a kit'} from this browser, which is not in the shared
-              library. Pick one above to switch, or publish it from{' '}
-              <a href="/facekit" className="underline underline-offset-4">
-                faceKit
-              </a>
-              .
-            </p>
-          )}
-
-          {faces.length === 0 && (
-            <p className="pb-1 text-[11px] text-slate-500">
-              The shared library is empty. Publish a kit from faceKit and it appears here, on
-              every browser signed in to this site.
+              No finished faces in the shared library. Save one from faceKit and mark it
+              ready, and it appears here on every browser signed in to this site.
             </p>
           )}
         </fieldset>

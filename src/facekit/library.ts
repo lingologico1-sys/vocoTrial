@@ -14,10 +14,10 @@ import { THUMB_EDGE, type PublishedFace } from './published';
 /**
  * A refusal from the library, with the status kept.
  *
- * It matters in one place: a 404 from `source` means the face was published
- * before authoring copies existed, which is a fallback rather than a failure.
- * Carrying the status on the error is cheaper than a second fetch helper that
- * would differ from this one only in what it does with a missing object.
+ * It matters in one place: a 404 from `original` means the library keeps no
+ * portrait for that face, which is a fallback rather than a failure. Carrying
+ * the status on the error is cheaper than a second fetch helper that would
+ * differ from this one only in what it does with a missing object.
  */
 export class LibraryError extends Error {
   readonly status: number;
@@ -61,24 +61,68 @@ export async function fetchPublished(id: string): Promise<FaceKit> {
 }
 
 /**
- * The same kit as it was authored, for editing rather than for wearing.
+ * The portrait one face was authored from, when the library kept one.
  *
- * Null means there is no authoring copy — a face published before the sources/
- * prefix existed, which republishing once from anywhere seeds. The caller opens
- * the wearable copy in that case, which is editable in every way except that
- * "start again from the original" has no original to go back to.
+ * Fetched beside the kit rather than inside it — see originalKey — so opening a
+ * face for editing costs this one object on top of a kit the browser may well
+ * have cached already from wearing it.
+ *
+ * Null means no portrait was kept: a face saved before the originals/ split,
+ * whose index entry says `hasOriginal: false`. The caller opens the kit anyway,
+ * which is editable in every way except that "start again from the original"
+ * has no original to go back to. Saving it once from here seeds it.
  */
-export async function fetchSource(id: string): Promise<FaceKit | null> {
+export async function fetchOriginal(id: string): Promise<string | null> {
   try {
-    return migrate(await post<FaceKit>('source', { id }));
+    return await post<string>('original', { id });
   } catch (cause) {
     if (cause instanceof LibraryError && cause.status === 404) return null;
     throw cause;
   }
 }
 
-export function unpublishFace(id: string): Promise<unknown> {
-  return post('unpublish', { id });
+/**
+ * The portrait of a face saved before the originals/ split, dug out of the
+ * whole-kit object it is buried in.
+ *
+ * Reached only when the listing says `hasOriginal` is false, which is the only
+ * state that can point at a legacy object. Null covers both ways of having no
+ * portrait — the face predates originals/ and its sources/ object is gone or
+ * was never written, or it predates `original` entirely and never had one.
+ *
+ * A whole kit crosses the wire to yield one member of it. That is the price of
+ * recovering these at all, it is paid once per face because the save that
+ * follows writes the portrait where it belongs, and the alternative was
+ * abandoning the portraits or parsing them in a Worker. See source.ts.
+ */
+export async function fetchLegacyOriginal(id: string): Promise<string | null> {
+  try {
+    const kit = await post<FaceKit>('source', { id });
+    return kit.original ?? null;
+  } catch (cause) {
+    if (cause instanceof LibraryError && cause.status === 404) return null;
+    throw cause;
+  }
+}
+
+/**
+ * Marks a face finished, or puts it back to a draft.
+ *
+ * Deliberately not a save: this rewrites one boolean in the index and touches
+ * no artwork, which is why it is worth a route of its own. See ready.ts.
+ */
+export function setReady(id: string, ready: boolean): Promise<unknown> {
+  return post('ready', { id, ready });
+}
+
+/**
+ * Deletes a face, artwork and all.
+ *
+ * There is no other copy — the library is where a kit lives — so the caller is
+ * expected to have asked first. See delete.ts.
+ */
+export function deleteFace(id: string): Promise<unknown> {
+  return post('delete', { id });
 }
 
 /**
@@ -106,23 +150,33 @@ async function thumbnail(base: string): Promise<string> {
 }
 
 /**
- * Shares one authored kit, so that browsers which never authored it can wear it
- * — and so that this one is no longer the only place it can be edited.
+ * Saves one kit to the library. This is the only save there is.
  *
- * The kit goes up whole, `original` included, and publish.ts makes the split:
- * the copy verbatim for editing, and the same kit minus `original` for wearing.
- * Stripping here instead would mean uploading both halves — the authoring copy
- * for the sources/ prefix and the trimmed one for kits/ — to save the Worker a
- * `delete` on an object it already holds in memory. So the browser sends one
- * payload and the far side does the arithmetic.
+ * `original` travels as its own member and only when the library does not
+ * already hold it, which is what keeps a save proportional to what changed. The
+ * portrait is close to half the bytes and never changes after upload, so
+ * sending it on every save would mean paying the larger half of the upload for
+ * a write that could not alter it. `hasOriginal` comes from the listing the
+ * caller already has — no extra request to find out.
  *
- * What that costs is roughly twice the upload this used to make. What it buys
- * is that the artwork stops living only in the IndexedDB of whichever laptop
- * drew it; readers are unaffected either way, since the object they fetch is
- * the trimmed one and is exactly the size it always was.
+ * `ready` rides along because publish.ts writes the whole index entry and would
+ * otherwise have to guess. Guessing wrong in the generous direction puts an
+ * unfinished face in front of a class, so the flag is always stated.
  */
-export async function publishKit(kit: FaceKit): Promise<PublishedFace> {
+export async function publishKit(
+  kit: FaceKit,
+  options: { ready: boolean; hasOriginal: boolean },
+): Promise<PublishedFace> {
   const thumb = await thumbnail(kit.base);
-  const { face } = await post<{ face: PublishedFace }>('publish', { kit, thumb });
+  // Split rather than deleted from a copy: `original` is one member among data
+  // URLs, and pulling it out by name here is what makes the request's two
+  // halves independent.
+  const { original, ...rest } = kit;
+  const { face } = await post<{ face: PublishedFace }>('publish', {
+    kit: rest,
+    thumb,
+    ready: options.ready,
+    ...(original && !options.hasOriginal ? { original } : {}),
+  });
   return face;
 }

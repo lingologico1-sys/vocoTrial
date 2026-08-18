@@ -1,38 +1,50 @@
 import { json } from '../_middleware';
-import { MAX_KIT_BYTES, kitKey, sourceKey, type PublishedFace } from '../../../src/facekit/published';
+import {
+  MAX_KIT_BYTES,
+  kitKey,
+  legacySourceKey,
+  originalKey,
+  type PublishedFace,
+} from '../../../src/facekit/published';
 import { type LibraryEnv, readIndex, writeIndex } from './_library';
 
 /**
- * Copies one authored kit into the shared library, as two objects.
+ * Writes one kit into the shared library.
  *
- * Keyed by the kit's own id, so publishing a kit twice replaces it rather than
- * leaving two faces with one name — which is what "publish" should mean for
+ * Keyed by the kit's own id, so saving a kit twice replaces it rather than
+ * leaving two faces with one name — which is what saving should mean for
  * artwork you are still adjusting.
  *
- * WHAT ARRIVES IS THE AUTHORING COPY, `original` included, and the split is
- * made here rather than in the browser. Two writes come out of it: the copy
- * verbatim under sourceKey, and the same kit minus `original` under kitKey for
- * everything that only wears the face. Stripping server-side is why the browser
- * uploads the big payload once instead of uploading both halves — see
- * publishKit() in facekit/library.ts, and the note on sourceKey for why the two
- * are separate objects at all.
+ * THIS IS THE SAVE PATH, not a second step after one. faceKit has no local
+ * store any more: the bucket is where a kit lives from its first save, which is
+ * why `ready` exists to say whether the thing saved is finished. A face arrives
+ * here half-drawn as a matter of course.
+ *
+ * WHAT ARRIVES IS THE KIT WITHOUT `original`, and the portrait separately when
+ * the library does not already hold it. Two objects come out: the kit under
+ * kitKey, and — only when a portrait came with it — the portrait under
+ * originalKey. Neither contains the other, so nothing is stored twice and a
+ * save that changes only artwork sends only artwork. See originalKey for why
+ * the portrait is the member that got split off.
  *
  * The checks below are shape checks, not a security boundary. The middleware
  * has already established that the caller knew the site password, and every
  * caller is faceKit; what these catch is a malformed kit poisoning the index
  * for the pages that read it, which is a bug rather than an attack.
  *
- * Both objects are written before the index. That order is deliberate:
+ * The objects are written before the index. That order is deliberate:
  * interrupted before it, the bucket holds objects nothing lists — invisible,
- * and overwritten by the next publish. The other order would list a face whose
+ * and overwritten by the next save. The other order would list a face whose
  * artwork is not there, which is a broken picker rather than a quiet one.
- * Between the two objects there is no order to get right, since neither is
- * reachable until the index names them.
+ * Between the objects there is no order to get right, since none is reachable
+ * until the index names them.
  */
 
 interface PublishBody {
   kit?: unknown;
   thumb?: unknown;
+  original?: unknown;
+  ready?: unknown;
 }
 
 /** Enough of a kit to be worn. The rest is faceKit's business, not this route's. */
@@ -64,15 +76,25 @@ export async function onRequestPost(
   if (typeof body?.thumb !== 'string' || !body.thumb.startsWith('data:image/')) {
     return json({ error: 'A thumbnail is required', code: 'bad_thumb' }, 400);
   }
+  // Absent is the ordinary case — every save after the first — so only a
+  // present-but-wrong value is a refusal.
+  const original = body.original;
+  if (original !== undefined && (typeof original !== 'string' || !original.startsWith('data:image/'))) {
+    return json({ error: 'That is not a portrait', code: 'bad_original' }, 400);
+  }
 
   const kit = body.kit;
-  const source = JSON.stringify(kit);
+  // Belt and braces: the browser strips `original` before sending, and this is
+  // what stops a caller that forgot from writing the bytes into both objects.
+  delete kit.original;
+  const wearable = JSON.stringify(kit);
+
   // Measured in bytes rather than characters: the data URLs are ASCII, but the
   // name beside them is whatever someone typed, and a length in UTF-16 code
-  // units would be the wrong number for the thing being capped. Measured on the
-  // authoring copy, which is the larger of the two and the one that had to
-  // cross the wire.
-  const size = new TextEncoder().encode(source).length;
+  // units would be the wrong number for the thing being capped. Measured across
+  // both halves, since both had to cross the wire to get here.
+  const encoder = new TextEncoder();
+  const size = encoder.encode(wearable).length + (original ? encoder.encode(original).length : 0);
   if (size > MAX_KIT_BYTES) {
     return json(
       { error: `That kit is ${Math.round(size / 1e6)} MB, over the limit`, code: 'too_large' },
@@ -80,19 +102,29 @@ export async function onRequestPost(
     );
   }
 
-  // Re-serialised from a copy rather than edited as text: `original` is a data
-  // URL of unbounded length sitting among other data URLs, and there is no
-  // honest way to cut one out of a JSON string.
-  const wearable = { ...kit };
-  delete wearable.original;
+  const faces = await readIndex(env.FACES);
+  const existing = faces.find((face) => face.id === kit.id);
 
   await Promise.all([
-    env.FACES.put(sourceKey(kit.id), source, {
+    env.FACES.put(kitKey(kit.id), wearable, {
       httpMetadata: { contentType: 'application/json' },
     }),
-    env.FACES.put(kitKey(kit.id), JSON.stringify(wearable), {
-      httpMetadata: { contentType: 'application/json' },
-    }),
+    ...(original === undefined
+      ? []
+      : [
+          env.FACES.put(originalKey(kit.id), JSON.stringify(original), {
+            httpMetadata: { contentType: 'application/json' },
+          }),
+          // Only now, and this condition is the whole of the safety. A face
+          // published in the window when sources/ existed keeps its portrait
+          // inside that object and nowhere else; deleting it on every save
+          // would throw the portrait away to tidy up after it. Reached only on
+          // the save that has just written the replacement, so what goes is a
+          // copy of something the bucket now holds under its own key. A face
+          // nobody re-saves keeps its legacy object until it is deleted, which
+          // costs storage and nothing else. See legacySourceKey.
+          env.FACES.delete(legacySourceKey(kit.id)),
+        ]),
   ]);
 
   const entry: PublishedFace = {
@@ -101,9 +133,16 @@ export async function onRequestPost(
     createdAt: typeof kit.createdAt === 'number' ? kit.createdAt : Date.now(),
     publishedAt: Date.now(),
     thumb: body.thumb,
+    // Draft unless the caller says otherwise. The default matters: this route
+    // is now reached by every save, most of which are of unfinished faces, and
+    // the safe reading of "someone pressed save" is not "put this in front of a
+    // class". Saying `ready: true` is a separate, deliberate act.
+    ready: body.ready === true,
+    // True once the portrait has ever been written, not only when it arrived
+    // just now — that is the whole point of not re-sending it.
+    hasOriginal: original !== undefined || existing?.hasOriginal === true,
   };
 
-  const faces = await readIndex(env.FACES);
   const without = faces.filter((face) => face.id !== entry.id);
   await writeIndex(env.FACES, [entry, ...without].sort((a, b) => b.createdAt - a.createdAt));
 

@@ -73,7 +73,7 @@ the key private at the cost of a latency leg and some billed Worker time.
 | --- | --- |
 | [src/tutor/TutorBench.tsx](src/tutor/TutorBench.tsx) | **tutorBench**, at `/` — every model, every knob, the prompt you write, and what the call cost |
 | [src/live/LiveTrial.tsx](src/live/LiveTrial.tsx) | **liveTrial**, at `/livetrial` — one model, a face, and the picker that chooses which face |
-| [src/facekit/FaceKit.tsx](src/facekit/FaceKit.tsx) | **faceKit**, at `/facekit` — authors a face, and publishes it to the shared library |
+| [src/facekit/FaceKit.tsx](src/facekit/FaceKit.tsx) | **faceKit**, at `/facekit` — authors a face, and saves it to the shared library |
 | [functions/api/_middleware.ts](functions/api/_middleware.ts) | Same-origin **and** session-cookie gate in front of every `/api/*` route; POST-only except WebSocket upgrades |
 | [functions/api/auth/](functions/api/auth/) | Trades the site password for a signed session cookie |
 | [src/PasswordGate.tsx](src/PasswordGate.tsx) | The sign-in screen. Cosmetic — the middleware is what actually refuses |
@@ -90,9 +90,9 @@ the key private at the cost of a latency leg and some billed Worker time.
 | [src/realtime/gemini.ts](src/realtime/gemini.ts) | WebSocket session — this code handles mic and playback |
 | [src/realtime/audio.ts](src/realtime/audio.ts) | 16 kHz capture and 24 kHz scheduled playback |
 | [public/worklets/pcm-capture.js](public/worklets/pcm-capture.js) | AudioWorklet: float32 → int16, batched to ~128 ms |
-| [functions/api/faces/](functions/api/faces/) | The shared face library on R2 — list, get, source, publish, unpublish |
+| [functions/api/faces/](functions/api/faces/) | The shared face library on R2 — list, get, original, source, publish, ready, delete |
 | [src/facekit/published.ts](src/facekit/published.ts) | What that library holds and where, read by the Worker and the browser alike |
-| [src/facekit/store.ts](src/facekit/store.ts) | IndexedDB: the kits this browser authored, and a cache of the ones it fetched |
+| [src/facekit/store.ts](src/facekit/store.ts) | IndexedDB: a cache of the faces this browser has fetched, and which one is worn |
 
 ## What a call can be configured with
 
@@ -152,27 +152,27 @@ is deliberately not offered — they are code; save your version as your own.
 
 ## The shared face library
 
-A kit is nine 1024-square PNGs, which is why kits live in IndexedDB rather than
-`localStorage` — and, until now, why they went nowhere else. That was fine while
-one person on one laptop was the whole audience and useless the moment a face
-has to appear on a machine that never authored it.
+A kit is nine 1024-square PNGs. Those used to live in the authoring browser's
+IndexedDB and go nowhere else, which was fine while one person on one laptop was
+the whole audience and useless the moment a face had to appear on a machine that
+never authored it.
 
-So faceKit **publishes**: it copies the kit to an R2 bucket, and every other
-browser signed in to this site reads it back. liveTrial's picker is the first
-consumer of that channel.
+So **R2 is where a kit lives**. faceKit has no local store: saving writes to the
+bucket, and every other browser signed in to this site reads it back. There is
+one list of faces, not a private one and a shared one.
 
 ```
-faceKit ──publish──► R2 ──list────► liveTrial's picker
- (any browser)         │  └─get────► the face it wears
-     ▲                 │
-     └────────source───┘  the same face, opened for editing
+faceKit ──save────► R2 ──list────► liveTrial's picker (ready faces only)
+ (any browser)        │  └─get────► the face it wears
+     ▲                │
+     └──get+original──┘  the same face, opened for editing
 ```
 
 | Object | What it is |
 | --- | --- |
-| `index.json` | Every published face as `{ id, name, createdAt, publishedAt, thumb }` |
-| `kits/<id>.json` | The wearable copy — one whole kit, artwork inlined as data URLs, no `original` |
-| `sources/<id>.json` | The authoring copy — the same kit with `original` kept |
+| `index.json` | Every face as `{ id, name, createdAt, publishedAt, thumb, ready, hasOriginal }` |
+| `kits/<id>.json` | One whole kit, artwork inlined as data URLs, no `original` |
+| `originals/<id>.json` | The portrait that kit was authored from, on its own |
 
 **The index is one object rather than a `list()` call**, because R2 will hand
 back custom metadata with its keys but that metadata is HTTP headers — capped
@@ -182,40 +182,59 @@ strip. Thumbnails ride inside the index for the same reason a thumbnail cannot
 be an `<img src>` pointing at a route: the middleware allows POST and nothing
 else.
 
-Four things worth knowing:
+Five things worth knowing:
 
-- **`publishedAt` is the whole cache check.** A browser keeps fetched kits in a
-  second IndexedDB store and compares that one number against the listing, so a
-  page load costs a small request rather than several megabytes of artwork that
-  has not changed. A republish bumps it and the next load re-fetches.
-- **Publishing keyed by the kit's own id**, so publishing twice replaces a face
-  rather than leaving two with one name.
-- **Two objects, one upload.** The kit goes up whole and `publish.ts` makes the
-  split: verbatim to `sources/`, and minus `original` to `kits/`. `original` is
-  the portrait as uploaded, kept so neutralising stays repeatable — an authoring
-  concern, useless to anything that only wears the face, and close to half the
-  payload. Folding it into the wearable copy would put it on every student's
-  page load; a separate prefix means it is fetched only when a face is opened
-  for editing. Publish uploads roughly twice what it used to; reads are
-  untouched.
-- **Unpublish is not delete.** It removes both shared copies; the authored kit
-  in the author's own browser is untouched. faceKit's delete button is the other
-  thing, deliberately kept separate so a mistake here costs a re-publish rather
-  than artwork.
+- **`publishedAt` is the whole cache check.** A browser keeps fetched kits in an
+  IndexedDB store and compares that one number against the listing, so a page
+  load costs a small request rather than several megabytes of artwork that has
+  not changed. A save bumps it and the next load re-fetches. That cache is now
+  the only thing IndexedDB holds, and deleting it loses nothing.
+- **Keyed by the kit's own id**, so saving twice replaces a face rather than
+  leaving two with one name.
+- **`ready` is what separates saved from fit to wear.** A face reaches the
+  library on its first save, half its mouths undrawn, because the library is the
+  only place it can go — so "in the library" stopped answering "fit to put in
+  front of somebody". liveTrial's picker offers ready faces only, plus whichever
+  is currently worn so that a draft being tested does not vanish from under the
+  person testing it. faceKit shows everything, dims the drafts, and flips the
+  flag through `ready.ts` — one small index write, no artwork.
+- **The portrait goes up once.** `original` is kept so neutralising stays
+  repeatable; it is close to half a kit's bytes and useless to anything that
+  only wears the face, so it lives under its own prefix and is fetched only when
+  a face is opened for editing. It also never changes after upload, so the
+  browser reads `hasOriginal` from the listing it already has and skips it on
+  every save after the first. First save: both halves. Every save after: the kit
+  alone, roughly half the bytes.
+- **Delete is delete.** It removes the kit, the portrait, and the index entry.
+  The route was called `unpublish` and removed a shared copy, leaving the
+  authored kit in the author's own browser; there is no second copy now, so it
+  is named for what it does and faceKit asks before calling it.
 
-**A library face can be edited from any browser.** Tapping one in faceKit's
-shared-library strip fetches `sources/<id>.json` into the editor, so the artwork
-is no longer trapped in the IndexedDB of whichever laptop drew it; republishing
-replaces the shared copy under the same id. Faces published before the
-`sources/` prefix existed have no authoring copy, and open from the wearable one
-instead — editable in every way except that "start again from the original" has
-no original to return to. Republishing once seeds the source and settles it.
+**A face can be edited from any browser.** Tapping one in faceKit's library
+strip reads `kits/<id>.json` through the same cache that wearing it uses — free
+if this browser has worn it — and fetches the portrait beside it.
 
-One writer is assumed. The index is read, edited and written back, so two
-publishes landing together can lose one of the two entries — the kits themselves
-are already safely written by then, so the loss is a face missing from the
-listing until something republishes it. Not worth a lock while the author is one
-person at one keyboard.
+Faces saved before the `originals/` prefix report `hasOriginal: false`, and
+there are two kinds. Those from the window when the whole authoring copy went to
+`sources/<id>.json` still have their portrait inside it; `source.ts` hands that
+object back and the browser lifts `original` out of it, which is a whole kit
+across the wire to get one member and is the price of not abandoning them. Those
+older than that never had a portrait at all, and open without one — editable in
+every way except that "start again from the original" has no original to return
+to. Either way the next save writes whatever was recovered under `originals/`,
+so the detour happens once per face.
+
+**A legacy `sources/` object is deleted only by the save that replaces it**, and
+never merely to tidy up. It is the sole home of that face's portrait until
+`originals/` has one, so a save that deletes it without writing the replacement
+would be throwing the portrait away. Faces nobody re-saves keep theirs until the
+face is deleted — storage, and nothing else.
+
+One writer is assumed. The index is read, edited and written back, so two saves
+landing together can lose one of the two entries — the kits themselves are
+already safely written by then, so the loss is a face missing from the listing
+until something saves it again. Not worth a lock while the author is one person
+at one keyboard.
 
 ## First-time deploy
 
@@ -277,7 +296,7 @@ gates the build.
 
    They have to go in the dashboard: because `wrangler.toml` exists, Pages takes
    plain-text vars from that file and the dashboard will only accept Secrets.
-4. **Create the face bucket**, once, before the first publish:
+4. **Create the face bucket**, once, before the first save:
 
    ```bash
    npx wrangler r2 bucket create vocotrial-faces
@@ -285,7 +304,7 @@ gates the build.
 
    The binding is already in [wrangler.toml](wrangler.toml) — a binding name is
    not a credential, so unlike the keys it belongs in the file. Without the
-   bucket, faceKit's publish button and liveTrial's picker both say no library
+   bucket, faceKit's save button and liveTrial's picker both say no library
    is configured, and nothing else is affected.
 5. Push to `main`. Every push deploys; every PR gets a preview URL.
 
@@ -329,7 +348,7 @@ npm run lint
 | `/api/live/models` | probes candidate ids with `generateContent`, the only call this key may make |
 | `/api/live/regions` | **run 2026-08-16** — all twelve hosts take the key; Pro is global-endpoint-only, Flash is in seven regions |
 | `/api/image/generate` | **working on Vertex** — returned an image in ~16s on Flash |
-| `/api/faces/*`, the shared library | **untested** — typechecks, lints and builds; the publish → list → wear round trip, and the publish → source → edit → republish one, both need a browser and a created bucket |
+| `/api/faces/*`, the shared library | **untested** — typechecks, lints and builds; the save → list → wear round trip, the save → get + original → edit → save one, and the `ready` flag reaching liveTrial's picker, all need a browser and a created bucket |
 | Gemini handshake | **working** — 2.5 native audio on Vertex, 3.1 Flash Live on AI Studio |
 | Gemini audio in a browser | untested; needs a mic |
 | Saved prompt presets | typechecks and builds; the create/update/delete round trip is **untested in a browser** |
