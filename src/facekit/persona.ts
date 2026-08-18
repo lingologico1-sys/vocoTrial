@@ -94,26 +94,35 @@ export function emptyPersona(): Persona {
  * well and none does distinctively, so a picker would be a knob with nothing to
  * learn from it.
  *
- * VERIFIED, in exactly the sense imageModels.ts means it: the id has been seen
- * to return text on this account's Vertex key. Nothing here could check it —
- * the keys live only in Cloudflare — so the proof was a draft that worked, on
- * 2026-08-18, and not that the id looked right. The flag stays rather than
- * going, because it is the answer to a question the next model id will raise
- * again, and `false` is a claim about this one rather than an absence.
+ * UNVERIFIED, in exactly the sense imageModels.ts means it: nothing here can
+ * check an id — the keys live only in Cloudflare — so the flag says no draft
+ * has come back on this one yet, not that it reads wrong. Clear it when a
+ * draft returns text, and not before.
+ *
+ * The id it replaced, gemini-2.5-flash, was verified that way by a working
+ * draft on 2026-08-18 and still answers on Vertex. It goes anyway, because it
+ * is deprecated with a shutdown no earlier than 2026-10-16, and because the
+ * Gemini API had already started 404ing it in July while Vertex went on
+ * serving it — so "it worked today" stopped being evidence it will work in
+ * October. This is the migration that comment was written to expect.
  *
  * The rates are list prices per million tokens, read on the date below, and
  * they are used for real rather than for decoration: the route bills from the
  * token counts Vertex reports, so a kit's `spentUsd` absorbs this call instead
- * of quietly missing it. It does not model the discount Vertex gives on cached
+ * of quietly missing it. They are introductory, which is rare enough here to
+ * be worth saying: Google lists these through 2026-12-31 and doubles them on
+ * 2027-01-01, and they are already 2.5x the input and 1.5x the output of the
+ * 2.5 Flash rates they replace. A draft is still a fraction of a cent, and it
+ * is a larger fraction. It does not model the discount Vertex gives on cached
  * input — see costUsd in the route for why a made-up factor would be worse than
  * paying the sticker price on a fraction of a cent.
  */
 export const PERSONA_MODEL = {
-  id: 'gemini-2.5-flash',
-  label: 'Gemini 2.5 Flash',
-  unverified: false,
-  usdPerMillionInput: 0.3,
-  usdPerMillionOutput: 2.5,
+  id: 'gemini-3.7-flash',
+  label: 'Gemini 3.7 Flash',
+  unverified: true,
+  usdPerMillionInput: 0.75,
+  usdPerMillionOutput: 3.75,
   ratesReadOn: '2026-08-18',
 };
 
