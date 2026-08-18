@@ -103,7 +103,7 @@ interface FaceProps {
    * The discrete shape the classifier settled on.
    *
    * Unused by the drawn face, which interpolates `shape` continuously, and the
-   * only thing a kit can use: drawn artwork comes in six poses, not on a
+   * only thing a kit can use: drawn artwork comes in fixed poses, not on a
    * spectrum between them.
    */
   viseme: Viseme;
@@ -218,8 +218,14 @@ const toHead = (value: number) => (value / CANVAS_EDGE) * 200;
  * Spelled out rather than read off the kit's own keys, so the set of <image>
  * elements does not change when a patch is added — React would remount the
  * lot, and a remount mid-sentence is a visible blank.
+ *
+ * Being a plain array, this is the one place a new Viseme does not announce
+ * itself: nothing here is exhaustive, so a shape left out is simply a patch
+ * that never paints. `fv` is listed for that reason and no other — the audio
+ * analyser cannot select it, so today it sits at opacity 0 for the whole of
+ * every call, waiting for a driver that can.
  */
-const VISEME_ORDER: Viseme[] = ['rest', 'mbp', 'ee', 'uh', 'aa', 'oh'];
+const VISEME_ORDER: Viseme[] = ['rest', 'mbp', 'fv', 'ee', 'uh', 'aa', 'oh'];
 
 export default function Face({
   shape,
@@ -479,7 +485,7 @@ export default function Face({
    * the base — patches, lids, brow crops — sits inside the same group and scales
    * with it, which is the only way the registration survives.
    *
-   * What also changes is the mouth: six poses instead of a spectrum, chosen by
+   * What also changes is the mouth: discrete poses instead of a spectrum, chosen by
    * `viseme` rather than interpolated from `shape`. Every pose stays mounted and
    * is revealed by opacity, because decoding a patch the first time it is
    * painted costs a frame, and dropping a frame at the exact moment a mouth

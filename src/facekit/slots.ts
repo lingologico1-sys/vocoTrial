@@ -118,8 +118,8 @@ export interface Slot {
    * analysis and mean nothing to an image model.
    *
    * A function of the kit's lash style rather than a plain string, because the
-   * eye slots vary with it and a field that is right for six slots and stale
-   * for two is a bug waiting for whoever reads it next. Mouth slots take the
+   * eye slots vary with it and a field that is right for the mouth slots and
+   * stale for two is a bug waiting for whoever reads it next. Mouth slots take the
    * argument and ignore it, which costs a pair of brackets and means every
    * call site has to have the setting in hand.
    */
@@ -272,12 +272,16 @@ const CORNERS_FIXED = [
 ].join(' ');
 
 /**
- * The compression exemption, for the one pose that is defined by it.
+ * The compression exemption, for the poses defined by it.
  *
  * Everything CORNERS_FIXED protects is protected here too — colour, line
  * weight, the mouth staying put — except the thickness, which is the single
  * property the pose is about. A prompt that asks for lips squeezed thinner
  * while forbidding any change of thickness is arguing with itself.
+ *
+ * Shared with `fv`, which thins the lower lip alone rather than both, and gets
+ * the difference said in its own prompt instead of in a third constant: the
+ * exemption either applies or it does not, and here it does.
  */
 const MBP_COMPRESSES = [
   'Keep the lips the same colour and line weight as the original, and keep the',
@@ -338,6 +342,8 @@ const JAW_DROPS = [
 const MOUTH_NOTE = [CORNERS_FIXED, MOUTH_STYLE, FACE_FIXED].join(' ');
 const MBP_NOTE = [MBP_COMPRESSES, MOUTH_STYLE, FACE_FIXED].join(' ');
 const TEETH_NOTE = [CORNERS_FIXED, MOUTH_STYLE, TEETH_BAND, FACE_FIXED].join(' ');
+/** The one pose that both shows teeth and thins a lip. */
+const FV_NOTE = [MBP_COMPRESSES, MOUTH_STYLE, TEETH_BAND, FACE_FIXED].join(' ');
 const OPEN_NOTE = [CORNERS_FIXED, MOUTH_STYLE, TEETH_BAND, JAW_DROPS].join(' ');
 
 const mouth =
@@ -377,6 +383,32 @@ export const SLOTS: Slot[] = [
     prompt: mouth(
       'Press the lips firmly together so that they roll slightly inward, as when beginning to say "m". Compared with a relaxed closed mouth, the coloured area of both lips must end up visibly thinner — the lower lip most of all — and the line where they meet must become straighter, flatter and a little longer, reaching very slightly wider, with a small tuck of tension at each corner. The result has to be plainly distinguishable from a relaxed closed mouth: thinner lips, a longer and flatter seam. No teeth and no opening at all, and no pursing, pouting or dimples.',
       MBP_NOTE,
+    ),
+  },
+  /*
+   * The pose no call will ever show, generated anyway.
+   *
+   * Nothing in the live path can select it — the audio analyser classifies into
+   * a grid this does not sit on, and the note on Viseme in live/visemes.ts says
+   * why it never could. It is here because the thing that will select it reads
+   * text rather than sound, and the cost of adding it then is not one prompt
+   * but every kit made before it, generated again, judged again.
+   *
+   * Written against mbp the way rest and mbp are written against each other,
+   * and for a sharper version of the same reason. Those two start from the same
+   * closed mouth; these two *end* at nearly one, both being lips that have gone
+   * thin without the jaw moving. The divergence check will say so — of every
+   * pair in the kit this is the one legitimately closest, and a low reading here
+   * is not the duplicate it is elsewhere. What separates them is the only thing
+   * worth insisting on: teeth, showing, resting on the lip.
+   */
+  {
+    id: 'fv',
+    label: 'F / V',
+    region: 'mouth',
+    prompt: mouth(
+      'Rest the upper front teeth directly on the lower lip, as when beginning to say "f". Compared with a relaxed closed mouth, the upper lip lifts just far enough to uncover a narrow band of upper teeth, and the lower lip draws back and tucks under that band, so that the coloured area of the lower lip is visibly reduced while the upper lip keeps its full natural thickness. The teeth rest against the lip along their whole width: there is no dark gap, opening or shadow between the two anywhere. The result has to be plainly distinguishable from a mouth with the lips pressed together — teeth are showing — and from any mouth held open, because nothing dark is visible inside it.',
+      FV_NOTE,
     ),
   },
   {

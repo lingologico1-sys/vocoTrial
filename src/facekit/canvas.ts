@@ -404,7 +404,7 @@ export function featherDepth(box: Box, radius = PATCH_FEATHER): number {
  * prevents is the fade climbing over face: the bottom edge is the one the lower
  * lip and chin sit nearest, and a box drawn tight to the resting chin has the
  * ramp eating the chin the portrait wears when it is *not* speaking — which then
- * ghosts on every pose at once, since all six carry it.
+ * ghosts on every pose at once, since all of them carry it.
  *
  * This is the same family as the blur that once erased a lower lip, and it is
  * worth being clear about how it differs, because the earlier fix does not cover

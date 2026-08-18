@@ -17,20 +17,36 @@ import { ROUNDING_SPLIT_HZ, SPEECH_BAND, type AudioTap } from '../realtime/audio
  * Three openings times two roundnesses is six shapes, which is the sweet spot:
  * expressive enough to read as speech, coarse enough that the measurement can
  * actually tell the states apart. It collapses to loudness-only when the
- * spectrum is too quiet to trust, and the six names below are standard visemes,
- * so hand-drawn art can replace the generated shapes without touching any of
- * this.
+ * spectrum is too quiet to trust, and the names below are standard visemes, so
+ * hand-drawn art can replace the generated shapes without touching any of this.
+ *
+ * `fv` is the exception and the only one: a seventh shape the analyser can
+ * never report. The grid has no room for it — it is not an opening crossed with
+ * a roundness — and the measurements could not find it anyway, because what
+ * separates /f/ from /s/ is absolute loudness, which the running peak in
+ * MouthAnalyser deliberately normalises away, and spectral detail above 5 kHz,
+ * which SPEECH_BAND deliberately discards. Under audio it stays dark and /f/
+ * falls through to `mbp`, which is near enough: quiet enough to be classified
+ * as closed lips, and closed lips are roughly what a labiodental looks like.
+ *
+ * It exists because a text-driven driver has the information the audio does
+ * not. Amazon Polly's speech marks name the labiodental outright, and its
+ * eighteen visemes otherwise collapse onto these six with nothing lost that a
+ * flat drawn mouth could have shown — f/v against p/b/m is the one distinction
+ * worth a seventh image. Carrying the slot now means a kit generated today is
+ * still complete when that driver arrives, rather than every face needing to be
+ * made again for the sake of one pose.
  */
 
-export type Viseme = 'rest' | 'mbp' | 'ee' | 'uh' | 'aa' | 'oh';
+export type Viseme = 'rest' | 'mbp' | 'fv' | 'ee' | 'uh' | 'aa' | 'oh';
 
 /**
  * A mouth as three numbers, in the coordinate space of MOUTH_BOX.
  *
  * Parameters rather than path strings because two shapes built the same way can
  * be interpolated between, and a mouth that eases between targets looks far
- * more like speech than one that snaps. The six named entries are still the
- * only states the analyser reports — the easing is presentation.
+ * more like speech than one that snaps. The named entries are still the only
+ * states a driver selects between — the easing is presentation.
  */
 export interface LipShape {
   /** Half the mouth's width. */
@@ -58,6 +74,17 @@ export const VISEMES: Record<Viseme, LipShape> = {
   rest: { w: 19, up: 1.4, down: 2.8 },
   /** The closed consonants. Wider and flatter than rest — lips pressed, not slack. */
   mbp: { w: 23, up: 0.9, down: 1.6 },
+  /**
+   * "f", "v". Teeth on the lower lip, which the drawn mouth cannot show.
+   *
+   * Only ever selected by a text-driven driver — see the note on Viseme. The
+   * numbers are inverted against every other shape: more above the centre line
+   * than below, because the lower lip is the half that disappears. On the drawn
+   * fallback that is all it can be, a small opening sitting high; on a kit it is
+   * a patch with teeth in it, and the drawing is only what shows when a face has
+   * no artwork.
+   */
+  fv: { w: 21, up: 2.8, down: 1 },
   /** Spread and half open: "ee", and the sibilants that share its brightness. */
   ee: { w: 27, up: 4, down: 5.5 },
   /** Rounded and half open: "uh", "l". */
@@ -96,7 +123,7 @@ export function lipPath({ w, up, down }: LipShape): string {
 
 /** What the analyser reports each frame. */
 export interface MouthFrame {
-  /** Which of the six states the sound is in. The part hand-drawn art replaces. */
+  /** Which state the sound is in, `fv` excepted. The part hand-drawn art replaces. */
   viseme: Viseme;
   /** That state's shape, eased toward rather than snapped to. */
   shape: LipShape;
@@ -556,7 +583,10 @@ export class MouthAnalyser {
 
   /** Two openness levels at once — worth breaking the hold for. */
   private isJump(next: Viseme): boolean {
-    const rank: Record<Viseme, number> = { rest: 0, mbp: 1, ee: 2, uh: 2, aa: 3, oh: 3 };
+    // `fv` sits with mbp because it is the same openness — near shut — even
+    // though nothing here can classify into it. Ranked rather than excluded so
+    // that the table stays a complete statement about the shapes.
+    const rank: Record<Viseme, number> = { rest: 0, mbp: 1, fv: 1, ee: 2, uh: 2, aa: 3, oh: 3 };
     return Math.abs(rank[next] - rank[this.viseme]) >= 2;
   }
 }

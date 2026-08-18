@@ -7,8 +7,8 @@ import { SLOTS, type SlotId } from './slots';
  * Plays the kit's mouths in a loop, fast, so you can see it fail.
  *
  * The most useful control on this page and among the cheapest. Drift between
- * generations is close to invisible in a contact sheet — six stills, all
- * plainly the same character, all fine — and unmissable in motion, where the
+ * generations is close to invisible in a contact sheet — a handful of stills,
+ * all plainly the same character, all fine — and unmissable in motion, where the
  * same drift arrives as the whole face crawling. Judging a kit by looking at
  * its patches side by side is judging it in the one condition it will never be
  * used in.
