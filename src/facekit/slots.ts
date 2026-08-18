@@ -290,7 +290,28 @@ const MBP_COMPRESSES = [
 ].join(' ');
 
 /**
- * How teeth are drawn, on the two poses that show any.
+ * The spreading exemption, for the pose named after it.
+ *
+ * CORNERS_FIXED was written against a jaw drop that inflated the whole mouth,
+ * and it is right about every pose that opens by dropping a jaw. EE does not:
+ * it opens by pulling the corners apart, which is the one thing that sentence
+ * forbids. Held under it, EE could only comply by becoming a small parted mouth
+ * with teeth in it — which is what it became, and which is indistinguishable
+ * from `fv` drawn the same way. The width is also what the drawn fallback
+ * already does: VISEMES.ee is the widest shape in the table.
+ *
+ * What is still held is the direction. A spread mouth gets wider *without*
+ * getting taller, so the height is fixed here in the place the width was.
+ */
+const EE_SPREADS = [
+  'Keep the lips the same colour and line weight as the original, and keep the',
+  'mouth centred exactly where it is: the corners draw back and apart so that',
+  'the mouth ends up slightly wider than it began, but it does not grow taller,',
+  'slide or tilt.',
+].join(' ');
+
+/**
+ * How teeth are drawn, on the poses that show any.
  *
  * "A clean row of upper teeth as one simple white shape" was meant to say this
  * and does not: a row of teeth *is* a row, so a generator drawing each tooth
@@ -341,7 +362,8 @@ const JAW_DROPS = [
 
 const MOUTH_NOTE = [CORNERS_FIXED, MOUTH_STYLE, FACE_FIXED].join(' ');
 const MBP_NOTE = [MBP_COMPRESSES, MOUTH_STYLE, FACE_FIXED].join(' ');
-const TEETH_NOTE = [CORNERS_FIXED, MOUTH_STYLE, TEETH_BAND, FACE_FIXED].join(' ');
+/** Teeth, and the corners free to spread. EE only — see EE_SPREADS. */
+const EE_NOTE = [EE_SPREADS, MOUTH_STYLE, TEETH_BAND, FACE_FIXED].join(' ');
 /** The one pose that both shows teeth and thins a lip. */
 const FV_NOTE = [MBP_COMPRESSES, MOUTH_STYLE, TEETH_BAND, FACE_FIXED].join(' ');
 const OPEN_NOTE = [CORNERS_FIXED, MOUTH_STYLE, TEETH_BAND, JAW_DROPS].join(' ');
@@ -394,20 +416,32 @@ export const SLOTS: Slot[] = [
    * text rather than sound, and the cost of adding it then is not one prompt
    * but every kit made before it, generated again, judged again.
    *
-   * Written against mbp the way rest and mbp are written against each other,
-   * and for a sharper version of the same reason. Those two start from the same
-   * closed mouth; these two *end* at nearly one, both being lips that have gone
-   * thin without the jaw moving. The divergence check will say so — of every
-   * pair in the kit this is the one legitimately closest, and a low reading here
-   * is not the duplicate it is elsewhere. What separates them is the only thing
-   * worth insisting on: teeth, showing, resting on the lip.
+   * The expected collision was with mbp, both being lips gone thin without the
+   * jaw moving. It was with ee instead, and at 2.8% — the two came back as the
+   * same picture. Read together the reason is not subtle: the first draft asked
+   * for teeth under a lifted upper lip and said nothing about what sits below
+   * them, and ee asked for teeth in a parted mouth and said nothing either. Two
+   * prompts describing a white band between two lips get one white band between
+   * two lips.
+   *
+   * So they are now written against each other, the way rest and mbp are, and
+   * on two cues rather than one, because a single cue is a single thing for a
+   * generator to miss:
+   *
+   *   the gap    ee is parted and dark below the teeth; fv has nothing dark in
+   *              it anywhere, the teeth sitting straight on the lip
+   *   the lip    ee keeps its lower lip whole; fv thins it, which is the half
+   *              of the mouth a labiodental consumes
+   *
+   * Neither one is a shading detail — they are the two largest shapes in the
+   * patch — and either alone is enough to tell the poses apart in motion.
    */
   {
     id: 'fv',
     label: 'F / V',
     region: 'mouth',
     prompt: mouth(
-      'Rest the upper front teeth directly on the lower lip, as when beginning to say "f". Compared with a relaxed closed mouth, the upper lip lifts just far enough to uncover a narrow band of upper teeth, and the lower lip draws back and tucks under that band, so that the coloured area of the lower lip is visibly reduced while the upper lip keeps its full natural thickness. The teeth rest against the lip along their whole width: there is no dark gap, opening or shadow between the two anywhere. The result has to be plainly distinguishable from a mouth with the lips pressed together — teeth are showing — and from any mouth held open, because nothing dark is visible inside it.',
+      'Rest the upper front teeth directly on the lower lip, as when beginning to say "f". Compared with a relaxed closed mouth, the upper lip lifts only slightly, uncovering a narrow strip of upper teeth, and the lower lip draws back and tucks in under that strip so that its coloured area ends up clearly thinner than the upper lip\'s. The teeth sit against the lip along their whole width, and the mouth is not open: there is no dark gap, no dark opening and no dark shadow anywhere between the teeth and the lower lip, and no part of the inside of the mouth is visible. The mouth also stays as wide as it was, with the corners where they were and no smile or spread. The result has to be plainly distinguishable from a parted mouth with teeth showing: the only shapes here are lip, teeth and lip, with nothing dark between them.',
       FV_NOTE,
     ),
   },
@@ -416,8 +450,8 @@ export const SLOTS: Slot[] = [
     label: 'Spread (EE)',
     region: 'mouth',
     prompt: mouth(
-      'Open the lips into a wide, shallow slot showing the upper teeth as one simple white shape. The jaw stays almost closed, so the opening is wide but not tall.',
-      TEETH_NOTE,
+      'Spread the lips into a wide, shallow slot, as when saying "ee". Compared with a relaxed closed mouth, the corners draw back and apart so the opening reaches wider than the closed mouth did, while the jaw stays almost closed, so the slot is much wider than it is tall. The upper teeth show as one simple white band along the top of the opening, and directly below that band there is a clear dark opening running the full width of the mouth, because the mouth is genuinely parted. The lower lip keeps its full natural thickness and is not drawn back, tucked or thinned. The result has to be plainly distinguishable from teeth resting on the lip: a dark opening separates the teeth from the lower lip along the whole width.',
+      EE_NOTE,
     ),
   },
   {
