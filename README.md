@@ -88,7 +88,7 @@ the key private at the cost of a latency leg and some billed Worker time.
 | [src/realtime/gemini.ts](src/realtime/gemini.ts) | WebSocket session — this code handles mic and playback |
 | [src/realtime/audio.ts](src/realtime/audio.ts) | 16 kHz capture and 24 kHz scheduled playback |
 | [public/worklets/pcm-capture.js](public/worklets/pcm-capture.js) | AudioWorklet: float32 → int16, batched to ~128 ms |
-| [functions/api/faces/](functions/api/faces/) | The shared face library on R2 — list, get, publish, unpublish |
+| [functions/api/faces/](functions/api/faces/) | The shared face library on R2 — list, get, source, publish, unpublish |
 | [src/facekit/published.ts](src/facekit/published.ts) | What that library holds and where, read by the Worker and the browser alike |
 | [src/facekit/store.ts](src/facekit/store.ts) | IndexedDB: the kits this browser authored, and a cache of the ones it fetched |
 
@@ -160,14 +160,17 @@ browser signed in to this site reads it back. liveTrial's picker is the first
 consumer of that channel.
 
 ```
-faceKit ──publish──► R2 ──list──► liveTrial's picker
- (one browser)              └────get───► the face it wears
+faceKit ──publish──► R2 ──list────► liveTrial's picker
+ (any browser)         │  └─get────► the face it wears
+     ▲                 │
+     └────────source───┘  the same face, opened for editing
 ```
 
 | Object | What it is |
 | --- | --- |
 | `index.json` | Every published face as `{ id, name, createdAt, publishedAt, thumb }` |
-| `kits/<id>.json` | One whole kit, the artwork inlined as data URLs |
+| `kits/<id>.json` | The wearable copy — one whole kit, artwork inlined as data URLs, no `original` |
+| `sources/<id>.json` | The authoring copy — the same kit with `original` kept |
 
 **The index is one object rather than a `list()` call**, because R2 will hand
 back custom metadata with its keys but that metadata is HTTP headers — capped
@@ -177,21 +180,34 @@ strip. Thumbnails ride inside the index for the same reason a thumbnail cannot
 be an `<img src>` pointing at a route: the middleware allows POST and nothing
 else.
 
-Three things worth knowing:
+Four things worth knowing:
 
 - **`publishedAt` is the whole cache check.** A browser keeps fetched kits in a
   second IndexedDB store and compares that one number against the listing, so a
   page load costs a small request rather than several megabytes of artwork that
   has not changed. A republish bumps it and the next load re-fetches.
 - **Publishing keyed by the kit's own id**, so publishing twice replaces a face
-  rather than leaving two with one name. `original` — the portrait as uploaded,
-  kept so neutralising stays repeatable — is dropped on the way out: it is an
-  authoring concern, useless to anything that only wears the face, and close to
-  half the payload.
-- **Unpublish is not delete.** It removes the shared copy; the authored kit in
-  the author's own browser is untouched. faceKit's delete button is the other
+  rather than leaving two with one name.
+- **Two objects, one upload.** The kit goes up whole and `publish.ts` makes the
+  split: verbatim to `sources/`, and minus `original` to `kits/`. `original` is
+  the portrait as uploaded, kept so neutralising stays repeatable — an authoring
+  concern, useless to anything that only wears the face, and close to half the
+  payload. Folding it into the wearable copy would put it on every student's
+  page load; a separate prefix means it is fetched only when a face is opened
+  for editing. Publish uploads roughly twice what it used to; reads are
+  untouched.
+- **Unpublish is not delete.** It removes both shared copies; the authored kit
+  in the author's own browser is untouched. faceKit's delete button is the other
   thing, deliberately kept separate so a mistake here costs a re-publish rather
   than artwork.
+
+**A library face can be edited from any browser.** Tapping one in faceKit's
+shared-library strip fetches `sources/<id>.json` into the editor, so the artwork
+is no longer trapped in the IndexedDB of whichever laptop drew it; republishing
+replaces the shared copy under the same id. Faces published before the
+`sources/` prefix existed have no authoring copy, and open from the wearable one
+instead — editable in every way except that "start again from the original" has
+no original to return to. Republishing once seeds the source and settles it.
 
 One writer is assumed. The index is read, edited and written back, so two
 publishes landing together can lose one of the two entries — the kits themselves
@@ -312,7 +328,7 @@ npm run lint
 | `/api/live/models` | probes candidate ids with `generateContent`, the only call this key may make |
 | `/api/live/regions` | **run 2026-08-16** — all twelve hosts take the key; Pro is global-endpoint-only, Flash is in seven regions |
 | `/api/image/generate` | **working on Vertex** — returned an image in ~16s on Flash |
-| `/api/faces/*`, the shared library | **untested** — typechecks, lints and builds; the publish → list → wear round trip needs a browser and a created bucket |
+| `/api/faces/*`, the shared library | **untested** — typechecks, lints and builds; the publish → list → wear round trip, and the publish → source → edit → republish one, both need a browser and a created bucket |
 | Gemini handshake | **working** — 2.5 native audio on Vertex, 3.1 Flash Live on AI Studio |
 | Gemini audio in a browser | untested; needs a mic |
 | Saved prompt presets | typechecks and builds; the create/update/delete round trip is **untested in a browser** |

@@ -1,23 +1,33 @@
 import { json } from '../_middleware';
-import { MAX_KIT_BYTES, kitKey, type PublishedFace } from '../../../src/facekit/published';
+import { MAX_KIT_BYTES, kitKey, sourceKey, type PublishedFace } from '../../../src/facekit/published';
 import { type LibraryEnv, readIndex, writeIndex } from './_library';
 
 /**
- * Copies one authored kit into the shared library.
+ * Copies one authored kit into the shared library, as two objects.
  *
  * Keyed by the kit's own id, so publishing a kit twice replaces it rather than
  * leaving two faces with one name — which is what "publish" should mean for
  * artwork you are still adjusting.
+ *
+ * WHAT ARRIVES IS THE AUTHORING COPY, `original` included, and the split is
+ * made here rather than in the browser. Two writes come out of it: the copy
+ * verbatim under sourceKey, and the same kit minus `original` under kitKey for
+ * everything that only wears the face. Stripping server-side is why the browser
+ * uploads the big payload once instead of uploading both halves — see
+ * publishKit() in facekit/library.ts, and the note on sourceKey for why the two
+ * are separate objects at all.
  *
  * The checks below are shape checks, not a security boundary. The middleware
  * has already established that the caller knew the site password, and every
  * caller is faceKit; what these catch is a malformed kit poisoning the index
  * for the pages that read it, which is a bug rather than an attack.
  *
- * The kit is written before the index. That order is deliberate: interrupted
- * between the two, the bucket holds an object nothing lists — invisible, and
- * overwritten by the next publish. The other order would list a face whose
+ * Both objects are written before the index. That order is deliberate:
+ * interrupted before it, the bucket holds objects nothing lists — invisible,
+ * and overwritten by the next publish. The other order would list a face whose
  * artwork is not there, which is a broken picker rather than a quiet one.
+ * Between the two objects there is no order to get right, since neither is
+ * reachable until the index names them.
  */
 
 interface PublishBody {
@@ -26,7 +36,7 @@ interface PublishBody {
 }
 
 /** Enough of a kit to be worn. The rest is faceKit's business, not this route's. */
-function looksLikeKit(value: unknown): value is { id: string; name: string; createdAt?: number } {
+function looksLikeKit(value: unknown): value is Record<string, unknown> & { id: string; name: string; createdAt?: number } {
   if (typeof value !== 'object' || value === null) return false;
   const kit = value as Record<string, unknown>;
   return (
@@ -56,11 +66,13 @@ export async function onRequestPost(
   }
 
   const kit = body.kit;
-  const payload = JSON.stringify(kit);
+  const source = JSON.stringify(kit);
   // Measured in bytes rather than characters: the data URLs are ASCII, but the
   // name beside them is whatever someone typed, and a length in UTF-16 code
-  // units would be the wrong number for the thing being capped.
-  const size = new TextEncoder().encode(payload).length;
+  // units would be the wrong number for the thing being capped. Measured on the
+  // authoring copy, which is the larger of the two and the one that had to
+  // cross the wire.
+  const size = new TextEncoder().encode(source).length;
   if (size > MAX_KIT_BYTES) {
     return json(
       { error: `That kit is ${Math.round(size / 1e6)} MB, over the limit`, code: 'too_large' },
@@ -68,9 +80,20 @@ export async function onRequestPost(
     );
   }
 
-  await env.FACES.put(kitKey(kit.id), payload, {
-    httpMetadata: { contentType: 'application/json' },
-  });
+  // Re-serialised from a copy rather than edited as text: `original` is a data
+  // URL of unbounded length sitting among other data URLs, and there is no
+  // honest way to cut one out of a JSON string.
+  const wearable = { ...kit };
+  delete wearable.original;
+
+  await Promise.all([
+    env.FACES.put(sourceKey(kit.id), source, {
+      httpMetadata: { contentType: 'application/json' },
+    }),
+    env.FACES.put(kitKey(kit.id), JSON.stringify(wearable), {
+      httpMetadata: { contentType: 'application/json' },
+    }),
+  ]);
 
   const entry: PublishedFace = {
     id: kit.id,

@@ -47,9 +47,17 @@ import {
   type BoxId,
   type SlotId,
 } from './slots';
-import { listPublished, publishKit, unpublishFace } from './library';
+import { fetchSource, listPublished, publishKit, unpublishFace } from './library';
 import type { PublishedFace } from './published';
-import { deleteKit, listKits, saveKit, selectKit, selectedKit, type KitRef } from './store';
+import {
+  deleteKit,
+  listKits,
+  publishedKit,
+  saveKit,
+  selectKit,
+  selectedKit,
+  type KitRef,
+} from './store';
 import { download, zip } from './zip';
 
 /**
@@ -389,6 +397,8 @@ export default function FaceKit() {
    */
   const [published, setPublished] = useState<PublishedFace[]>([]);
   const [publishing, setPublishing] = useState(false);
+  /** Which library face is being fetched, if one is. Its id, so the strip can say so. */
+  const [opening, setOpening] = useState<string | null>(null);
 
   const refreshLibrary = useCallback(() => {
     listPublished()
@@ -397,6 +407,47 @@ export default function FaceKit() {
   }, []);
 
   useEffect(refreshLibrary, [refreshLibrary]);
+
+  /**
+   * Opens a library face for editing, on a browser that need not have authored it.
+   *
+   * The authoring copy is what is wanted — it carries `original`, so "start
+   * again from the original" still means something — and it is the larger of
+   * the two objects, which is why it is fetched on this click rather than
+   * riding along in the listing.
+   *
+   * Falling back to the wearable copy is not a degraded mode so much as an
+   * older one: a face published before the sources/ prefix existed has no
+   * authoring copy and never will until it is republished, which this very
+   * edit will do. Everything works except starting over from the portrait.
+   *
+   * Nothing is written to this browser's store here. The kit lands in the
+   * editor and reaches IndexedDB the same way an uploaded portrait does — on
+   * the first save — so opening a face to look at it leaves no copy behind.
+   */
+  const openPublished = useCallback(async (id: string) => {
+    setError(null);
+    setOpening(id);
+    try {
+      const source = (await fetchSource(id)) ?? (await publishedKit(id));
+      if (!source) {
+        setError('That face is in the listing but its artwork is missing');
+        return;
+      }
+      setKit(source);
+      // As Saved kits: a kit arriving from elsewhere has boxes but no history
+      // of how they got there, so every box goes back to being judged on size.
+      setFollowing({});
+      // The editor is at the top of a page whose library sits at the bottom,
+      // and a click that changes only off-screen state is the complaint this
+      // whole button exists to answer.
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'That face could not be opened');
+    } finally {
+      setOpening(null);
+    }
+  }, []);
 
   // Deduplicated: picking the same model in both slots should offer one button,
   // not two identical ones side by side.
@@ -1559,20 +1610,36 @@ export default function FaceKit() {
             <h2 className="text-sm font-medium text-slate-300">Shared library</h2>
             <p className="max-w-prose text-xs text-slate-500">
               Published faces, readable from any browser signed in to this site. This is the
-              list liveTrial's picker offers. Unpublishing removes the shared copy and leaves
+              list liveTrial's picker offers. Tap one to open it for editing — the artwork
+              comes back from the library, so it works on a laptop that never authored it.
+              Republish when you are done. Unpublishing removes the shared copy and leaves
               the kit in this browser alone.
             </p>
             <ul className="flex flex-wrap gap-3">
               {published.map((face) => (
                 <li key={face.id} className="space-y-1 text-center">
-                  {/* Not a button: there is nothing to open. The editable kit
-                      is in Saved kits above, and only if this browser is the
-                      one that authored it. */}
-                  <img
-                    src={face.thumb}
-                    alt=""
-                    className="h-24 w-24 rounded-lg border border-slate-800 object-cover"
-                  />
+                  {/* A button, since the authoring copy came up with the face.
+                      What opens is the library's kit, not this browser's — the
+                      two share an id and only one of them is the shared one. */}
+                  <button
+                    type="button"
+                    onClick={() => void openPublished(face.id)}
+                    disabled={opening !== null}
+                    title="Open this face for editing. Republish when you are done to replace the shared copy."
+                    className="disabled:cursor-wait"
+                  >
+                    <img
+                      src={face.thumb}
+                      alt=""
+                      className={`h-24 w-24 rounded-lg border object-cover ${
+                        opening === face.id ? 'animate-pulse ' : ''
+                      }${
+                        inUse?.source === 'published' && inUse.id === face.id
+                          ? 'border-sky-500'
+                          : 'border-slate-800 hover:border-slate-600'
+                      }`}
+                    />
+                  </button>
                   <p className="max-w-24 truncate text-[11px] text-slate-400">{face.name}</p>
                   <button
                     type="button"

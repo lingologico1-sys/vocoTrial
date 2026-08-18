@@ -36,9 +36,33 @@ export interface PublishedFace {
 /** The index, as one object, so listing the library is one read. */
 export const INDEX_KEY = 'index.json';
 
-/** Where one kit's JSON lives. Keyed by the kit's id, which is already unique. */
+/**
+ * Where the wearable copy of one kit lives. Keyed by the kit's id, which is
+ * already unique.
+ *
+ * This is the one on the wear path: every browser that puts the face on
+ * downloads this object whole. It carries no `original` — see sourceKey.
+ */
 export function kitKey(id: string): string {
   return `kits/${id}.json`;
+}
+
+/**
+ * Where the authoring copy of the same kit lives.
+ *
+ * A second object rather than a fatter first one, and the split is the whole
+ * point. `original` is the portrait as uploaded, kept so that neutralising
+ * stays repeatable; it is close to half a kit's bytes and useless to anything
+ * that only wears the face. Folding it back into kitKey would make every
+ * student's page load carry an authoring artefact they cannot use, so it lives
+ * here instead and is fetched only when a face is opened for editing — one
+ * person, occasionally, against everyone else on every visit.
+ *
+ * Written by publish.ts, read by source.ts, deleted by unpublish.ts. Nothing on
+ * the live path touches it.
+ */
+export function sourceKey(id: string): string {
+  return `sources/${id}.json`;
 }
 
 /**
@@ -59,5 +83,14 @@ export const THUMB_EDGE = 192;
  * reasonable one well under. The ceiling is here to stop a single malformed
  * publish filling the bucket, not to police normal artwork; nothing authored by
  * faceKit has come close.
+ *
+ * Doubled from 32 MB when publishing started carrying `original` as well. The
+ * request that arrives at publish.ts is now the authoring copy — both halves —
+ * and measuring the old ceiling against it would have started bouncing heavy
+ * portraits that used to fit. The wearable copy written out the far side is
+ * unchanged in size.
+ *
+ * Still comfortably inside Cloudflare's own request-body limit, which is the
+ * real ceiling here and is not ours to raise.
  */
-export const MAX_KIT_BYTES = 32 * 1024 * 1024;
+export const MAX_KIT_BYTES = 64 * 1024 * 1024;

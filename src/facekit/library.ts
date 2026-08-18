@@ -11,6 +11,24 @@ import { THUMB_EDGE, type PublishedFace } from './published';
  * thumbnails ride inside the listing as data URLs instead. See published.ts.
  */
 
+/**
+ * A refusal from the library, with the status kept.
+ *
+ * It matters in one place: a 404 from `source` means the face was published
+ * before authoring copies existed, which is a fallback rather than a failure.
+ * Carrying the status on the error is cheaper than a second fetch helper that
+ * would differ from this one only in what it does with a missing object.
+ */
+export class LibraryError extends Error {
+  readonly status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = 'LibraryError';
+    this.status = status;
+  }
+}
+
 async function post<T>(route: string, body?: unknown): Promise<T> {
   const response = await fetch(`/api/faces/${route}`, {
     method: 'POST',
@@ -20,7 +38,10 @@ async function post<T>(route: string, body?: unknown): Promise<T> {
 
   if (!response.ok) {
     const detail = (await response.json().catch(() => null)) as { error?: string } | null;
-    throw new Error(detail?.error ?? `The face library refused that (${response.status})`);
+    throw new LibraryError(
+      detail?.error ?? `The face library refused that (${response.status})`,
+      response.status,
+    );
   }
 
   return (await response.json()) as T;
@@ -37,6 +58,23 @@ export async function listPublished(): Promise<PublishedFace[]> {
  */
 export async function fetchPublished(id: string): Promise<FaceKit> {
   return migrate(await post<FaceKit>('get', { id }));
+}
+
+/**
+ * The same kit as it was authored, for editing rather than for wearing.
+ *
+ * Null means there is no authoring copy — a face published before the sources/
+ * prefix existed, which republishing once from anywhere seeds. The caller opens
+ * the wearable copy in that case, which is editable in every way except that
+ * "start again from the original" has no original to go back to.
+ */
+export async function fetchSource(id: string): Promise<FaceKit | null> {
+  try {
+    return migrate(await post<FaceKit>('source', { id }));
+  } catch (cause) {
+    if (cause instanceof LibraryError && cause.status === 404) return null;
+    throw cause;
+  }
 }
 
 export function unpublishFace(id: string): Promise<unknown> {
@@ -68,17 +106,23 @@ async function thumbnail(base: string): Promise<string> {
 }
 
 /**
- * Shares one authored kit, so that browsers which never authored it can wear it.
+ * Shares one authored kit, so that browsers which never authored it can wear it
+ * — and so that this one is no longer the only place it can be edited.
  *
- * `original` is dropped on the way out. It is the portrait as uploaded, kept so
- * that neutralising stays repeatable — an authoring concern, useless to anything
- * that only wears the face, and close to half the payload. Publishing it would
- * double the bytes every reader downloads to carry a copy none of them can use.
+ * The kit goes up whole, `original` included, and publish.ts makes the split:
+ * the copy verbatim for editing, and the same kit minus `original` for wearing.
+ * Stripping here instead would mean uploading both halves — the authoring copy
+ * for the sources/ prefix and the trimmed one for kits/ — to save the Worker a
+ * `delete` on an object it already holds in memory. So the browser sends one
+ * payload and the far side does the arithmetic.
+ *
+ * What that costs is roughly twice the upload this used to make. What it buys
+ * is that the artwork stops living only in the IndexedDB of whichever laptop
+ * drew it; readers are unaffected either way, since the object they fetch is
+ * the trimmed one and is exactly the size it always was.
  */
 export async function publishKit(kit: FaceKit): Promise<PublishedFace> {
   const thumb = await thumbnail(kit.base);
-  const shared = { ...kit };
-  delete shared.original;
-  const { face } = await post<{ face: PublishedFace }>('publish', { kit: shared, thumb });
+  const { face } = await post<{ face: PublishedFace }>('publish', { kit, thumb });
   return face;
 }
