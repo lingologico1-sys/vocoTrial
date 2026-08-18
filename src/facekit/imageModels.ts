@@ -4,7 +4,8 @@
  * Same contract as realtime/models.ts, and for the same reason: the browser
  * sends a *key* and the Worker resolves it to a provider model id, so a caller
  * cannot name an arbitrary model and spend the account on it. Both sides import
- * this file, so the picker and the allowlist cannot drift apart.
+ * this file, so the client and the allowlist cannot drift apart. It said "the
+ * picker" until FaceKit stopped drawing one — see below.
  *
  * Every model here is Gemini, on Vertex, and there is no `provider` field any
  * more — see the note at the foot of this file for what went and why. What that
@@ -30,10 +31,10 @@ export interface ImageModelChoice {
   /**
    * A word for a button, where the full label will not fit.
    *
-   * Named per model rather than per family, because the two comparison slots
-   * hold two Gemini models now that Gemini is the only family here — Pro
-   * against Flash is the comparison left worth making, and "gemini" twice tells
-   * you nothing about which button you are pressing.
+   * Named per model rather than per family. Gemini is the only family here, so
+   * a per-family word would print "gemini" on everything and tell you nothing
+   * — which is the failure the captions in FaceKit still use this to avoid,
+   * now that the buttons it was written for have gone.
    */
   short: string;
   /** The provider's own model id. */
@@ -162,10 +163,12 @@ export const NEUTRALISE_MODEL_KEY = 'gemini-image-pro';
  * mouth and not the four sentences constraining how the mouth is drawn, and the
  * whole of this page's method is those four sentences.
  *
- * So the comparison this page runs is currently no comparison at all — one
- * model, named in both slots, offering one button. The A/B machinery is kept
- * because the open question is still which *Gemini* to spend on, and answering
- * it needs two slots the moment there is a second model to put in one. If a
+ * So there is no comparison for the page to run, and as of the commit that
+ * added this sentence it no longer pretends otherwise: the two dropdowns are
+ * gone from FaceKit, along with the per-model buttons they fed. What is kept is
+ * the shape of this list, which is all the A/B ever needed — the open question
+ * is still which *Gemini* to spend on, and the day a second entry lands here is
+ * the day to put the pickers back. `git log` holds what they looked like. If a
  * third Gemini image model is ever wanted, gemini-3.1-flash-image exists on
  * this same project — PanelForge's Flash entry names it — and is a different
  * model from the one removed here. It has not been tried against these prompts.

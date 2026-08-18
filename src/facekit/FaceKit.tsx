@@ -13,7 +13,12 @@ import {
   patchDivergence,
 } from './canvas';
 import { generateBase, generatePatch } from './generate';
-import { IMAGE_MODELS, IMAGE_RATES_READ_ON, findImageModel } from './imageModels';
+import {
+  IMAGE_MODELS,
+  IMAGE_RATES_READ_ON,
+  NEUTRALISE_MODEL_KEY,
+  findImageModel,
+} from './imageModels';
 import {
   KIT_FORMAT,
   browHeadroom,
@@ -61,8 +66,10 @@ import { download, zip } from './zip';
  * portrait into the set of images the live face wears: a neutral base, six
  * mouths, and a pair of closed eyes. It exists as a page rather than a script
  * because every step of it is a judgement — where the mouth box goes, which of
- * two providers drew the better "oh", whether the seam shows — and judgements
- * want the picture in front of you.
+ * the attempts drew the better "oh", whether the seam shows — and judgements
+ * want the picture in front of you. It used to say "which of two providers"
+ * there, back when the page offered a pair of them; the judgement outlived the
+ * comparison, because two attempts on one model differ as well.
  *
  * The rule the page is built around, stated once here and enforced in
  * canvas.ts: a generator's output is never used whole. It is cut to the box and
@@ -225,23 +232,22 @@ const REGION_TABS: { id: BoxId; label: string }[] = [
 ];
 
 /**
- * The two models the page compares, and what they start as.
+ * The model every generation on this page runs on.
  *
- * Once one family had won every slot outright, "one picker per provider"
- * stopped describing a useful comparison — the open question became which
- * *Gemini* to spend on, and the old shape could not express that. Both slots
- * choose from the whole list, so a model against itself is as sayable as one
- * against another. Which is just as well, because that is what the page offers
- * today: the list is one model long, so both slots start on the same entry and
- * the run dedupes them into a single button.
+ * There used to be two of these behind two dropdowns, because the page ran an
+ * A/B: one picker per provider at first, then — once one family had won every
+ * slot outright — two slots drawn from the same list, the open question having
+ * become which *Gemini* to spend on. Both dropdowns are gone. The list is one
+ * model long (see the foot of imageModels.ts for what left and why), so the
+ * pair offered the same entry twice, deduplicated back to a single button, and
+ * asked everyone authoring a face to make a choice that did not exist.
  *
- * Both derived rather than named — what A always was, and what B became when
- * Flash was removed for being unable to draw teeth (see imageModels.ts). The
- * defaults follow the list, so removing a model from the list is the whole of
- * removing it, and the day a second one lands B starts there with no edit here.
+ * Derived rather than named, so removing a model from the list stays the whole
+ * of removing it. The day a second one lands, the comparison wants its two
+ * pickers back rather than an arbitrary first entry — `git log` holds the shape
+ * they had, and restoring them is where that work starts.
  */
-const DEFAULT_A = IMAGE_MODELS[0].key;
-const DEFAULT_B = (IMAGE_MODELS[1] ?? IMAGE_MODELS[0]).key;
+const MODEL_KEY = IMAGE_MODELS[0].key;
 
 /**
  * The ellipsis a busy button wears, carrying the attempt number once there has
@@ -298,24 +304,34 @@ export default function FaceKit() {
    */
   const [busy, setBusy] = useState<Record<string, number>>({});
   const [error, setError] = useState<string | null>(null);
-  const [modelA, setModelA] = useState(DEFAULT_A);
-  const [modelB, setModelB] = useState(DEFAULT_B);
   /**
    * Whether the portrait is sent before the instruction rather than after.
    *
-   * Off by default, which is not a preference: off is the order every kit in
-   * this repo was generated under, and a comparison whose control has quietly
-   * moved is not a comparison. It is here to be switched on for one slot, next
-   * to the same slot generated with it off — see the note under the toggle.
+   * Read once off the query string, and deliberately not a checkbox any more.
+   * It is a bench experiment rather than a setting: the base image is identical
+   * across every generation on a kit and the instruction is what varies, so
+   * picture-first is the only arrangement in which the expensive half of the
+   * request can be a reusable prefix. Whether Vertex actually caches it is
+   * reported per candidate rather than assumed, and whether it costs anything
+   * in quality is what the thumbnails and the divergence percentage are for.
    *
-   * The reason to want it on is caching. The base image is identical across
-   * every generation on a kit and the instruction is what varies, so image
-   * first is the only arrangement in which the expensive half is a reusable
-   * prefix. Whether Vertex actually caches it is reported per candidate rather
-   * than assumed, and whether it costs anything in quality is what the
-   * thumbnails and the percentage are for.
+   * Off unless asked for, which is less a default than a control: off is the
+   * order every kit in this repo was generated under, and a comparison whose
+   * control has quietly moved is not a comparison. Running it means generating
+   * one slot *twice with this off* — that difference is what two attempts cost
+   * for nothing, no generation being deterministic — and only then once with it
+   * on. A third figure inside the first two says the order changed nothing; one
+   * well outside them is the finding.
+   *
+   * The protocol above used to be printed on the page under the checkbox, which
+   * put a hundred words of bench procedure in front of everyone authoring a
+   * face, for something they had no reason to run. It lives here now, where the
+   * people who need it are the people already reading this file.
    */
-  const [imageFirst, setImageFirst] = useState(false);
+  const imageFirst = useMemo(
+    () => new URLSearchParams(window.location.search).get('imagefirst') === '1',
+    [],
+  );
   const [assembled, setAssembled] = useState<string | null>(null);
   /**
    * How far every mouth on the page sits from every mouth in the kit.
@@ -459,13 +475,6 @@ export default function FaceKit() {
       }
     },
     [],
-  );
-
-  // Deduplicated: picking the same model in both slots should offer one button,
-  // not two identical ones side by side.
-  const chosen = useMemo(
-    () => Array.from(new Set([modelA, modelB])),
-    [modelA, modelB],
   );
 
   /**
@@ -633,9 +642,30 @@ export default function FaceKit() {
     }
   };
 
-  const neutralise = async (modelKey: string) => {
+  /**
+   * Takes no model, where it used to take one per button.
+   *
+   * The buttons were rendered one per picked model, which was a choice the
+   * function underneath refused to honour: generateBase throws on anything but
+   * NEUTRALISE_MODEL_KEY, on the argument that a base quietly drawn by the
+   * cheaper model is indistinguishable from a right one until a slot laid over
+   * it looks wrong. Offering a choice that would have thrown was the picker's
+   * doing, and it went with the picker.
+   */
+  const neutralise = async () => {
     if (!kit) return;
-    const key = `base:${modelKey}`;
+    // Asked rather than done quietly, for the same reason restart() asks: the
+    // discard below is not a side effect the button's label mentions. A kit
+    // with nothing cut yet is the ordinary case and gets no question.
+    if (
+      generated > 0 &&
+      !window.confirm(
+        `Neutralising redraws the base, so the ${generated} image(s) cut from the old one will be discarded. Go on?`,
+      )
+    ) {
+      return;
+    }
+    const key = 'base';
     mark(key, 1);
     setError(null);
 
@@ -643,7 +673,7 @@ export default function FaceKit() {
       // From the upload, never from the current base. Pressing this again means
       // "try that again", not "edit the last attempt".
       const result = await generateBase({
-        modelKey,
+        modelKey: NEUTRALISE_MODEL_KEY,
         base: kit.original ?? kit.base,
         instruction: NEUTRALISE_BASE_PROMPT,
         box: kit.boxes.mouth,
@@ -987,7 +1017,7 @@ export default function FaceKit() {
       );
   };
 
-  const anyUnverified = chosen.some((key) => findImageModel(key)?.unverified);
+  const modelUnverified = findImageModel(MODEL_KEY)?.unverified === true;
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
@@ -1059,6 +1089,72 @@ export default function FaceKit() {
                     ? 'unsaved changes'
                     : 'saved to library'}
               </span>
+            </div>
+
+            {/*
+              What the panel below the boxes used to open with, reduced to the
+              line it always was, and carrying the two facts the dropdowns
+              carried besides a choice: which model the spending goes to, and
+              what it costs an image. It stays a floor and stays saying so — the
+              input image's own tokens are billed separately and are not
+              reported in a form worth modelling.
+            */}
+            <p className="text-xs text-slate-500">
+              <span className="tabular-nums">{money(kit.spentUsd)}</span> spent on this kit — a
+              floor, excluding the input image&rsquo;s own tokens. Every generation runs on{' '}
+              {findImageModel(MODEL_KEY)?.label} at {money(findImageModel(MODEL_KEY)?.usdPerImage ?? 0)}
+              /image; rates read {IMAGE_RATES_READ_ON}.
+            </p>
+
+            {modelUnverified && (
+              <p className="text-xs text-amber-400/80">
+                Marked unverified: neither the model id nor the rate has yet been confirmed by a
+                call that returned an image. Clear the flag in imageModels.ts once one has.
+              </p>
+            )}
+
+            {/*
+              Shown only when it is on, which is the whole of what the page owes
+              anyone about it. Off, there is nothing to say and no control to
+              explain. On, a run is being generated under an ordering no other
+              kit in this repo was made with, and that should not be a surprise
+              when the thumbnails come back. See `imageFirst` above.
+            */}
+            {imageFirst && (
+              <p className="text-xs text-sky-400/80">
+                Picture-first ordering is on for this session, so every generation sends the
+                portrait ahead of the instruction and each candidate below says so. Drop{' '}
+                <code>?imagefirst=1</code> from the URL for the ordering every other kit was made
+                under.
+              </p>
+            )}
+
+            {/*
+              The first step, at the top, where it used to be a button in a
+              provider panel below the boxes. Everything under it is drawn onto
+              whatever this leaves behind, and pressing it discards whatever has
+              been cut already — so it belongs above the work it invalidates
+              rather than beside a model dropdown.
+            */}
+            <div className="flex flex-wrap items-start justify-between gap-3 rounded-xl border border-slate-800 p-4">
+              <div className="space-y-1">
+                <h2 className="text-sm font-medium text-slate-300">Base</h2>
+                <p className="max-w-xl text-xs text-slate-500">
+                  Closes the mouth on the portrait that every later pose is drawn over. Worth
+                  doing first if the portrait arrived smiling. It always runs against the picture
+                  you uploaded, so pressing it again is another attempt rather than an edit of the
+                  last one — which is also why it clears any poses already cut, those having been
+                  drawn for a face that is about to be replaced.
+                </p>
+              </div>
+              <button
+                type="button"
+                disabled={Boolean(busy.base)}
+                onClick={() => void neutralise()}
+                className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:border-slate-500 disabled:opacity-40"
+              >
+                {busy.base ? `Neutralising${busyMark(busy.base)}` : 'Neutralise base'}
+              </button>
             </div>
 
             <section className="grid gap-5 md:grid-cols-2">
@@ -1238,94 +1334,6 @@ export default function FaceKit() {
               </div>
             </section>
 
-            <section className="space-y-3 rounded-xl border border-slate-800 p-4">
-              <div className="flex flex-wrap items-end justify-between gap-3">
-                <h2 className="text-sm font-medium text-slate-300">Providers</h2>
-                <p className="text-xs text-slate-500">
-                  Spent on this kit: <span className="tabular-nums">{money(kit.spentUsd)}</span> — a
-                  floor, excluding the input image&rsquo;s own tokens. Rates read{' '}
-                  {IMAGE_RATES_READ_ON}.
-                </p>
-              </div>
-
-              <div className="grid gap-3 sm:grid-cols-2">
-                {(
-                  [
-                    ['A', modelA, setModelA],
-                    ['B', modelB, setModelB],
-                  ] as const
-                ).map(([slotName, value, set]) => (
-                  <label key={slotName} className="space-y-1 text-xs text-slate-500">
-                    <span>{slotName}</span>
-                    <select
-                      value={value}
-                      onChange={(event) => set(event.target.value)}
-                      className="w-full rounded-lg border border-slate-800 bg-slate-900 px-2 py-1.5 text-sm text-slate-200"
-                    >
-                      {IMAGE_MODELS.map((model) => (
-                        <option key={model.key} value={model.key}>
-                          {model.label} — {money(model.usdPerImage)}/image
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                ))}
-              </div>
-
-              <label className="flex items-start gap-2 text-xs text-slate-400">
-                <input
-                  type="checkbox"
-                  checked={imageFirst}
-                  onChange={(event) => setImageFirst(event.target.checked)}
-                  className="mt-0.5"
-                />
-                <span>
-                  Send the picture before the prompt.{' '}
-                  <span className="text-slate-500">
-                    It is a cache question: the base is identical on every generation this
-                    kit will ever run and the instruction is what changes, so this is the only
-                    arrangement where the expensive half of the request can be a reusable prefix.
-                    Whether it costs anything in quality is not settled here, and the comparison
-                    has a trap in it: two attempts at one slot differ anyway, because nothing about
-                    a generation is deterministic. So run the slot <em>twice with this off</em>
-                    first — that percentage is what two attempts differ by for nothing — and only
-                    then turn it on. A third figure inside the first two says the order changed
-                    nothing; one well outside them is the finding.
-                  </span>
-                </span>
-              </label>
-
-              {anyUnverified && (
-                <p className="text-xs text-amber-400/80">
-                  Marked unverified: neither the model id nor the rate has yet been confirmed by a
-                  call that returned an image. Clear the flag in imageModels.ts once one has.
-                </p>
-              )}
-
-              <div className="flex flex-wrap gap-2 pt-1">
-                {chosen.map((modelKey) => (
-                  <button
-                    key={modelKey}
-                    type="button"
-                    disabled={Boolean(busy[`base:${modelKey}`])}
-                    onClick={() => void neutralise(modelKey)}
-                    className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:border-slate-500 disabled:opacity-40"
-                  >
-                    {busy[`base:${modelKey}`]
-                      ? `Neutralising${busyMark(busy[`base:${modelKey}`])}`
-                      : 'Neutralise base'}{' '}
-                    · {findImageModel(modelKey)?.label}
-                  </button>
-                ))}
-              </div>
-              <p className="text-xs text-slate-500">
-                Closes the mouth on the base itself. Worth doing first if the portrait arrived
-                smiling — and it clears any patches, which were cut for the old face. Always runs
-                against the portrait you uploaded, so pressing it again is another attempt rather
-                than an edit of the last one.
-              </p>
-            </section>
-
             <section className="space-y-3">
               <h2 className="text-sm font-medium text-slate-300">Slots</h2>
 
@@ -1365,6 +1373,7 @@ export default function FaceKit() {
               {SLOTS.map((entry) => {
                 const options = candidates[entry.id] ?? [];
                 const current = kit.patches[entry.id];
+                const busyKey = `${entry.id}:${MODEL_KEY}`;
                 /** Every measured distance for one thumbnail, and the subset that counts as a copy. */
                 const near = (index: number | 'kept') => distances[twinKey(entry.id, index)] ?? [];
                 const copies = (index: number | 'kept') =>
@@ -1378,27 +1387,23 @@ export default function FaceKit() {
                     <div className="space-y-1.5">
                       <p className="text-sm text-slate-200">{entry.label}</p>
                       <p className="text-[11px] capitalize text-slate-600">{entry.region}</p>
+                      {/*
+                        One button, where there was one per picked model. Its
+                        label was the model's `short` name, which existed only
+                        to tell two such buttons apart — with one model on the
+                        list it read as "pro", a word for a choice nobody was
+                        being offered. It says what pressing it does instead.
+                      */}
                       <div className="flex flex-wrap gap-1.5 pt-1">
-                        {chosen.map((modelKey) => {
-                          const model = findImageModel(modelKey);
-                          const key = `${entry.id}:${modelKey}`;
-                          return (
-                            <button
-                              key={modelKey}
-                              type="button"
-                              disabled={Boolean(busy[key])}
-                              onClick={() => void run(entry.id, modelKey)}
-                              title={
-                                current
-                                  ? `Generate another with ${model?.label ?? modelKey}`
-                                  : model?.label
-                              }
-                              className="rounded-md border border-slate-700 px-2 py-1 text-[11px] text-slate-300 hover:border-slate-500 disabled:opacity-40"
-                            >
-                              {busy[key] ? busyMark(busy[key]) : (model?.short ?? modelKey)}
-                            </button>
-                          );
-                        })}
+                        <button
+                          type="button"
+                          disabled={Boolean(busy[busyKey])}
+                          onClick={() => void run(entry.id, MODEL_KEY)}
+                          title={findImageModel(MODEL_KEY)?.label}
+                          className="rounded-md border border-slate-700 px-2 py-1 text-[11px] text-slate-300 hover:border-slate-500 disabled:opacity-40"
+                        >
+                          {busy[busyKey] ? busyMark(busy[busyKey]) : current ? 'Again' : 'Generate'}
+                        </button>
                       </div>
                     </div>
 
