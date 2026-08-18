@@ -25,7 +25,7 @@ import { INSTRUCTION_PRESETS, defaultPresetKey } from './instructions';
  * Where saved prompts and the last-used pick live.
  *
  * Separate from either page's own prefs key on purpose: both pages read this
- * one, and a prompt you wrote on the comparison rig is usable on the face page
+ * one, and a prompt you wrote on tutorBench is usable on the face page
  * without retyping it. Nothing here is a secret.
  */
 const STORE_KEY = 'vocotrial.presets.v1';

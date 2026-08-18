@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Mic, MicOff, PhoneOff, Radio } from 'lucide-react';
-import { startGeminiSession } from './realtime/gemini';
-import { defaultModelKey, findModel, visibleModels } from './realtime/models';
-import { LANGUAGES, defaultLanguageCode, findLanguage } from './realtime/languages';
-import { MAX_INSTRUCTIONS } from './realtime/instructions';
+import { startGeminiSession } from '../realtime/gemini';
+import { defaultModelKey, findModel, visibleModels } from '../realtime/models';
+import { LANGUAGES, defaultLanguageCode, findLanguage } from '../realtime/languages';
+import { MAX_INSTRUCTIONS } from '../realtime/instructions';
 import {
   deletePreset,
   lastUsedKey,
@@ -12,8 +12,8 @@ import {
   renderPreset as renderFor,
   savePreset,
   updatePreset,
-} from './realtime/presets';
-import type { SessionSettings } from './realtime/settings';
+} from '../realtime/presets';
+import type { SessionSettings } from '../realtime/settings';
 import SettingsPanel from './SettingsPanel';
 import {
   MIN_PROJECTION_SECONDS,
@@ -26,8 +26,8 @@ import {
   speakingTime,
   totalTokens,
   type UsageTotals,
-} from './realtime/cost';
-import type { SessionStatus, TranscriptDelta, VoiceSession } from './realtime/types';
+} from '../realtime/cost';
+import type { SessionStatus, TranscriptDelta, VoiceSession } from '../realtime/types';
 
 interface Turn {
   /** Google's id for this turn, when it gives one. See TranscriptDelta. */
@@ -110,13 +110,13 @@ const STATUS_LABEL: Record<SessionStatus, string> = {
   error: 'Error',
 };
 
-export default function App() {
+export default function TutorBench() {
   const [modelKey, setModelKey] = useState(defaultModelKey());
   const [language, setLanguage] = useState(defaultLanguageCode());
 
   /**
    * The prompt and the knobs. Kept across a model switch on purpose — running
-   * both models on the same instructions is the entire point of the rig, and
+   * both models on the same instructions is the entire point of the bench, and
    * the Worker drops whatever the chosen model does not accept.
    *
    * The page opens on the preset used last, here or on liveTrial. The scratch
@@ -469,7 +469,7 @@ export default function App() {
       </span>
       <div className="mx-auto flex min-h-screen max-w-2xl flex-col gap-6 px-6 py-10">
         <header className="flex items-center justify-between gap-3">
-          <h1 className="text-2xl font-semibold tracking-tight">vocoTrial</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">tutorBench</h1>
           {/* A plain link, not a router push: main.tsx reads the path once at
               startup, so crossing between the pages is a reload by design. */}
           <a

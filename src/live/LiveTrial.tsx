@@ -6,7 +6,10 @@ import { LANGUAGES, defaultLanguageCode, findLanguage } from '../realtime/langua
 import { lastUsedKey, listPresets, rememberPreset, renderPreset } from '../realtime/presets';
 import type { AudioTap, SessionStatus, TranscriptDelta, VoiceSession } from '../realtime/types';
 import type { FaceKit } from '../facekit/kit';
-import { activeKit } from '../facekit/store';
+import { loadBundledKit } from '../facekit/bundled';
+import { listPublished } from '../facekit/library';
+import type { PublishedFace } from '../facekit/published';
+import { activeKit, publishedKit, selectKit, selectedKit, type KitRef } from '../facekit/store';
 import Stage from './Stage';
 import { RevealQueue } from './reveal';
 import {
@@ -41,7 +44,7 @@ import { tailSentences } from './text';
 /**
  * The live-model playground.
  *
- * Separate from App.tsx by design. That page is a comparison rig — both models,
+ * Separate from tutorBench by design. That page is the bench — both models,
  * every knob exposed, everything held constant so the numbers mean something.
  * This one is fixed to a single model and spends its screen on the character
  * instead. The prompt list is the only thing the two share; see presets.ts.
@@ -50,7 +53,7 @@ import { tailSentences } from './text';
 /** The only model this page runs. It is the thing being tried out. */
 const MODEL_KEY = 'gemini-native-audio';
 
-/** As App.tsx: audio bills per second of connection, so a forgotten tab costs. */
+/** As tutorBench: audio bills per second of connection, so a forgotten tab costs. */
 const IDLE_TIMEOUT_MS = 90_000;
 const IDLE_POLL_MS = 5_000;
 
@@ -58,7 +61,7 @@ const IDLE_POLL_MS = 5_000;
 const BUBBLE_SENTENCES = 2;
 
 /**
- * Its own key — this page's picks are not the comparison rig's picks.
+ * Its own key — this page's picks are not tutorBench's picks.
  *
  * Versioned so that changing a default can actually reach a browser that has
  * been here before. Saved picks beat defaults, which is right while you are
@@ -184,7 +187,7 @@ export default function LiveTrial() {
   const [language, setLanguage] = useState(prefs.language ?? defaultLanguageCode());
   /**
    * Not in this page's prefs, unlike everything else here: the prompt list and
-   * the last pick live in realtime/presets.ts, which the comparison rig writes
+   * the last pick live in realtime/presets.ts, which tutorBench writes
    * to as well. A prompt saved over there is offered here, and picking one here
    * is what that page opens on next.
    */
@@ -251,15 +254,32 @@ export default function LiveTrial() {
   const [tap, setTap] = useState<AudioTap | null>(null);
 
   /**
-   * The artwork the face wears, authored at /facekit and picked there.
+   * The artwork the face wears.
    *
-   * Loaded once at mount and never watched for changes: a kit is swapped on the
-   * other page, which the user reaches by a link that reloads this one. Polling
-   * IndexedDB for a change that cannot happen while this page is open would be
-   * work in exchange for nothing. Absent — no kit made, or the selected one
-   * deleted — leaves the drawn placeholder in place rather than an empty head.
+   * Resolved once at mount from whatever was last picked — see activeKit — and
+   * thereafter only by the picker below, which is the one thing on this page
+   * that can change it. Nothing polls: a kit authored on /facekit is reached by
+   * a link that reloads this page, and a face published from another machine
+   * cannot appear mid-session either. Absent — nothing made, or the selection
+   * unpublished or deleted — leaves the drawn placeholder rather than an empty
+   * head.
    */
   const [kit, setKit] = useState<FaceKit | null>(null);
+
+  /**
+   * The shared library, and which of it is worn.
+   *
+   * The listing is names and thumbnails only, so this costs one small request
+   * whether the library holds two faces or twenty; the artwork is fetched when
+   * a face is actually put on. `bundled` is the deployment's own face, loaded
+   * for its thumbnail so the "default" tile can show what it is rather than
+   * asserting it — it is also what an empty selection resolves to, so the tile
+   * and the fallback are the same face by construction.
+   */
+  const [faces, setFaces] = useState<PublishedFace[]>([]);
+  const [bundled, setBundled] = useState<FaceKit | null>(null);
+  const [chosen, setChosen] = useState<KitRef | null>(selectedKit);
+  const [swapping, setSwapping] = useState(false);
 
   /**
    * The last thing that happened worth leaning at.
@@ -283,9 +303,47 @@ export default function LiveTrial() {
         if (live) setKit(found);
       })
       .catch(() => undefined);
+    listPublished()
+      .then((list) => {
+        if (live) setFaces(list);
+      })
+      // A library that cannot be reached leaves the picker holding only the
+      // default, which is a smaller page rather than a broken one. Whatever is
+      // already worn stays on — activeKit has its own copy by now.
+      .catch(() => undefined);
+    loadBundledKit()
+      .then((found) => {
+        if (live) setBundled(found);
+      })
+      .catch(() => undefined);
     return () => {
       live = false;
     };
+  }, []);
+
+  /**
+   * Puts a face on, and remembers it for next time.
+   *
+   * `null` means the deployment's own face, which is what an empty selection
+   * already resolves to — so clearing the selection and picking the default are
+   * deliberately the same act rather than two states that look alike.
+   *
+   * The picker is closed while a call is up, so nothing here has to reason
+   * about swapping artwork out from under a face that is mid-sentence.
+   */
+  const wear = useCallback(async (ref: KitRef | null) => {
+    setSwapping(true);
+    try {
+      const next = ref === null ? await loadBundledKit() : await publishedKit(ref.id);
+      selectKit(ref);
+      setChosen(ref);
+      setKit(next);
+    } catch {
+      // The face on screen is still the one that loaded, which is the better
+      // of the two things to be looking at when a fetch fails.
+    } finally {
+      setSwapping(false);
+    }
   }, []);
 
   const session = useRef<VoiceSession | null>(null);
@@ -516,7 +574,7 @@ export default function LiveTrial() {
               {kit ? `faceKit · ${kit.name}` : 'faceKit'} →
             </a>
             <a href="/" className="underline-offset-4 hover:underline">
-              comparison rig →
+              tutorBench →
             </a>
           </nav>
         </header>
@@ -541,6 +599,92 @@ export default function LiveTrial() {
           tiltCue={tiltCue}
           speaking={speaking}
         />
+
+        <fieldset className="rounded-lg border border-slate-800 px-3 pb-2.5 pt-1">
+          <legend className="px-1 text-[11px] uppercase tracking-wide text-slate-500">
+            Face
+          </legend>
+          {/*
+            Idle only, unlike the mouth driver two fieldsets down. That one is
+            switched mid-sentence on purpose — hearing one voice through two
+            drivers back to back is the comparison it exists for. This is the
+            opposite case: swapping artwork means a multi-megabyte fetch and a
+            whole new set of patches arriving under a mouth that is moving, and
+            the comparison it would buy is one you can make just as well between
+            two calls.
+          */}
+          <ul className="flex flex-wrap items-start gap-3 py-1">
+            {[null, ...faces].map((face) => {
+              const ref: KitRef | null = face && { source: 'published', id: face.id };
+              const picked = face
+                ? chosen?.source === 'published' && chosen.id === face.id
+                : chosen === null;
+              const thumb = face ? face.thumb : bundled?.base;
+
+              return (
+                <li key={face?.id ?? 'default'} className="space-y-1 text-center">
+                  <button
+                    type="button"
+                    disabled={live || busy || swapping}
+                    onClick={() => void wear(ref)}
+                    title={
+                      face
+                        ? `Wear ${face.name}, from the shared library`
+                        : 'The face this deployment ships with, in public/faces'
+                    }
+                    className="block disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    {thumb ? (
+                      <img
+                        src={thumb}
+                        alt=""
+                        className={`h-16 w-16 rounded-lg border object-cover ${
+                          picked ? 'border-sky-500' : 'border-slate-800 hover:border-slate-600'
+                        }`}
+                      />
+                    ) : (
+                      <span
+                        className={`flex h-16 w-16 items-center justify-center rounded-lg border text-[10px] text-slate-600 ${
+                          picked ? 'border-sky-500' : 'border-slate-800'
+                        }`}
+                      >
+                        none
+                      </span>
+                    )}
+                  </button>
+                  <p className="max-w-16 truncate text-[10px] text-slate-500">
+                    {face ? face.name : 'default'}
+                  </p>
+                </li>
+              );
+            })}
+          </ul>
+
+          {/*
+            The one case the tiles above cannot show. A kit authored in this
+            browser is worn from /facekit and was never published, so none of
+            these tiles is it — and a picker with nothing highlighted reads as a
+            bug rather than as the truth. Saying which face is on costs a line
+            and removes the ambiguity.
+          */}
+          {chosen?.source === 'local' && (
+            <p className="pb-1 text-[11px] text-slate-500">
+              Wearing {kit?.name ?? 'a kit'} from this browser, which is not in the shared
+              library. Pick one above to switch, or publish it from{' '}
+              <a href="/facekit" className="underline underline-offset-4">
+                faceKit
+              </a>
+              .
+            </p>
+          )}
+
+          {faces.length === 0 && (
+            <p className="pb-1 text-[11px] text-slate-500">
+              The shared library is empty. Publish a kit from faceKit and it appears here, on
+              every browser signed in to this site.
+            </p>
+          )}
+        </fieldset>
 
         <fieldset className="rounded-lg border border-slate-800 px-3 pb-2.5 pt-1">
           <legend className="px-1 text-[11px] uppercase tracking-wide text-slate-500">

@@ -1,6 +1,6 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
-import App from './App';
+import TutorBench from './tutor/TutorBench';
 import LiveTrial from './live/LiveTrial';
 import FaceKit from './facekit/FaceKit';
 import PasswordGate from './PasswordGate';
@@ -20,7 +20,7 @@ const PAGES: Record<string, () => JSX.Element> = {
 };
 
 const page = window.location.pathname.replace(/\/+$/, '').toLowerCase();
-const Page = PAGES[page] ?? App;
+const Page = PAGES[page] ?? TutorBench;
 
 // The gate wraps the page rather than living inside it so that nothing mounts
 // unauthenticated — nothing in either page can fire a request before the check

@@ -69,6 +69,9 @@ the key private at the cost of a latency leg and some billed Worker time.
 
 | Path | What it does |
 | --- | --- |
+| [src/tutor/TutorBench.tsx](src/tutor/TutorBench.tsx) | **tutorBench**, at `/` — every model, every knob, the prompt you write, and what the call cost |
+| [src/live/LiveTrial.tsx](src/live/LiveTrial.tsx) | **liveTrial**, at `/livetrial` — one model, a face, and the picker that chooses which face |
+| [src/facekit/FaceKit.tsx](src/facekit/FaceKit.tsx) | **faceKit**, at `/facekit` — authors a face, and publishes it to the shared library |
 | [functions/api/_middleware.ts](functions/api/_middleware.ts) | Same-origin **and** session-cookie gate in front of every `/api/*` route; POST-only except WebSocket upgrades |
 | [functions/api/auth/](functions/api/auth/) | Trades the site password for a signed session cookie |
 | [src/PasswordGate.tsx](src/PasswordGate.tsx) | The sign-in screen. Cosmetic — the middleware is what actually refuses |
@@ -81,16 +84,19 @@ the key private at the cost of a latency leg and some billed Worker time.
 | [src/realtime/instructions.ts](src/realtime/instructions.ts) | The five built-in prompts, and the default the server falls back to |
 | [src/realtime/presets.ts](src/realtime/presets.ts) | Those plus your saved ones, and the last-used pick. Browser only |
 | [src/realtime/settings.ts](src/realtime/settings.ts) | Which knobs exist, which models take them, and the sanitiser |
-| [src/SettingsPanel.tsx](src/SettingsPanel.tsx) | The panel, rendered from the settings schema rather than written out |
+| [src/tutor/SettingsPanel.tsx](src/tutor/SettingsPanel.tsx) | The panel, rendered from the settings schema rather than written out |
 | [src/realtime/gemini.ts](src/realtime/gemini.ts) | WebSocket session — this code handles mic and playback |
 | [src/realtime/audio.ts](src/realtime/audio.ts) | 16 kHz capture and 24 kHz scheduled playback |
 | [public/worklets/pcm-capture.js](public/worklets/pcm-capture.js) | AudioWorklet: float32 → int16, batched to ~128 ms |
+| [functions/api/faces/](functions/api/faces/) | The shared face library on R2 — list, get, publish, unpublish |
+| [src/facekit/published.ts](src/facekit/published.ts) | What that library holds and where, read by the Worker and the browser alike |
+| [src/facekit/store.ts](src/facekit/store.ts) | IndexedDB: the kits this browser authored, and a cache of the ones it fetched |
 
 ## What a call can be configured with
 
-This is a rig for comparing realtime models as language tutors, so the prompt
-and the knobs are set per call, from the panel, and kept in `localStorage`
-between calls.
+**tutorBench** is the page for comparing realtime models as language tutors,
+so the prompt and the knobs are set per call, from the panel, and kept in
+`localStorage` between calls.
 
 **The prompt is the client's to write.** It used to be server-only, so that a
 visitor could not turn a metered key into their own chatbot — the right call for
@@ -133,7 +139,7 @@ Saved prompts live beside them in
 `vocotrial.presets.v1` in `localStorage`. Write anything in the box, **Save as
 new**, name it, and it joins the picker; **Update** writes over the selected one
 and **Delete** removes it. Both pages read this store, so a prompt written on
-the comparison rig is offered on liveTrial too, and whichever was picked last —
+tutorBench is offered on liveTrial too, and whichever was picked last —
 on either page — is the one both open on.
 
 One real difference, surfaced in the panel rather than hidden: a saved prompt is
@@ -141,6 +147,57 @@ One real difference, surfaced in the panel rather than hidden: a saved prompt is
 follow the language picker afterwards. Rewriting someone's own words on a
 dropdown change would be worse than letting them go stale. Updating a built-in
 is deliberately not offered — they are code; save your version as your own.
+
+## The shared face library
+
+A kit is nine 1024-square PNGs, which is why kits live in IndexedDB rather than
+`localStorage` — and, until now, why they went nowhere else. That was fine while
+one person on one laptop was the whole audience and useless the moment a face
+has to appear on a machine that never authored it.
+
+So faceKit **publishes**: it copies the kit to an R2 bucket, and every other
+browser signed in to this site reads it back. liveTrial's picker is the first
+consumer of that channel.
+
+```
+faceKit ──publish──► R2 ──list──► liveTrial's picker
+ (one browser)              └────get───► the face it wears
+```
+
+| Object | What it is |
+| --- | --- |
+| `index.json` | Every published face as `{ id, name, createdAt, publishedAt, thumb }` |
+| `kits/<id>.json` | One whole kit, the artwork inlined as data URLs |
+
+**The index is one object rather than a `list()` call**, because R2 will hand
+back custom metadata with its keys but that metadata is HTTP headers — capped
+around two kilobytes, nowhere near a thumbnail. A picker of names with no faces
+is not a picker, so the alternative was one read per face just to draw the
+strip. Thumbnails ride inside the index for the same reason a thumbnail cannot
+be an `<img src>` pointing at a route: the middleware allows POST and nothing
+else.
+
+Three things worth knowing:
+
+- **`publishedAt` is the whole cache check.** A browser keeps fetched kits in a
+  second IndexedDB store and compares that one number against the listing, so a
+  page load costs a small request rather than several megabytes of artwork that
+  has not changed. A republish bumps it and the next load re-fetches.
+- **Publishing keyed by the kit's own id**, so publishing twice replaces a face
+  rather than leaving two with one name. `original` — the portrait as uploaded,
+  kept so neutralising stays repeatable — is dropped on the way out: it is an
+  authoring concern, useless to anything that only wears the face, and close to
+  half the payload.
+- **Unpublish is not delete.** It removes the shared copy; the authored kit in
+  the author's own browser is untouched. faceKit's delete button is the other
+  thing, deliberately kept separate so a mistake here costs a re-publish rather
+  than artwork.
+
+One writer is assumed. The index is read, edited and written back, so two
+publishes landing together can lose one of the two entries — the kits themselves
+are already safely written by then, so the loss is a face missing from the
+listing until something republishes it. Not worth a lock while the author is one
+person at one keyboard.
 
 ## First-time deploy
 
@@ -203,7 +260,17 @@ gates the build.
 
    They have to go in the dashboard: because `wrangler.toml` exists, Pages takes
    plain-text vars from that file and the dashboard will only accept Secrets.
-4. Push to `main`. Every push deploys; every PR gets a preview URL.
+4. **Create the face bucket**, once, before the first publish:
+
+   ```bash
+   npx wrangler r2 bucket create vocotrial-faces
+   ```
+
+   The binding is already in [wrangler.toml](wrangler.toml) — a binding name is
+   not a credential, so unlike the keys it belongs in the file. Without the
+   bucket, faceKit's publish button and liveTrial's picker both say no library
+   is configured, and nothing else is affected.
+5. Push to `main`. Every push deploys; every PR gets a preview URL.
 
 Set `SITE_PASSWORD` **before** the first deploy that includes the gate. It fails
 closed, so a deployment without it locks out everyone, you included — the sign-in
@@ -245,6 +312,7 @@ npm run lint
 | `/api/live/models` | probes candidate ids with `generateContent`, the only call this key may make |
 | `/api/live/regions` | **run 2026-08-16** — all twelve hosts take the key; Pro is global-endpoint-only, Flash is in seven regions |
 | `/api/image/generate` | **working on Vertex** — returned an image in ~16s on Flash |
+| `/api/faces/*`, the shared library | **untested** — typechecks, lints and builds; the publish → list → wear round trip needs a browser and a created bucket |
 | Gemini handshake | **working** — 2.5 native audio on Vertex, 3.1 Flash Live on AI Studio |
 | Gemini audio in a browser | untested; needs a mic |
 | Saved prompt presets | typechecks and builds; the create/update/delete round trip is **untested in a browser** |
@@ -416,3 +484,9 @@ page may hold, and if one exists it will be a Vertex one.
 - **No session resumption.** A dropped socket ends the call rather than
   reconnecting; the Live API supports resumption handles if that becomes worth
   wiring up.
+- **Students will reach every page.** The site is one shared password, so
+  anyone who can practise can also open faceKit and spend the image keys, and
+  every metered call is anonymous — there is nothing to attribute a bill to or
+  to rate-limit per person. A deliberate choice while the audience is nobody
+  yet; the alternative is a real user store, and that is worth building once
+  students are actually using this rather than before.

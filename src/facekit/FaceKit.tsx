@@ -46,7 +46,9 @@ import {
   type BoxId,
   type SlotId,
 } from './slots';
-import { deleteKit, listKits, saveKit, selectKit, selectedKitId } from './store';
+import { listPublished, publishKit, unpublishFace } from './library';
+import type { PublishedFace } from './published';
+import { deleteKit, listKits, saveKit, selectKit, selectedKit, type KitRef } from './store';
 import { download, zip } from './zip';
 
 /**
@@ -254,7 +256,7 @@ function money(usd: number): string {
 export default function FaceKit() {
   const [kit, setKit] = useState<Kit | null>(null);
   const [saved, setSaved] = useState<Kit[]>([]);
-  const [inUse, setInUse] = useState<string | null>(selectedKitId());
+  const [inUse, setInUse] = useState<KitRef | null>(selectedKit());
   const [region, setRegion] = useState<BoxId>('mouth');
   const [candidates, setCandidates] = useState<Partial<Record<SlotId, Candidate[]>>>({});
   /**
@@ -328,6 +330,26 @@ export default function FaceKit() {
   }, []);
 
   useEffect(refresh, [refresh]);
+
+  /**
+   * What the shared library holds, which is not what this browser holds.
+   *
+   * Kept separate from `saved` rather than merged into one list, because the
+   * two answer different questions — "what can I edit" and "what can anyone
+   * else see" — and a face can easily be in one and not the other. A kit
+   * deleted here stays published until it is unpublished; a face published from
+   * another machine is not editable from this one at all.
+   */
+  const [published, setPublished] = useState<PublishedFace[]>([]);
+  const [publishing, setPublishing] = useState(false);
+
+  const refreshLibrary = useCallback(() => {
+    listPublished()
+      .then(setPublished)
+      .catch(() => setPublished([]));
+  }, []);
+
+  useEffect(refreshLibrary, [refreshLibrary]);
 
   // Deduplicated: picking the same model in both slots should offer one button,
   // not two identical ones side by side.
@@ -719,8 +741,31 @@ export default function FaceKit() {
   const use = async () => {
     if (!kit) return;
     await store();
-    selectKit(kit.id);
-    setInUse(kit.id);
+    const ref: KitRef = { source: 'local', id: kit.id };
+    selectKit(ref);
+    setInUse(ref);
+  };
+
+  /**
+   * Saves, then copies the kit into the shared library.
+   *
+   * Saved first on purpose: publishing artwork that is not also kept locally
+   * would leave the only editable copy in the page, one reload from gone. The
+   * save is the cheap half and the one that cannot be redone from the far side.
+   */
+  const share = async () => {
+    if (!kit) return;
+    setError(null);
+    setPublishing(true);
+    try {
+      await store();
+      await publishKit(kit);
+      refreshLibrary();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'That kit could not be published');
+    } finally {
+      setPublishing(false);
+    }
   };
 
   /**
@@ -804,7 +849,7 @@ export default function FaceKit() {
               liveTrial →
             </a>
             <a href="/" className="underline-offset-4 hover:underline">
-              comparison rig →
+              tutorBench →
             </a>
           </nav>
         </header>
@@ -1302,6 +1347,19 @@ export default function FaceKit() {
               </button>
               <button
                 type="button"
+                onClick={() => void share()}
+                disabled={publishing}
+                title="Copies this kit to the shared library, so a browser that never authored it can wear it. Publishing again replaces the shared copy."
+                className="rounded-lg border border-slate-700 px-3 py-1.5 text-sm text-slate-300 hover:border-slate-500 disabled:opacity-40"
+              >
+                {publishing
+                  ? 'Publishing…'
+                  : published.some((face) => face.id === kit.id)
+                    ? 'Republish to library'
+                    : 'Publish to library'}
+              </button>
+              <button
+                type="button"
                 onClick={exportKit}
                 className="rounded-lg border border-slate-700 px-3 py-1.5 text-sm text-slate-300 hover:border-slate-500"
               >
@@ -1350,7 +1408,9 @@ export default function FaceKit() {
                       src={entry.base}
                       alt=""
                       className={`h-24 w-24 rounded-lg border object-cover ${
-                        entry.id === inUse ? 'border-sky-500' : 'border-slate-800 hover:border-slate-600'
+                        inUse?.source === 'local' && inUse.id === entry.id
+                          ? 'border-sky-500'
+                          : 'border-slate-800 hover:border-slate-600'
                       }`}
                     />
                   </button>
@@ -1359,7 +1419,7 @@ export default function FaceKit() {
                     type="button"
                     onClick={() =>
                       void deleteKit(entry.id).then(() => {
-                        if (entry.id === inUse) {
+                        if (inUse?.source === 'local' && inUse.id === entry.id) {
                           selectKit(null);
                           setInUse(null);
                         }
@@ -1369,6 +1429,48 @@ export default function FaceKit() {
                     className="text-[10px] text-slate-600 underline-offset-4 hover:underline"
                   >
                     delete
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+
+        {published.length > 0 && (
+          <section className="space-y-2 border-t border-slate-800 pt-4">
+            <h2 className="text-sm font-medium text-slate-300">Shared library</h2>
+            <p className="max-w-prose text-xs text-slate-500">
+              Published faces, readable from any browser signed in to this site. This is the
+              list liveTrial's picker offers. Unpublishing removes the shared copy and leaves
+              the kit in this browser alone.
+            </p>
+            <ul className="flex flex-wrap gap-3">
+              {published.map((face) => (
+                <li key={face.id} className="space-y-1 text-center">
+                  {/* Not a button: there is nothing to open. The editable kit
+                      is in Saved kits above, and only if this browser is the
+                      one that authored it. */}
+                  <img
+                    src={face.thumb}
+                    alt=""
+                    className="h-24 w-24 rounded-lg border border-slate-800 object-cover"
+                  />
+                  <p className="max-w-24 truncate text-[11px] text-slate-400">{face.name}</p>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      void unpublishFace(face.id)
+                        .then(refreshLibrary)
+                        .catch((cause: unknown) =>
+                          setError(
+                            cause instanceof Error ? cause.message : 'That face could not be removed',
+                          ),
+                        )
+                    }
+                    title="Removes the shared copy. The kit in this browser is untouched."
+                    className="text-[10px] text-slate-600 underline-offset-4 hover:underline"
+                  >
+                    unpublish
                   </button>
                 </li>
               ))}

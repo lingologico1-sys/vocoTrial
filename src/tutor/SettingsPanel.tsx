@@ -1,13 +1,13 @@
 import { useState } from 'react';
-import { MAX_INSTRUCTIONS } from './realtime/instructions';
-import { MAX_PRESET_NAME, type Preset } from './realtime/presets';
+import { MAX_INSTRUCTIONS } from '../realtime/instructions';
+import { MAX_PRESET_NAME, type Preset } from '../realtime/presets';
 import {
   fieldsFor,
   optionsFor,
   type SessionSettings,
   type SettingField,
-} from './realtime/settings';
-import type { ModelChoice } from './realtime/models';
+} from '../realtime/settings';
+import type { ModelChoice } from '../realtime/models';
 
 /**
  * The prompt and the Gemini knobs, for the call you are about to place.

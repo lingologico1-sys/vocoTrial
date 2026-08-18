@@ -34,3 +34,18 @@ pages_build_output_dir = "dist"
 # OPENAI_REALTIME_VOICE was the last entry, and went with OpenAI Realtime.
 # Gemini's voice is picked in the settings panel and set in the setup frame.
 [vars]
+
+# The shared face library. faceKit publishes a kit here and every other browser
+# reads it back, which is the only way a face authored on one laptop reaches a
+# student on another — kits otherwise live in the authoring browser's IndexedDB
+# and go no further. See functions/api/faces/.
+#
+# Create it once before the first publish:
+#
+#   npx wrangler r2 bucket create vocotrial-faces
+#
+# Unlike the API keys, this is not a secret and belongs in this file: a binding
+# name is not a credential, and Pages needs it here to inject the binding.
+[[r2_buckets]]
+binding = "FACES"
+bucket_name = "vocotrial-faces"
