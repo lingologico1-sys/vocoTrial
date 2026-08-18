@@ -19,11 +19,13 @@
  * from the client is a model id or a language code (see models.ts and
  * languages.ts): those pick what gets spent, and a prompt does not.
  *
- * Deliberately free of imports beyond the language type: functions/ compiles
- * against workers-types with no DOM lib, so this has to stay pure.
+ * Deliberately free of imports beyond two types: functions/ compiles against
+ * workers-types with no DOM lib, so this has to stay pure. Both files it reaches
+ * for — languages.ts and facekit/persona.ts — are pure data for the same reason.
  */
 
 import type { LanguageChoice } from './languages';
+import { hasPersona, type Persona } from '../facekit/persona';
 
 /**
  * A ceiling on what the client may send, in characters.
@@ -233,6 +235,62 @@ export const INSTRUCTION_PRESETS: InstructionPreset[] = [
 
 export function defaultPresetKey(): string {
   return INSTRUCTION_PRESETS[0].key;
+}
+
+/**
+ * Wraps a rendered preset in the persona the worn face carries.
+ *
+ * A PREFIX AND A SUFFIX, never a rewrite. The preset's own text arrives here
+ * byte-identical to what it would have been without a persona, and leaves
+ * byte-identical, which is the property that keeps a run measurable: the
+ * difference between a session with a biography and one without is exactly
+ * these two blocks, so switching the persona off in liveTrial measures what
+ * they cost rather than comparing two prompts that drifted apart.
+ *
+ * THE ORDER IS THE DESIGN. Identity first, because it is background the model
+ * should read before it reads its instructions; the job second; the rules for
+ * using the background last, because a constraint that has to hold for a whole
+ * call is the thing these models revert on soonest, and last is where it
+ * survives longest. The precedence line at the end exists for the case the
+ * other two disagree, which they eventually will — a chatty persona and a
+ * corrective preset pull in opposite directions, and something has to win.
+ *
+ * The block of rules is doing more work than the biography is. A model handed a
+ * life wants to tell you about it, and every turn spent on Valencia is a turn
+ * not spent on the subjunctive — so the usage rules are written the way
+ * `selective` is written, as a test the model can actually run ("only when
+ * asked", "at most one") rather than a judgement it has to make about how much
+ * is too much.
+ *
+ * The honesty clause is deliberate and not a hedge. This face is a drawing with
+ * a voice, and a learner who directly asks whether they are talking to a person
+ * gets told. The persona is a texture on a tutor, not a deception, and a model
+ * left without the line will improvise its own answer in either direction.
+ *
+ * Headed blocks rather than merged prose, because the two are read differently:
+ * a labelled block reads as reference material to draw on, and the same
+ * sentences run into the instructions read as things to perform.
+ */
+export function withPersona(instructions: string, persona?: Persona): string {
+  if (!hasPersona(persona)) return instructions;
+
+  const named = persona.fullName.trim();
+  const opening = named ? `You are ${named}.` : '';
+  const bio = persona.bio.trim();
+
+  return `WHO YOU ARE
+${[opening, bio].filter(Boolean).join('\n')}
+
+YOUR JOB
+${instructions}
+
+USING YOUR BACKGROUND
+Never volunteer your life story. Bring in a detail from it only when the learner
+asks you something about yourself, or when it makes a natural example — at most
+one detail per turn, in one sentence, and then carry on. Never list facts about
+yourself. If the learner asks directly whether you are a real person, tell them
+the truth and go back to the lesson. Everything under YOUR JOB wins wherever it
+disagrees with anything here.`;
 }
 
 /** What the server sends when the client supplies no instructions of its own. */

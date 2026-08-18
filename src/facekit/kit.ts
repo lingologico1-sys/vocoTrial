@@ -1,4 +1,5 @@
 import { CANVAS_EDGE } from './imageModels';
+import type { Persona } from './persona';
 import {
   DEFAULT_LASH_STYLE,
   isBrow,
@@ -229,6 +230,22 @@ export interface FaceKit {
    * nothing about it for a migration to bring forward.
    */
   lashes?: LashStyle;
+  /**
+   * Who this face is, when anyone has said.
+   *
+   * The only member here that is never drawn and never measured — it is prompt
+   * text, and it rides on the kit because identity travels with a face rather
+   * than with a session. A kit published to the library carries it (unlike
+   * `original`, which is stripped): a browser that never authored the portrait
+   * needs the person more than it needs the authoring history.
+   *
+   * Optional, and absent is the ordinary state rather than a gap to fill: it
+   * means this face says nothing about itself, which is exactly what every kit
+   * did before the field existed and what liveTrial sends when the persona is
+   * switched off. No format bump for the same reason `lashes` needed none —
+   * nothing already drawn has to be brought forward.
+   */
+  persona?: Persona;
   /** What the kit has cost to generate so far, in USD. A floor — see below. */
   spentUsd: number;
 }

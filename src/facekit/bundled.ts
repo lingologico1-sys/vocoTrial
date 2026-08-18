@@ -1,4 +1,5 @@
 import { KIT_FORMAT, migrate, type Boxes, type FaceKit } from './kit';
+import type { Persona } from './persona';
 import type { LashStyle, SlotId } from './slots';
 
 /**
@@ -25,6 +26,13 @@ interface BundledManifest {
   boxes?: Boxes;
   patches?: Partial<Record<SlotId, string>>;
   lashes?: LashStyle;
+  /**
+   * Carried through like the rest of the manifest, and it is the one member
+   * here that is not about pixels. A committed face is the one every fresh
+   * browser wears, so it is the face most in need of somebody to be — and
+   * dropping it here would quietly make the two routes into a kit disagree.
+   */
+  persona?: Persona;
 }
 
 export async function loadBundledKit(name = 'face'): Promise<FaceKit | null> {
@@ -53,6 +61,7 @@ export async function loadBundledKit(name = 'face'): Promise<FaceKit | null> {
       boxes: manifest.boxes,
       patches,
       lashes: manifest.lashes,
+      persona: manifest.persona,
       spentUsd: 0,
     });
   } catch {

@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Mic, MicOff, PhoneOff, Radio, SlidersHorizontal } from 'lucide-react';
+import { Mic, MicOff, PhoneOff, Radio, SlidersHorizontal, User } from 'lucide-react';
 import { startGeminiSession } from '../realtime/gemini';
 import { findModel } from '../realtime/models';
 import { LANGUAGES, defaultLanguageCode, findLanguage } from '../realtime/languages';
 import { lastUsedKey, listPresets, rememberPreset, renderPreset } from '../realtime/presets';
+import { withPersona } from '../realtime/instructions';
 import { VOICES } from '../realtime/settings';
 import type { AudioTap, SessionStatus, TranscriptDelta, VoiceSession } from '../realtime/types';
 import type { FaceKit } from '../facekit/kit';
+import { hasPersona } from '../facekit/persona';
 import { loadBundledKit } from '../facekit/bundled';
 import { listPublished } from '../facekit/library';
 import type { PublishedFace } from '../facekit/published';
@@ -79,6 +81,7 @@ const PREFS_KEY = 'vocotrial.live.v7';
 interface Prefs {
   language: string;
   voice: string;
+  persona: boolean;
   driver: MouthDriver;
   lookaheadMs: number;
   motion: HeadMotion;
@@ -213,6 +216,21 @@ export default function LiveTrial() {
    * it is the whole point of the page.
    */
   const [voice, setVoice] = useState<string>(prefs.voice ?? '');
+  /**
+   * Whether the worn face's own background goes into the prompt.
+   *
+   * A switch rather than a fixture, and that is the measurement rather than a
+   * courtesy: a persona is a block of text competing with the preset for the
+   * model's attention, and the question worth answering is whether a tutor
+   * still corrects as well while it is being somebody. The same face under the
+   * same preset with this off is the control, and `withPersona` is written as a
+   * prefix and a suffix precisely so the two runs differ by nothing else.
+   *
+   * On by default: a kit that carries a persona was given one deliberately, and
+   * a face whose backstory silently did nothing would be the more confusing of
+   * the two defaults. It does nothing at all on a kit that has none.
+   */
+  const [persona, setPersona] = useState<boolean>(prefs.persona ?? true);
   // Scheduled by default: it is the better mouth, and reactive is kept beside
   // it as the thing to compare against rather than the thing to start from.
   const [driver, setDriver] = useState<MouthDriver>(prefs.driver ?? 'scheduled');
@@ -327,7 +345,13 @@ export default function LiveTrial() {
     let live = true;
     activeKit()
       .then((found) => {
-        if (live) setKit(found);
+        if (!live) return;
+        setKit(found);
+        // Only when this browser has no pick of its own to restore. A face's
+        // suggested voice is a default, and a default that overrode a saved
+        // preference on every reload would not be one — see `wear`, which is
+        // the other half of this rule and the case where adopting is right.
+        if (!prefs.voice && found?.persona?.voice) setVoice(found.persona.voice);
       })
       .catch(() => undefined);
     listPublished()
@@ -346,7 +370,10 @@ export default function LiveTrial() {
     return () => {
       live = false;
     };
-  }, []);
+    // `prefs` is the one snapshot this page ever reads — useState(loadPrefs)
+    // holds it for the lifetime of the component — so naming it here satisfies
+    // the rule without making this a mount effect that can run twice.
+  }, [prefs]);
 
   /**
    * Puts a face on, and remembers it for next time.
@@ -365,6 +392,12 @@ export default function LiveTrial() {
       selectKit(ref);
       setChosen(ref);
       setKit(next);
+      // Changing face is the one moment a suggested voice should win. The pick
+      // being overwritten was made for the face being taken off, and the
+      // alternative — a new character in the old character's voice — is the
+      // mismatch the field exists to prevent. Silent on a kit with no opinion,
+      // and a deliberate pick afterwards still stands.
+      if (next?.persona?.voice) setVoice(next.persona.voice);
     } catch {
       // The face on screen is still the one that loaded, which is the better
       // of the two things to be looking at when a fetch fails.
@@ -385,6 +418,7 @@ export default function LiveTrial() {
         JSON.stringify({
           language,
           voice,
+          persona,
           driver,
           lookaheadMs,
           motion,
@@ -405,6 +439,7 @@ export default function LiveTrial() {
   }, [
     language,
     voice,
+    persona,
     driver,
     lookaheadMs,
     motion,
@@ -559,7 +594,15 @@ export default function LiveTrial() {
     try {
       lastActivity.current = Date.now();
       const started = await startGeminiSession(handlers, MODEL_KEY, language, {
-        instructions: renderPreset(presetKey, choice),
+        // The preset decides what the tutor does; the worn face decides who is
+        // doing it. Composed at the call rather than held in state so that the
+        // prompt cannot go stale against a face swapped since — and composed
+        // by a function that leaves the preset's own text untouched, which is
+        // what makes a persona-on run comparable with a persona-off one.
+        instructions: withPersona(
+          renderPreset(presetKey, choice),
+          persona ? kit?.persona : undefined,
+        ),
         // Absent rather than empty when nothing is picked: the Worker drops a
         // blank, but sending one at all reads as a choice nobody made.
         settings: voice ? { voice } : {},
@@ -1212,6 +1255,33 @@ export default function LiveTrial() {
               ))}
             </select>
           </label>
+
+          {/*
+            Beside the prompt picker rather than among the motion knobs, because
+            it belongs to the same sentence: the preset is the job and this is
+            who is doing it. Locked while a call is up, like the two pickers
+            before it — all three are fixed in the setup frame.
+          */}
+          <button
+            type="button"
+            onClick={() => setPersona(!persona)}
+            disabled={live || busy || !hasPersona(kit?.persona)}
+            title={
+              hasPersona(kit?.persona)
+                ? 'Puts this face’s own background into the prompt, above the tutor prompt and with rules for using it below. Off is the control: the same face, the same prompt, nobody in particular.'
+                : 'This face has no background. Write one on faceKit — it travels with the kit.'
+            }
+            className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm ${
+              persona && hasPersona(kit?.persona)
+                ? 'border-slate-700 text-slate-200'
+                : 'border-slate-800 text-slate-500'
+            } disabled:opacity-40`}
+          >
+            <User size={13} />
+            {hasPersona(kit?.persona)
+              ? kit?.persona?.fullName.trim() || 'Persona'
+              : 'No persona'}
+          </button>
         </div>
 
         <div className="flex gap-3">

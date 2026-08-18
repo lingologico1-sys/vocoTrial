@@ -3,6 +3,7 @@ import BoxPicker from './BoxPicker';
 import DiagnosticsPanel from './DiagnosticsPanel';
 import Filmstrip from './Filmstrip';
 import MotionPreview from './MotionPreview';
+import PersonaPanel from './PersonaPanel';
 import {
   composite,
   dataUrlToBlob,
@@ -801,6 +802,9 @@ export default function FaceKit() {
       base: 'base.png',
       boxes: kit.boxes,
       lashes: kit.lashes ?? DEFAULT_LASH_STYLE,
+      // Written only when there is one, so a folder for a face with no
+      // background holds no empty key inviting someone to fill it in.
+      ...(kit.persona ? { persona: kit.persona } : {}),
       patches: Object.fromEntries(
         SLOTS.filter((entry) => kit.patches[entry.id]).map((entry) => [
           entry.id,
@@ -1329,6 +1333,8 @@ export default function FaceKit() {
                 );
               })}
             </section>
+
+            <PersonaPanel kit={kit} edit={edit} money={money} />
 
             <section className="flex flex-wrap items-center gap-2 border-t border-slate-800 pt-4">
               <button
