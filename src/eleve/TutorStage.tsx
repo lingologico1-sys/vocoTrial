@@ -120,6 +120,7 @@ export default function TutorStage({
             browLift={session.browLift}
             tilt={session.tilt}
             tiltRoll={session.tiltRoll}
+            tiltSettle={session.tiltSettle}
             tiltCue={tiltCue}
             speaking={speaking}
             bleed

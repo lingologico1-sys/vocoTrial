@@ -800,7 +800,6 @@ interface Envelope {
   release: number;
 }
 
-const total = (shape: Envelope) => shape.attack + shape.hold + shape.release;
 
 /**
  * The shape of one gesture.
@@ -906,19 +905,74 @@ const BROW_FLASH_CHANCE = 0.5;
  * The shape of a tilt, and the one envelope here that is a pose rather than a beat.
  *
  * Read against GESTURE, which it is deliberately unlike in all three terms. The
- * attack is more than twice as slow because a tilt settles into place — a head
- * that snaps sideways in 120ms has been startled, not made thoughtful. The hold
- * is nearly six times as long, which is the whole of what makes it a pose: it is
+ * attack is four times as slow because a tilt settles into place — a head that
+ * snaps sideways in 120ms has been startled, not made thoughtful. The hold is
+ * nearly six times as long, which is the whole of what makes it a pose: it is
  * meant to still be there while the silence it was fired by plays out. And the
  * release is slower again than the attack, because a tilt unwinding faster than
  * it arrived reads as the head being let go of.
  *
- * Two seconds all told. That is long enough to be caught leaving as well as
- * arriving, and short enough that the face cannot be found frozen at an angle
- * thirty seconds into somebody else's turn — which is the failure mode of the
- * obvious alternative, holding it until the agent speaks again.
+ * That last clause is the one this file got wrong, and the attack is the number
+ * that paid for it. It shipped at 0.28 against a release of 0.8, and the first
+ * thing reported on a real call was that the head arrived more abruptly than it
+ * left — which is exactly what those two numbers say out loud. A lean that snaps
+ * into place and then oozes out of it is not what the paragraph above argued
+ * for: that argument was only ever that the release should be the slower of the
+ * two, and it says nothing whatever in favour of nearly three times slower. At
+ * 0.5 the ratio is 1.6, the argument is intact, and the release does not move —
+ * so the correction lands entirely on the arrival, which is the half that was
+ * complained about. DEFAULT_TILT_ROLL and DEFAULT_NOD_DEPTH have this same
+ * history twice over: shipped on reasoning, corrected on the first real call,
+ * range left alone because only the default was ever taste.
+ *
+ * Two and a third seconds all told at the default. That is long enough to be
+ * caught leaving as well as arriving, and short enough that the face cannot be
+ * found frozen at an angle thirty seconds into somebody else's turn — which is
+ * the failure mode of the obvious alternative, holding it until the agent speaks
+ * again.
+ *
+ * This is the reference shape rather than the played one. Attack and release are
+ * both stretched live by the settle below; the hold never is.
  */
-const TILT: Envelope = { attack: 0.28, hold: 1, release: 0.8 };
+const TILT: Envelope = { attack: 0.5, hold: 1, release: 0.8 };
+
+/**
+ * How long the head takes to arrive, in seconds, as a range — because the shape
+ * of a tilt turns out to be taste in the same way its angle was.
+ *
+ * The slider is the attack, and the release follows it at TILT's own ratio of
+ * 1.6 rather than being a second control. The ratio is the part that was
+ * reasoned about, so it is not the part worth handing over; and two sliders
+ * governing one gesture's two halves is an invitation to set them wrongly
+ * against each other, which is the single mistake this gesture cannot survive —
+ * it is the mistake the default itself made for as long as it stood.
+ *
+ * The hold does not scale, and that is why this is a settle rather than a speed.
+ * The hold is the whole of what makes a tilt a pose instead of a beat, and how
+ * long a head *stays* leaned is a different question from how fast it gets
+ * there: one is about the length of the silence being sat through, the other is
+ * about the neck. Scaling both would have answered the first question by
+ * accident every time somebody went to adjust the second.
+ *
+ * For scale, at the ratio above:
+ *
+ *   0.20s   0.32s out   1.52s total   about what shipped, and the abrupt end
+ *   0.50s   0.80s out   2.30s total   the default below
+ *   1.20s   1.92s out   4.12s total   the ceiling
+ *
+ * The ceiling is set against TILT_LOCKOUT rather than by taste, though not in
+ * the tidy way that sounds. At 1.2 the gesture runs 4.12s against a nominal
+ * five-second refusal to start another, and the jitter on that can bring it in
+ * as low as three — so the two genuinely do cross at the top of the range.
+ * Nothing breaks when they do: `advance` needs both the lockout expired and the
+ * previous gesture finished, so the longer of the two simply wins, and a trigger
+ * arriving mid-lean is refused exactly as a locked-out one is. What the ceiling
+ * actually protects is the claim two paragraphs up — much past this and the face
+ * is holding an angle long enough to be caught frozen at it.
+ */
+export const DEFAULT_TILT_SETTLE = TILT.attack;
+export const TILT_SETTLE_MIN = 0.2;
+export const TILT_SETTLE_MAX = 1.2;
 
 /**
  * How long the tilt refuses to fire again, in seconds.
@@ -1367,6 +1421,15 @@ export interface CueInput {
   /** Which moments close the lips. Empty is that feature off. See PressTrigger. */
   press: readonly PressTrigger[];
   /**
+   * How long a tilt takes to arrive, in seconds. See DEFAULT_TILT_SETTLE.
+   *
+   * On the cue rather than in the constructor because it is a live setting and
+   * the performer outlives any particular value of it — the same reason
+   * `triggers` is here. Read every frame and applied as a stretch, so nothing
+   * has to be rebuilt when the slider moves.
+   */
+  settle: number;
+  /**
    * Whether the head may nod while the microphone hears a voice.
    *
    * A boolean where the tilt and the press take sets, because there is one
@@ -1388,20 +1451,26 @@ export interface CueInput {
  * gap is already a lockout that nothing can hurry. Two would only argue.
  */
 class Channel {
-  /** Seconds since this fired. Starts past the end, so nothing is playing. */
-  private since: number;
+  /**
+   * Seconds since this fired. Infinite until it ever has, which is what says
+   * nothing is playing.
+   *
+   * It used to start level with the span, which was the same statement while the
+   * span was fixed at construction. It is not fixed any more — the tilt's settle
+   * stretches it live — so a channel mounted while that slider sat near its top
+   * would have found itself apparently four fifths of the way through a gesture
+   * it never fired, and unwound from a full lean over the following two seconds.
+   * Infinity is past the end of every span this can be given.
+   */
+  private since = Number.POSITIVE_INFINITY;
   /** Seconds still to wait. */
   private locked = 0;
-  private readonly span: number;
   private justStarted = false;
 
   constructor(
     private readonly shape: Envelope,
     private readonly lockout = 0,
-  ) {
-    this.span = total(shape);
-    this.since = this.span;
-  }
+  ) {}
 
   /**
    * Whether the last `advance` was the frame this took the trigger.
@@ -1417,19 +1486,31 @@ class Channel {
     return this.justStarted;
   }
 
-  advance(dt: number, trigger: boolean): number {
+  /**
+   * `stretch` scales the moving halves and leaves the hold alone, which is the
+   * tilt's settle and nothing else — every other channel takes the default and
+   * plays the shape it was built with. Recomputed per frame rather than latched
+   * at the trigger, so dragging the slider mid-gesture retimes the rest of that
+   * gesture instead of finishing it at the old rate. That is a frame or two of
+   * disagreement in exchange for a slider that shows its work while it moves.
+   */
+  advance(dt: number, trigger: boolean, stretch = 1): number {
     this.since += dt;
     this.locked = Math.max(0, this.locked - dt);
     this.justStarted = false;
 
-    if (trigger && this.locked === 0 && this.since >= this.span) {
+    const attack = this.shape.attack * stretch;
+    const release = this.shape.release * stretch;
+    const { hold } = this.shape;
+    const span = attack + hold + release;
+
+    if (trigger && this.locked === 0 && this.since >= span) {
       this.since = 0;
       this.justStarted = true;
       this.locked = jittered(this.lockout);
     }
 
-    const { attack, hold, release } = this.shape;
-    if (this.since >= this.span) return 0;
+    if (this.since >= span) return 0;
     if (this.since < attack) return smooth(this.since / attack);
     if (this.since < attack + hold) return 1;
     return 1 - smooth((this.since - attack - hold) / release);
@@ -1806,7 +1887,14 @@ export class HeadPerformer {
     this.questionPending = false;
     this.yieldPending = false;
 
-    const leaning = this.tiltChannel.advance(dt, fireTilt);
+    /*
+      The cue carries a duration and the channel wants a multiple of the shape it
+      was built with. Guarded rather than divided blindly: a caller passing zero
+      would collapse the envelope to its hold alone and step the head sideways
+      inside a single frame, which is the one thing this setting exists to stop.
+    */
+    const stretch = cue.settle > 0 ? cue.settle / TILT.attack : 1;
+    const leaning = this.tiltChannel.advance(dt, fireTilt, stretch);
     if (this.tiltChannel.started) {
       if (waitTilt && this.waitTiltSide !== 0) {
         this.tiltSide = this.waitTiltSide;

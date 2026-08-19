@@ -62,6 +62,8 @@ interface SpeakingFaceProps {
   tilt?: readonly TiltTrigger[];
   /** How far it leans, in degrees. Switchable mid-call, like the lookahead. */
   tiltRoll?: number;
+  /** How long it takes to get there. See DEFAULT_TILT_SETTLE. */
+  tiltSettle?: number;
   /** The latest question or handover. See TiltCue. */
   tiltCue?: TiltCue | null;
   /** Whether the agent's audio is playing. Only the tilt reads it. */
@@ -94,6 +96,7 @@ export default function SpeakingFace({
   browLift,
   tilt,
   tiltRoll,
+  tiltSettle,
   tiltCue,
   speaking,
   bleed,
@@ -191,6 +194,7 @@ export default function SpeakingFace({
       browLift={browLift}
       tilt={tilt}
       tiltRoll={tiltRoll}
+      tiltSettle={tiltSettle}
       tiltCue={tiltCue}
       speaking={speaking}
       bleed={bleed}

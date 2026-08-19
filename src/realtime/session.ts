@@ -112,6 +112,16 @@ export interface StudentSession {
   browLift: number;
   tilt: TiltTrigger[];
   tiltRoll: number;
+  /**
+   * How long a tilt takes to arrive, in seconds, and optional where its
+   * neighbours are required.
+   *
+   * Optional because setups published before it existed are sitting in R2 and
+   * have to keep opening. Absent means the face's own default rather than zero —
+   * `tiltSettle={session.tiltSettle}` hands undefined to a defaulted prop, which
+   * is the whole mechanism and the reason this needs no migration.
+   */
+  tiltSettle?: number;
   listenNod: boolean;
   nodDepth: number;
 
@@ -180,6 +190,7 @@ export function looksLikeSession(value: unknown): value is StudentSession {
     typeof session.browLift === 'number' &&
     isStringArray(session.tilt) &&
     typeof session.tiltRoll === 'number' &&
+    (session.tiltSettle === undefined || typeof session.tiltSettle === 'number') &&
     typeof session.listenNod === 'boolean' &&
     typeof session.nodDepth === 'number'
   );

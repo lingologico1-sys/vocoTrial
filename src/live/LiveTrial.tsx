@@ -28,6 +28,7 @@ import {
   DEFAULT_NOD_DEPTH,
   DEFAULT_PRESS_TRIGGERS,
   DEFAULT_TILT_ROLL,
+  DEFAULT_TILT_SETTLE,
   DEFAULT_TILT_TRIGGERS,
   HEAD_MOTIONS,
   MOTION_CADENCES,
@@ -36,6 +37,8 @@ import {
   PRESS_TRIGGERS,
   TILT_ROLL_MAX,
   TILT_ROLL_MIN,
+  TILT_SETTLE_MAX,
+  TILT_SETTLE_MIN,
   TILT_TRIGGERS,
   type HeadMotion,
   type MotionCadence,
@@ -151,6 +154,7 @@ interface Prefs {
   browLift: number;
   tilt: TiltTrigger[];
   tiltRoll: number;
+  tiltSettle: number;
   listenNod: boolean;
   nodDepth: number;
   roundness: RoundnessMode;
@@ -282,6 +286,7 @@ export default function LiveTrial() {
   // the sentence it lands on, and a value you have to reconnect to try is a
   // value you are comparing against a memory.
   const [tiltRoll, setTiltRoll] = useState<number>(prefs.tiltRoll ?? DEFAULT_TILT_ROLL);
+  const [tiltSettle, setTiltSettle] = useState<number>(prefs.tiltSettle ?? DEFAULT_TILT_SETTLE);
 
   // The head's one movement during the user's turn. Stored like the rest, and
   // absent from anybody's saved prefs until they touch it — which is what the
@@ -422,6 +427,7 @@ export default function LiveTrial() {
           browLift,
           tilt,
           tiltRoll,
+          tiltSettle,
           listenNod,
           nodDepth,
           roundness,
@@ -443,6 +449,7 @@ export default function LiveTrial() {
     browLift,
     tilt,
     tiltRoll,
+    tiltSettle,
     listenNod,
     nodDepth,
     roundness,
@@ -566,6 +573,7 @@ export default function LiveTrial() {
         browLift,
         tilt,
         tiltRoll,
+        tiltSettle,
         listenNod,
         nodDepth,
       };
@@ -637,6 +645,7 @@ export default function LiveTrial() {
           browLift={browLift}
           tilt={tilt}
           tiltRoll={tiltRoll}
+          tiltSettle={tiltSettle}
           tiltCue={tiltCue}
           speaking={speaking}
         />
@@ -921,6 +930,34 @@ export default function LiveTrial() {
                 />
                 <span className="w-10 text-right font-mono text-slate-300">
                   {tiltRoll.toFixed(1)}°
+                </span>
+              </label>
+            )}
+
+            {/*
+              Beside Lean rather than under it, because they are the two halves
+              of one gesture — how far it goes and how long it takes to get
+              there. The readout gives both ends of the movement, since the
+              number being dragged is only the arrival and the departure is the
+              half that was ever complained about.
+            */}
+            {tilt.length > 0 && (
+              <label
+                title="How long the head takes to reach the lean. The return is always slower — a tilt that unwinds faster than it arrived reads as the head being dropped rather than lifted — so this drags both, at a fixed ratio. It does not change how long the lean is held, which is what makes it a pose rather than a beat."
+                className="flex min-w-[11rem] flex-1 cursor-help items-center gap-2 text-xs text-slate-500"
+              >
+                Settle
+                <input
+                  type="range"
+                  min={TILT_SETTLE_MIN}
+                  max={TILT_SETTLE_MAX}
+                  step={0.05}
+                  value={tiltSettle}
+                  onChange={(event) => setTiltSettle(Number(event.target.value))}
+                  className="flex-1 accent-sky-500"
+                />
+                <span className="w-20 text-right font-mono text-slate-300">
+                  {tiltSettle.toFixed(2)}/{(tiltSettle * 1.6).toFixed(2)}s
                 </span>
               </label>
             )}

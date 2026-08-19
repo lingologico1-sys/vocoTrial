@@ -10,6 +10,7 @@ import {
   DEFAULT_NOD_DEPTH,
   DEFAULT_PRESS_TRIGGERS,
   DEFAULT_TILT_ROLL,
+  DEFAULT_TILT_SETTLE,
   DEFAULT_TILT_TRIGGERS,
   HeadPerformer,
   MOTION,
@@ -171,6 +172,14 @@ interface FaceProps {
    */
   tiltRoll?: number;
   /**
+   * How long it takes to get there, in seconds. See DEFAULT_TILT_SETTLE.
+   *
+   * The release follows this at a fixed ratio and is not separately settable —
+   * the shape of the gesture is the file's opinion, and only its pace is the
+   * caller's.
+   */
+  tiltSettle?: number;
+  /**
    * The latest question or handover, or null if there has not been one.
    *
    * A fresh object per event and never rebuilt on an ordinary render, because
@@ -265,6 +274,7 @@ export default function Face({
   browLift = DEFAULT_BROW_LIFT,
   tilt = DEFAULT_TILT_TRIGGERS,
   tiltRoll = DEFAULT_TILT_ROLL,
+  tiltSettle = DEFAULT_TILT_SETTLE,
   tiltCue,
   speaking = false,
   hold = false,
@@ -301,10 +311,20 @@ export default function Face({
    * face finding its feet cannot be used for the one thing it exists for, which
    * is flipping between two schedules on the same sentence.
    */
-  const latest = useRef({ level, cadence, browBlink, press, heard, tilt, speaking, listenNod });
+  const latest = useRef({
+    level,
+    cadence,
+    browBlink,
+    press,
+    heard,
+    tilt,
+    speaking,
+    listenNod,
+    tiltSettle,
+  });
   useEffect(() => {
-    latest.current = { level, cadence, browBlink, press, heard, tilt, speaking, listenNod };
-  }, [level, cadence, browBlink, press, heard, tilt, speaking, listenNod]);
+    latest.current = { level, cadence, browBlink, press, heard, tilt, speaking, listenNod, tiltSettle };
+  }, [level, cadence, browBlink, press, heard, tilt, speaking, listenNod, tiltSettle]);
 
   /**
    * Questions and handovers, handed to the performer as they arrive.
@@ -380,6 +400,7 @@ export default function Face({
         heard: latest.current.heard,
         press: latest.current.press,
         nod: latest.current.listenNod,
+        settle: latest.current.tiltSettle,
       });
       // Returning the identical object when nothing has moved is what keeps a
       // silent face cheap: between flashes this loop costs one callback a frame

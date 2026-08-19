@@ -92,6 +92,8 @@ interface StageProps {
   tilt?: readonly TiltTrigger[];
   /** How far it leans, in degrees. See DEFAULT_TILT_ROLL in headMotion.ts. */
   tiltRoll?: number;
+  /** How long it takes to get there. See DEFAULT_TILT_SETTLE. */
+  tiltSettle?: number;
   /** The latest question or handover. See TiltCue in headMotion.ts. */
   tiltCue?: TiltCue | null;
   /**
@@ -125,6 +127,7 @@ export default function Stage({
   browLift,
   tilt,
   tiltRoll,
+  tiltSettle,
   tiltCue,
   speaking,
 }: StageProps) {
@@ -228,6 +231,7 @@ export default function Stage({
               browLift={browLift}
               tilt={tilt}
               tiltRoll={tiltRoll}
+              tiltSettle={tiltSettle}
               tiltCue={tiltCue}
               speaking={speaking}
               mouthRef={mouth}
