@@ -1105,6 +1105,8 @@ export default function LiveTrial() {
                     All of them share one lockout of about five seconds, so ticking a second does
                     not lean the head twice as often — it changes which moments get the lean, and
                     which get swallowed by one that has just happened.
+                    {tilt.includes('waiting') &&
+                      ' Waiting is outside that rather than a fourth member of it: it fires six seconds into a silence none of the others can reach, so it is the one box here that adds movement instead of relocating it.'}
                   </p>
                 )}
               </>

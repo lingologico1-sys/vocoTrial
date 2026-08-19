@@ -70,7 +70,17 @@ export default function LearnerPill({
   const listening = live && !muted && heard;
 
   return (
-    <div className="relative mx-auto w-full max-w-xl shrink-0">
+    /*
+      The ten pixels under the rim are slack, not spacing.
+
+      The pill is pinned to the foot of the panel and grows as the sentence in
+      it wraps, so a long answer takes a second and a third line — and the rim
+      used to sit straight on the panel's own padding, which put the shadow hard
+      against the bottom of the window and read as the pill falling out of the
+      page rather than resting in it. Small enough that nothing above it moves,
+      wide enough that a three-line pill still has ground under it.
+    */
+    <div className="relative mx-auto mb-2.5 w-full max-w-xl shrink-0">
       {/*
         The pulse is a sibling rather than a ring on the pill itself, so it can
         scale past the pill's own edge without the text moving with it.

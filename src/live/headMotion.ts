@@ -128,10 +128,10 @@ export const MOTION: Record<HeadMotion, { rise: number; roll: number }> = {
  *
  * Every other switch in this file is a radio because its options are rival
  * answers to one question. These are not rivals: a face could plausibly tilt at
- * all three moments, at none, or at any pair, and the thing actually in doubt is
- * *how many of them at once* stops reading as a person and starts reading as a
- * face that cannot keep still. That question cannot be asked one option at a
- * time, so the control is three boxes.
+ * all four moments, at none, or at any combination, and the thing actually in
+ * doubt is *how many of them at once* stops reading as a person and starts
+ * reading as a face that cannot keep still. That question cannot be asked one
+ * option at a time, so the control is four boxes.
  *
  *  - `question` is the strongest of them and the cheapest. It is not measured off
  *    the audio at all — it reads the agent's own transcript, held back by
@@ -143,22 +143,34 @@ export const MOTION: Record<HeadMotion, { rise: number; roll: number }> = {
  *  - `listening` fires when the agent's audio ends and the floor goes back to
  *    the user. It is the only one that does anything during the long stretches
  *    when the face is not talking, which is most of a conversation.
+ *  - `waiting` is the odd one, and the only tilt that fires with nobody talking
+ *    at all. It sits out TILT_WAIT_ONSET of silence and then leans, which is the
+ *    posture of a tutor whose question has not been answered yet.
  *
  * `hesitation` and `listening` are kept apart by `speaking` rather than by their
  * timers, and they would otherwise be the same trigger firing twice: a turn
  * ending is also a silence. Gating the first on audio still playing makes the
  * pair disjoint, so turning both on is a real question about frequency and not
  * an accident of which clock won.
+ *
+ * `waiting` is kept apart from `listening` by the clock instead, and the first
+ * three are kept apart from it by what they are attached to. Those all name a
+ * moment in the conversation — a question was asked, the voice broke off, the
+ * turn ended — and this one names the conversation having stopped. So it is the
+ * only box here that genuinely adds movement rather than choosing where the
+ * movement goes, which is PRESS_TRIGGERS' `waiting` making the same claim on the
+ * same silence. See TILT_WAIT_ONSET for why the head is allowed it on a weaker
+ * argument than the lips were.
  */
-export type TiltTrigger = 'question' | 'hesitation' | 'listening';
+export type TiltTrigger = 'question' | 'hesitation' | 'listening' | 'waiting';
 
 /**
  * Questions only, to start with.
  *
- * The rarest and most defensible of the three, and the one whose signal is not
+ * The rarest and most defensible of the four, and the one whose signal is not
  * an inference. Shipping the feature switched off entirely would be the same as
  * not shipping it — nobody forms an opinion about a box they have to find and
- * tick — and shipping all three at once would answer the frequency question in
+ * tick — and shipping all four at once would answer the frequency question in
  * advance, in the direction this whole change exists to argue against.
  */
 export const DEFAULT_TILT_TRIGGERS: readonly TiltTrigger[] = ['question'];
@@ -178,6 +190,11 @@ export const TILT_TRIGGERS: Array<{ id: TiltTrigger; label: string; hint: string
     id: 'listening',
     label: 'Listening',
     hint: 'Fires when the tutor stops and the floor goes back to you. The only one that does anything while the face is not speaking, which is most of a conversation.',
+  },
+  {
+    id: 'waiting',
+    label: 'Waiting',
+    hint: 'Leans into a silence nobody is filling — about six seconds into one, and roughly every twenty seconds it lasts after that. The only tilt with no conversation to hang it on, and the one box here that adds movement rather than moving it somewhere else.',
   },
 ];
 
@@ -916,6 +933,63 @@ const TILT: Envelope = { attack: 0.28, hold: 1, release: 0.8 };
 const TILT_LOCKOUT = 5;
 
 /**
+ * How long a silence has to run before the head leans into it, and how long
+ * between leans while it lasts, in seconds.
+ *
+ * This is the idle sway's question put back to the head itself, which is the one
+ * place it has only ever been answered no. Worth saying plainly rather than
+ * burying: this is the closest anything has come to the movement that failed
+ * twice. It is the head, it is a silence, and it is on a timer.
+ *
+ * What is different is not the size. Shrinking it was the sway's second attempt
+ * and it bought nothing — half a pixel running the whole time is still a picture
+ * that will not sit still, only a fainter one. What is different is that a tilt
+ * is a pose where the sway was a drift. Two detuned sines never arrive anywhere;
+ * TILT attacks, holds and releases, so what the eye is given is a head that took
+ * a position and then let it go. That is a thing a person does while waiting, and
+ * it is legible as one largely because it ends.
+ *
+ * It cannot borrow the lip press's exemption and should not be read as doing so.
+ * WAIT_ONSET is admissible because lips dry, part and get re-seated whatever else
+ * is happening — maintenance, honest with nothing going on, which is the blink's
+ * own argument. A head has no such errand. This stands on a weaker and more
+ * interesting claim instead: that leaning into an unanswered question is the
+ * posture itself. Roll already means uncertainty, sympathy, a question, the
+ * moment the floor is handed over, and a tutor waiting on a stuck learner is
+ * squarely in that set. What matters is that it claims nothing about having
+ * understood anything, which is exactly what disqualified the nod from this
+ * moment — see the listener's nod above, where every dip is a claim to have
+ * followed something and the claim is false.
+ *
+ * Six seconds rather than the press's four, because four is a lean scheduled to
+ * be swallowed: TILT_LOCKOUT is five, and with `listening` also ticked the
+ * handover has just spent one. Six mostly clears it — the jitter is ±40%, so the
+ * early end of the range still lands inside the lockout now and then, and a
+ * waiting lean lost to one that fired five seconds earlier is the cheapest loss
+ * available here. Six also clears the case NOD_GAP is built around: a learner
+ * assembling a sentence in a language they are unsure of goes quiet for a second
+ * or two repeatedly, and none of those are a silence nobody is filling.
+ *
+ * Twenty between them makes this the rarest thing the face does by some way. For
+ * scale, against the other schedules: the nod is three and a half seconds, the
+ * blink four, the brow flash eight, the lip press fourteen. The tilt is also the
+ * longest gesture of them at a little over two seconds, so twenty is a wider gap
+ * in proportion than the number looks. Both jittered like everything else here.
+ *
+ * The press's own waiting schedule runs underneath this one and the two will
+ * occasionally land near each other. Not guarded against: they are separate
+ * channels moving different parts of the face by about a pixel each, and a mouth
+ * settling as the head leans is one gesture rather than two colliding.
+ *
+ * Ships unticked, unlike the press's `waiting`, and the difference is the
+ * argument above rather than caution. That one had the blink's exemption and
+ * could be defended before anybody saw it. This one is a claim about what a
+ * waiting face should look like, and there is nowhere to settle that but a call.
+ */
+const TILT_WAIT_ONSET = 6;
+const TILT_WAIT_GAP = 20;
+
+/**
  * Which moments close the lips, offered as a set for TILT_TRIGGERS' reason.
  *
  * All three are the same gesture on the same channel. Two of them differ only
@@ -1186,7 +1260,7 @@ const BROW_LOCKOUT = 7;
  */
 const LOCKOUT_JITTER = 0.4;
 
-/** That jitter applied to a duration, since four schedules now want it. */
+/** That jitter applied to a duration, since half a dozen schedules now want it. */
 const jittered = (seconds: number) =>
   seconds * (1 - LOCKOUT_JITTER + Math.random() * 2 * LOCKOUT_JITTER);
 
@@ -1476,6 +1550,25 @@ export class HeadPerformer {
    */
   private waitingFor = 0;
   private waitPressDue = 0;
+  /**
+   * The same deadline for the tilt, which needs its own because it keeps its own
+   * cadence — TILT_WAIT_ONSET and TILT_WAIT_GAP against the press's four and
+   * fourteen. Both are read against `waitingFor`, so one clock still measures the
+   * silence and the two schedules disagree only about when it has run long enough.
+   */
+  private waitTiltDue = 0;
+  /**
+   * Which way this silence's leans go, or 0 before it has had one.
+   *
+   * `tiltSide` strictly alternates, which is right for gestures scattered across
+   * a conversation and wrong for a run of them inside one silence: a head leaning
+   * left, righting itself, then leaning right twenty seconds later is rocking
+   * rather than waiting. So the first waiting lean of a silence takes the
+   * alternation as it comes and every one after it is pinned to that side, with
+   * the pin dropped the moment anybody speaks. The alternation is kept where it
+   * was doing something — between silences, and against every other trigger.
+   */
+  private waitTiltSide = 0;
   /** Set by `blinked`, spent by the next `read`. */
   private flashPending = false;
   /**
@@ -1616,12 +1709,20 @@ export class HeadPerformer {
     const waiting = !cue.speaking && !cue.heard;
     if (!waiting) {
       this.waitingFor = 0;
+      this.waitTiltSide = 0;
     } else {
-      if (this.waitingFor === 0) this.waitPressDue = jittered(WAIT_ONSET);
+      if (this.waitingFor === 0) {
+        this.waitPressDue = jittered(WAIT_ONSET);
+        this.waitTiltDue = jittered(TILT_WAIT_ONSET);
+      }
       this.waitingFor += dt;
     }
     const waitPressing = waiting && this.waitingFor >= this.waitPressDue;
     if (waitPressing) this.waitPressDue = this.waitingFor + jittered(WAIT_GAP);
+    // The head's deadline off the same clock, spent when it comes due rather than
+    // when a lean results, for the reason the press's is spent that way above.
+    const waitTilting = waiting && this.waitingFor >= this.waitTiltDue;
+    if (waitTilting) this.waitTiltDue = this.waitingFor + jittered(TILT_WAIT_GAP);
 
     const wantsPress = (id: PressTrigger) => cue.press.includes(id);
     /*
@@ -1688,15 +1789,32 @@ export class HeadPerformer {
     // banked and cashed in later, a question would tilt the head at a moment
     // with nothing in the conversation to account for it.
     const wanted = (id: TiltTrigger) => cue.triggers.includes(id);
+    /*
+      Held apart from the disjunction because the side below has to know whether
+      this frame's lean was the waiting one. Nothing is lost by attributing it
+      that way: in a silence long enough to reach TILT_WAIT_ONSET none of the
+      other three can be live — two of them need `speaking`, and the yield edge
+      feeding the third was spent six seconds ago — so a lean starting on a frame
+      where this is true is this one's.
+    */
+    const waitTilt = waitTilting && wanted('waiting');
     const fireTilt =
       (this.questionPending && wanted('question')) ||
       (this.yieldPending && wanted('listening')) ||
-      (inPause && wanted('hesitation'));
+      (inPause && wanted('hesitation')) ||
+      waitTilt;
     this.questionPending = false;
     this.yieldPending = false;
 
     const leaning = this.tiltChannel.advance(dt, fireTilt);
-    if (this.tiltChannel.started) this.tiltSide = -this.tiltSide;
+    if (this.tiltChannel.started) {
+      if (waitTilt && this.waitTiltSide !== 0) {
+        this.tiltSide = this.waitTiltSide;
+      } else {
+        this.tiltSide = -this.tiltSide;
+        if (waitTilt) this.waitTiltSide = this.tiltSide;
+      }
+    }
 
     const head =
       cadence === 'syllable' ? level : cadence === 'phrase' ? this.phrase : headGesture;

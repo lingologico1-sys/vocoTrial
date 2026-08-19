@@ -183,14 +183,34 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
 
   useEffect(() => () => session.current?.stop(), []);
 
-  /** Extends the open turn for that role, or starts a new one. */
+  /**
+   * Extends the open turn for that role, or starts a new one.
+   *
+   * THE ROLE'S LAST TURN, NOT THE TRANSCRIPT'S LAST TURN. This used to look
+   * only at the tail, and that quietly threw away every close the learner's
+   * side ever got. The marker saying their turn is over arrives once the tutor
+   * has begun answering — see gemini.ts — and by then the tutor's own first
+   * words are already on the end of the list. The close found a role that did
+   * not match, fell through to the push below, was empty and so did nothing,
+   * and the learner's turn stayed open for the whole call. liveTrial never
+   * showed it because it reads the last turn of a role whether or not it has
+   * closed; /eleve's pill waits for a closed turn, so it sat empty no matter
+   * how much was said into it.
+   *
+   * A closed turn is never reopened. The last word or two of an utterance can
+   * land after the tutor has started replying, and those begin a fresh turn at
+   * the end of the list rather than being folded back into the sentence the
+   * pill has already settled on — which is what stops a two-word tail
+   * overwriting the answer while the learner is still reading it.
+   */
   const append = useCallback((role: 'user' | 'agent', text: string, done: boolean) => {
     if (!text && !done) return;
     setTurns((current) => {
-      const tail = current.length - 1;
-      if (tail >= 0 && current[tail].role === role && !current[tail].done) {
+      let index = current.length - 1;
+      while (index >= 0 && current[index].role !== role) index--;
+      if (index >= 0 && !current[index].done) {
         const next = [...current];
-        next[tail] = { ...next[tail], text: next[tail].text + text, done };
+        next[index] = { ...next[index], text: next[index].text + text, done };
         return next;
       }
       return text ? [...current, { role, text, done }] : current;
@@ -291,6 +311,11 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
           // Whatever was still queued was said, or was a word away from it.
           // Dropping it silently would lose the end of every conversation.
           for (const item of queue.current.drain()) append('agent', item.text, item.done);
+          // The learner's turn is closed by the tutor beginning to answer, so
+          // the last thing said before hanging up has nothing to close it. No-op
+          // unless one is open, and worth the line: without it the sentence
+          // someone ends a call on is the one sentence the pill never shows.
+          append('user', '', true);
           session.current = null;
           setTap(null);
           setSpeaking(false);

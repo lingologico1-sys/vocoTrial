@@ -144,6 +144,31 @@ export async function startGeminiSession(
     handlers.onUsage?.(perTurn ? summed : latest);
   };
 
+  /**
+   * Whether the model is part-way through an answer.
+   *
+   * It exists to close the *user's* turn. Google marks the end of the model's
+   * turn and never the learner's, so the only thing on the wire that says they
+   * have finished talking is the tutor starting to talk back — which is exactly
+   * the judgement the server's own voice detection has just made, and the
+   * earliest honest moment to act on it.
+   *
+   * The alternative, and what this used to do, was to close the user on
+   * `turnComplete`. That is not when the learner stopped speaking; it is when
+   * the model finished *generating* a reply it will then spend several more
+   * seconds saying. Audio is generated faster than real time, so the learner's
+   * own sentence appeared while the tutor was already mid-answer — long after
+   * the moment they were looking for it.
+   */
+  let answering = false;
+
+  /** Emitted once per model turn: their turn ended when this one began. */
+  const answerBegins = () => {
+    if (answering) return;
+    answering = true;
+    handlers.onTranscript({ role: 'user', text: '', done: true });
+  };
+
   let stopped = false;
   const socket = new WebSocket(liveSocketUrl(modelKey, language));
   socket.binaryType = 'arraybuffer';
@@ -221,6 +246,10 @@ export async function startGeminiSession(
         player.clear();
         handlers.onSpeaking?.(false);
         handlers.onInterrupted?.();
+        // The turn was cut off rather than completed, so no turnComplete is
+        // coming to reset this. Whatever the model says next is a new answer,
+        // and it has a new user turn in front of it to close.
+        answering = false;
       }
 
       if (content.inputTranscription?.text) {
@@ -228,6 +257,7 @@ export async function startGeminiSession(
       }
 
       if (content.outputTranscription?.text) {
+        answerBegins();
         handlers.onTranscript({
           role: 'agent',
           text: content.outputTranscription.text,
@@ -246,12 +276,17 @@ export async function startGeminiSession(
       for (const part of content.modelTurn?.parts ?? []) {
         const data = part.inlineData?.data;
         if (!data) continue;
+        // Belt and braces with the transcription above: the words and the sound
+        // of them travel in the same frame, but nothing promises which field a
+        // turn opens with, and a turn that opened on audio alone would leave
+        // the learner's own sentence uncommitted.
+        answerBegins();
         handlers.onSpeaking?.(true);
         player.enqueue(decodeBase64(data), () => handlers.onSpeaking?.(false));
       }
 
       if (content.turnComplete) {
-        handlers.onTranscript({ role: 'user', text: '', done: true });
+        answering = false;
         // Stamped like the words were, so a consumer holding the turn back to
         // match the audio closes it when the audio ends rather than when the
         // socket says so — which is seconds earlier.
