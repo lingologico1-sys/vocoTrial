@@ -54,9 +54,16 @@ bucket_name = "vocotrial-faces"
 # other browser reads it back — the same journey faces made, and for the same
 # reason: a scale authored on one laptop has to reach a student on another.
 #
-# Create it once before the first save:
+# CREATE THE BUCKET BEFORE PUSHING A BINDING FOR IT:
 #
 #   npx wrangler r2 bucket create vocotrial-evaluators
+#
+# Not before the first save — before the first *deploy*. Pages validates every
+# binding when it builds, so a block naming a bucket that does not exist yet
+# fails the whole deployment, and the site stays on the previous commit. It
+# reads as a build failure rather than as a missing bucket, and the fix is to
+# create the bucket and redeploy; nothing needs reverting. Learned by doing it
+# in the wrong order.
 #
 # Its own bucket rather than a prefix inside FACES, because a binding named
 # FACES holding level scales is a lie the next reader has to unpick. Buckets
