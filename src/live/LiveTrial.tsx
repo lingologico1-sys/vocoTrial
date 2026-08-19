@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Mic, MicOff, PhoneOff, Radio, SlidersHorizontal, User } from 'lucide-react';
 import { findModel } from '../realtime/models';
 import { LANGUAGES, defaultLanguageCode, findLanguage } from '../realtime/languages';
@@ -21,6 +21,7 @@ import { useVoiceCall } from './useVoiceCall';
 import {
   BROW_LIFT_MAX,
   BROW_LIFT_MIN,
+  DEFAULT_BROW_BLINK,
   DEFAULT_BROW_LIFT,
   DEFAULT_CADENCE,
   DEFAULT_HEAD_MOTION,
@@ -43,6 +44,7 @@ import {
   type HeadMotion,
   type MotionCadence,
   type PressTrigger,
+  type TiltCue,
   type TiltTrigger,
 } from './headMotion';
 import {
@@ -268,7 +270,7 @@ export default function LiveTrial() {
   const [cadence, setCadence] = useState<MotionCadence>(prefs.cadence ?? DEFAULT_CADENCE);
   // Defaulted on, and it is the one setting here that does something while
   // nobody is speaking at all — it rides on the blink, which never stops.
-  const [browBlink, setBrowBlink] = useState<boolean>(prefs.browBlink ?? true);
+  const [browBlink, setBrowBlink] = useState<boolean>(prefs.browBlink ?? DEFAULT_BROW_BLINK);
   // A set for the tilt's reason, arrived at from the other direction: these two
   // are not rivals either, and unlike the tilt they cannot even be read as a
   // frequency dial — one lockout covers both ends of a short exchange.
@@ -294,6 +296,44 @@ export default function LiveTrial() {
   // bumped: there is no stale value for the new default to lose to.
   const [listenNod, setListenNod] = useState<boolean>(prefs.listenNod ?? DEFAULT_LISTEN_NOD);
   const [nodDepth, setNodDepth] = useState<number>(prefs.nodDepth ?? DEFAULT_NOD_DEPTH);
+
+  /*
+    The ten controls the Head motion fieldset owns, gathered so it can be put
+    back. Listed in the order the panel shows them rather than the order Prefs
+    declares them, so that adding a row and forgetting it here is a discrepancy
+    visible from the row itself.
+
+    Compared as sets where the setting is a set. Unticking a box and reticking it
+    leaves the same triggers in a different array order, and a Reset that stayed
+    lit through that would be reporting on a literal rather than on the face.
+  */
+  const sameSet = (a: readonly string[], b: readonly string[]) =>
+    a.length === b.length && a.every((id) => b.includes(id));
+
+  const motionAtDefaults =
+    motion === DEFAULT_HEAD_MOTION &&
+    cadence === DEFAULT_CADENCE &&
+    browBlink === DEFAULT_BROW_BLINK &&
+    browLift === DEFAULT_BROW_LIFT &&
+    sameSet(press, DEFAULT_PRESS_TRIGGERS) &&
+    listenNod === DEFAULT_LISTEN_NOD &&
+    nodDepth === DEFAULT_NOD_DEPTH &&
+    sameSet(tilt, DEFAULT_TILT_TRIGGERS) &&
+    tiltRoll === DEFAULT_TILT_ROLL &&
+    tiltSettle === DEFAULT_TILT_SETTLE;
+
+  const resetMotion = () => {
+    setMotion(DEFAULT_HEAD_MOTION);
+    setCadence(DEFAULT_CADENCE);
+    setBrowBlink(DEFAULT_BROW_BLINK);
+    setBrowLift(DEFAULT_BROW_LIFT);
+    setPress([...DEFAULT_PRESS_TRIGGERS]);
+    setListenNod(DEFAULT_LISTEN_NOD);
+    setNodDepth(DEFAULT_NOD_DEPTH);
+    setTilt([...DEFAULT_TILT_TRIGGERS]);
+    setTiltRoll(DEFAULT_TILT_ROLL);
+    setTiltSettle(DEFAULT_TILT_SETTLE);
+  };
 
   const [showLog, setShowLog] = useState(false);
   /**
@@ -512,6 +552,19 @@ export default function LiveTrial() {
     settings: voice ? { voice } : {},
   });
   const { status, detail, turns, tap, speaking, heard, muted, tiltCue, live, busy } = call;
+
+  /*
+    Both sources of a lean funnel into one piece of state, because Face keys on
+    the cue's *identity* rather than on anything inside it — two props racing to
+    be that identity is a bug waiting for a call that ends mid-drag. The call's
+    own cues pass through untouched, and the button below writes one of its own
+    against a counter that cannot collide with them.
+  */
+  const [leanCue, setLeanCue] = useState<TiltCue | null>(null);
+  useEffect(() => {
+    if (tiltCue) setLeanCue(tiltCue);
+  }, [tiltCue]);
+  const probes = useRef(0);
   const { hangUp, toggleMute } = call;
 
   /**
@@ -646,7 +699,7 @@ export default function LiveTrial() {
           tilt={tilt}
           tiltRoll={tiltRoll}
           tiltSettle={tiltSettle}
-          tiltCue={tiltCue}
+          tiltCue={leanCue}
           speaking={speaking}
         />
 
@@ -961,6 +1014,23 @@ export default function LiveTrial() {
                 </span>
               </label>
             )}
+
+            {/*
+              The two sliders above govern a gesture that will not happen while
+              you are looking at them: the trigger this ships on needs a live
+              call to say anything, and the other three are rare by design. A
+              button is the difference between tuning this and waiting for it.
+            */}
+            {tilt.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setLeanCue({ kind: 'probe', seq: (probes.current += 1) })}
+                title="Leans the head once, now, whatever is ticked above and whether or not a call is running. Nothing happens while a lean is already playing — a gesture cannot be restarted part-way without the jump these sliders exist to keep out of it — so wait for it to finish and click again."
+                className="shrink-0 cursor-pointer rounded border border-slate-700 px-2 py-1 text-xs text-slate-300 transition-colors hover:border-slate-500 hover:text-slate-100"
+              >
+                Fire one
+              </button>
+            )}
           </div>
 
           {/*
@@ -1195,6 +1265,34 @@ export default function LiveTrial() {
               </>
             )}
           </Why>
+
+          {/*
+            Ten controls, and until now no way back from them.
+
+            They are not ten independent settings. The lockouts and schedules in
+            headMotion.ts are picked against one another — the flash's eight
+            seconds against the blink's four, the tilt's five against the nod's
+            three and a half — so a panel dragged around for twenty minutes is
+            not a set of separable mistakes to undo one at a time. It is a face
+            that has stopped demonstrating anything, and the defaults are the one
+            configuration this repo actually argues for.
+
+            Disabled when there is nothing to undo, which makes it a readout as
+            much as a control. On a fieldset this size "have I changed anything"
+            is a real question, and answering it otherwise means ten comparisons
+            against constants that are not on screen.
+          */}
+          <div className="flex justify-end pt-0.5">
+            <button
+              type="button"
+              onClick={resetMotion}
+              disabled={motionAtDefaults}
+              title="Puts every control in this fieldset back to the value the code ships with — direction, cadence, brows, lips, tilt and nod. Nothing outside it moves: the artwork, the mouth driver and the language are left where they are."
+              className="rounded border border-slate-700 px-2 py-1 text-xs text-slate-400 transition-colors hover:border-slate-500 hover:text-slate-100 disabled:border-slate-800 disabled:text-slate-600 disabled:hover:border-slate-800 disabled:hover:text-slate-600"
+            >
+              {motionAtDefaults ? 'At defaults' : 'Reset to defaults'}
+            </button>
+          </div>
         </fieldset>
 
         <div className="flex items-center gap-3 rounded-lg border border-slate-800 px-4 py-2.5">

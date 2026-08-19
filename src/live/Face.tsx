@@ -3,6 +3,7 @@ import { CANVAS_EDGE } from '../facekit/imageModels';
 import { browHeadroom, type FaceKit } from '../facekit/kit';
 import { BROW_BOXES } from '../facekit/slots';
 import {
+  DEFAULT_BROW_BLINK,
   DEFAULT_BROW_LIFT,
   DEFAULT_CADENCE,
   DEFAULT_HEAD_MOTION,
@@ -266,7 +267,7 @@ export default function Face({
   kit,
   motion = DEFAULT_HEAD_MOTION,
   cadence = DEFAULT_CADENCE,
-  browBlink = true,
+  browBlink = DEFAULT_BROW_BLINK,
   press = DEFAULT_PRESS_TRIGGERS,
   heard = false,
   listenNod = DEFAULT_LISTEN_NOD,
@@ -336,6 +337,7 @@ export default function Face({
   useEffect(() => {
     if (!tiltCue) return;
     if (tiltCue.kind === 'question') performer.current?.heardQuestion();
+    else if (tiltCue.kind === 'probe') performer.current?.probed();
     else performer.current?.yielded();
   }, [tiltCue]);
 

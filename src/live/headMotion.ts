@@ -212,9 +212,20 @@ export const TILT_TRIGGERS: Array<{ id: TiltTrigger; label: string; hint: string
  * objects, which is what the effect watching this actually keys on; it is spelled
  * out rather than left to `{}` identity so that the contract is legible instead
  * of incidental.
+ *
+ * `probe` is the odd member, and it does not name a trigger at all. It is the
+ * bench asking for one lean, now, so that the two sliders governing this gesture
+ * can be tuned without waiting for a conversation to supply a reason — the
+ * default trigger needs a live call to say anything, and the other three are
+ * rare on purpose. Tuning a rare gesture by watching for it is not tuning.
+ *
+ * It travels here rather than on a prop of its own because this is already the
+ * road an event-with-an-identity takes to the performer, and a second mechanism
+ * doing the first one's job costs more than a union naming one thing that is not
+ * a cause. Nothing outside the bench ever sends it.
  */
 export interface TiltCue {
-  kind: Extract<TiltTrigger, 'question' | 'listening'>;
+  kind: Extract<TiltTrigger, 'question' | 'listening'> | 'probe';
   seq: number;
 }
 
@@ -789,6 +800,18 @@ const BROW_BEAT = 0.3;
  * the deciding and the slider would stop responding — a control that goes dead in
  * its last third is worse than one that stops there.
  */
+/**
+ * Whether a blink carries a brow at all, which had been a bare `true` in three
+ * files and is now a constant in one.
+ *
+ * Not a new decision — it is BROW_FLASH's, already argued above. What it is is
+ * the same decision stated once, because a default duplicated as a literal is a
+ * default that drifts: the face, the page's initial state and the page's reset
+ * were each free to disagree about it, and the last of those did not exist when
+ * the first two were written.
+ */
+export const DEFAULT_BROW_BLINK = true;
+
 export const DEFAULT_BROW_LIFT = 6;
 export const BROW_LIFT_MIN = 0;
 export const BROW_LIFT_MAX = 12;
@@ -958,21 +981,33 @@ const TILT: Envelope = { attack: 0.5, hold: 1, release: 0.8 };
  *
  *   0.20s   0.32s out   1.52s total   about what shipped, and the abrupt end
  *   0.50s   0.80s out   2.30s total   the default below
- *   1.20s   1.92s out   4.12s total   the ceiling
+ *   1.20s   1.92s out   4.12s total   the first ceiling
+ *   2.40s   3.84s out   7.24s total   the ceiling now
  *
- * The ceiling is set against TILT_LOCKOUT rather than by taste, though not in
- * the tidy way that sounds. At 1.2 the gesture runs 4.12s against a nominal
- * five-second refusal to start another, and the jitter on that can bring it in
- * as low as three — so the two genuinely do cross at the top of the range.
- * Nothing breaks when they do: `advance` needs both the lockout expired and the
- * previous gesture finished, so the longer of the two simply wins, and a trigger
- * arriving mid-lean is refused exactly as a locked-out one is. What the ceiling
- * actually protects is the claim two paragraphs up — much past this and the face
- * is holding an angle long enough to be caught frozen at it.
+ * That ceiling was 1.2 and has been doubled, and what the doubling gives up is
+ * worth stating rather than discovering. Two things stop being true at the top
+ * of this range.
+ *
+ * TILT_LOCKOUT stops governing. At 1.2 the gesture and the five-second refusal
+ * to start another were comparable, crossing only when the lockout's jitter came
+ * in low; at 2.4 the gesture outlasts even a high roll of it, so the lockout is
+ * never the binding constraint and the gesture's own length is what spaces leans
+ * apart. Nothing breaks — `advance` wants both the lockout expired and the
+ * previous gesture finished, so the longer of the two simply wins and a trigger
+ * arriving mid-lean is refused exactly as a locked-out one is — but the setting
+ * that decides how often the head can lean is this slider now, not that constant.
+ *
+ * And TILT's "short enough not to be caught frozen" stops being a promise the
+ * range keeps. At the ceiling the head is leaning, held, or unwinding for over
+ * seven seconds, which is long enough to be found part-way through one by
+ * somebody glancing over. That is now a thing the slider can be asked for rather
+ * than an accident, which is the whole argument for allowing it: the default is
+ * still 0.5, nobody arrives at 2.4 without dragging there, and a range that
+ * cannot reach a setting cannot be used to find out whether it was wanted.
  */
 export const DEFAULT_TILT_SETTLE = TILT.attack;
 export const TILT_SETTLE_MIN = 0.2;
-export const TILT_SETTLE_MAX = 1.2;
+export const TILT_SETTLE_MAX = 2.4;
 
 /**
  * How long the tilt refuses to fire again, in seconds.
@@ -1457,10 +1492,10 @@ class Channel {
    *
    * It used to start level with the span, which was the same statement while the
    * span was fixed at construction. It is not fixed any more — the tilt's settle
-   * stretches it live — so a channel mounted while that slider sat near its top
-   * would have found itself apparently four fifths of the way through a gesture
-   * it never fired, and unwound from a full lean over the following two seconds.
-   * Infinity is past the end of every span this can be given.
+   * stretches it live — so a channel mounted while that slider sat above its
+   * default would have found itself part-way through a gesture it never fired,
+   * and unwound from a near-full lean over the seconds that followed. Infinity
+   * is past the end of every span this can be given, at any setting.
    */
   private since = Number.POSITIVE_INFINITY;
   /** Seconds still to wait. */
@@ -1484,6 +1519,23 @@ class Channel {
    */
   get started(): boolean {
     return this.justStarted;
+  }
+
+  /**
+   * Drops the remaining lockout.
+   *
+   * For the bench's probe alone. The refusal to fire again exists to stop the
+   * *conversation* producing leans in a run, and somebody clicking a button is
+   * not the conversation — a tuning control that ignores four clicks in five
+   * reads as broken rather than as disciplined.
+   *
+   * The span check in `advance` is deliberately left alone, so a lean already
+   * playing still cannot be restarted mid-flight. There is no way to do that
+   * without a jump, and a jump is the one thing a gesture being tuned for its
+   * smoothness must not be made to do.
+   */
+  unlock(): void {
+    this.locked = 0;
   }
 
   /**
@@ -1666,6 +1718,8 @@ export class HeadPerformer {
   /** Set by `heardQuestion` and `yielded`, spent by the next `read`. */
   private questionPending = false;
   private yieldPending = false;
+  /** Set by `probed`, spent the same way. See TiltCue. */
+  private probePending = false;
   /**
    * Which way the next tilt goes.
    *
@@ -1733,6 +1787,19 @@ export class HeadPerformer {
   /** The agent's audio has ended and the floor is back with the user. */
   yielded(): void {
     this.yieldPending = true;
+  }
+
+  /**
+   * The bench has asked for one lean, whatever is or is not ticked.
+   *
+   * Alone among the four things pushed in here it reports nothing about the
+   * world, which is why it answers no trigger and checks none. What is being
+   * looked at when this fires is the movement — how far it goes and how long it
+   * takes — and both of those are the same whichever cause would have produced
+   * it in a real conversation.
+   */
+  probed(): void {
+    this.probePending = true;
   }
 
   /**
@@ -1879,13 +1946,25 @@ export class HeadPerformer {
       where this is true is this one's.
     */
     const waitTilt = waitTilting && wanted('waiting');
+    /*
+      The probe is asked once and answered whatever is armed, and it clears the
+      lockout on its way past. Both halves of that are the point rather than
+      shortcuts: with only `waiting` ticked there is no conversation event a
+      button could honestly impersonate, and a five-second refusal is a sensible
+      rule about leaning at a *speaker* and a nuisance to somebody dragging a
+      slider. It cannot outrun the span check, so a lean already playing still
+      finishes on its own terms.
+    */
+    if (this.probePending) this.tiltChannel.unlock();
     const fireTilt =
       (this.questionPending && wanted('question')) ||
       (this.yieldPending && wanted('listening')) ||
       (inPause && wanted('hesitation')) ||
-      waitTilt;
+      waitTilt ||
+      this.probePending;
     this.questionPending = false;
     this.yieldPending = false;
+    this.probePending = false;
 
     /*
       The cue carries a duration and the channel wants a multiple of the shape it
