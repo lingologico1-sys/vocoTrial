@@ -258,93 +258,109 @@ export default function Eleve() {
   ];
 
   return (
-    <div className="lingo-light flex h-screen flex-col overflow-hidden bg-lingo-paper font-lingo text-lingo-ink">
-      <header className="flex h-14 shrink-0 items-center justify-between border-b-4 border-lingo-rule bg-lingo-bar px-6">
-        {/*
-          No `gap` on this row: every piece of the lockup carries its own
-          margin, copied one for one from LingoLecto, and a gap here would add
-          itself to each of them — which is how the wordmark came to sit 14px
-          from `Voco` where LingoLecto puts it at 9.
-        */}
-        <div className="flex items-center">
+    <div className="lingo-light flex h-screen flex-col overflow-hidden bg-lingo-mat font-lingo text-lingo-ink">
+      {/*
+        The bar is full bleed, its contents are not — LingoLecto's
+        `.header-inner`, at its own numbers.
+
+        The lockup and the language picker are cut to the same 1152px column
+        the two cards below are cut to, with the same 16px gutter, so the
+        wordmark starts where the left card starts and the picker ends where
+        the right card ends. Without it the lockup hangs off the far corner of
+        a wide monitor while everything it belongs to sits in the middle. The
+        gutter lives on this inner row rather than on the bar for the reason
+        LingoLecto found: on the bar it lands outside the cap, which insets the
+        lockup from the column while the cards are inset from the mat instead,
+        and the two insets are not the same 16px.
+      */}
+      <header className="flex h-14 shrink-0 items-center border-b-4 border-lingo-rule bg-lingo-bar">
+        <div className="mx-auto flex w-full max-w-6xl items-center justify-between px-4">
           {/*
-            Chock A Block draws the tile box as part of each glyph, so the
-            wordmark is text with a stroke rather than text on a fill — a CSS
-            background would cover the whole inline box and turn the blocks'
-            transparent interiors opaque. Cream on this blue is about 1.3:1, so
-            the stroke is doing the real work.
-
-            The sizes are LingoLecto's `.brand-lock--inline`, not a fresh guess:
-            30px wordmark, 26px badge around a 15px glyph, 22px sub-name, 22px
-            divider. That variant exists because its reading view is a 100vh
-            flex column where a pixel of header is a pixel of passage, so the
-            lockup is grown inside a fixed 56px bar rather than by growing the
-            bar — the wordmark plus its stroke is ~32px of the 56, and that is
-            the ceiling here, not the font size. This page is the same shape and
-            the same bar, so it takes the same numbers; anything smaller and the
-            two apps read as different headers, which is what they did.
+            No `gap` on this row: every piece of the lockup carries its own
+            margin, copied one for one from LingoLecto, and a gap here would add
+            itself to each of them — which is how the wordmark came to sit 14px
+            from `Voco` where LingoLecto puts it at 9.
           */}
-          <div
-            className="flex gap-0.5 font-lingo-block text-[30px] leading-none"
-            role="img"
-            aria-label="LingoMondo"
-          >
-            {'LINGO'.split('').map((letter, index) => (
-              <span
-                key={`lingo-${index}`}
-                aria-hidden="true"
-                className="text-lingo-paper"
-                style={{ WebkitTextStroke: '0.03em #311706' }}
-              >
-                {letter}
-              </span>
-            ))}
-            {'MONDO'.split('').map((letter, index) => (
-              <span
-                key={`mondo-${index}`}
-                aria-hidden="true"
-                className="text-lingo-gold"
-                style={{ WebkitTextStroke: '0.03em #311706' }}
-              >
-                {letter}
-              </span>
-            ))}
-          </div>
+          <div className="flex items-center">
+            {/*
+              Chock A Block draws the tile box as part of each glyph, so the
+              wordmark is text with a stroke rather than text on a fill — a CSS
+              background would cover the whole inline box and turn the blocks'
+              transparent interiors opaque. Cream on this blue is about 1.3:1, so
+              the stroke is doing the real work.
 
-          <div className="ml-[9px] flex items-center gap-1.5">
-            <span className="flex h-[26px] w-[26px] items-center justify-center rounded-md border-2 border-lingo-stroke bg-lingo-accent shadow-lingo-pop-sm">
-              <Mic size={15} className="text-lingo-paper" strokeWidth={2.5} />
-            </span>
-            <span
-              className="font-lingo-brand text-[22px] leading-none text-lingo-accent"
-              style={{ WebkitTextStroke: '0.07em #311706', paintOrder: 'stroke fill' }}
+              The sizes are LingoLecto's `.brand-lock--inline`, not a fresh guess:
+              30px wordmark, 26px badge around a 15px glyph, 22px sub-name, 22px
+              divider. That variant exists because its reading view is a 100vh
+              flex column where a pixel of header is a pixel of passage, so the
+              lockup is grown inside a fixed 56px bar rather than by growing the
+              bar — the wordmark plus its stroke is ~32px of the 56, and that is
+              the ceiling here, not the font size. This page is the same shape and
+              the same bar, so it takes the same numbers; anything smaller and the
+              two apps read as different headers, which is what they did.
+            */}
+            <div
+              className="flex gap-0.5 font-lingo-block text-[30px] leading-none"
+              role="img"
+              aria-label="LingoMondo"
             >
-              Voco
+              {'LINGO'.split('').map((letter, index) => (
+                <span
+                  key={`lingo-${index}`}
+                  aria-hidden="true"
+                  className="text-lingo-paper"
+                  style={{ WebkitTextStroke: '0.03em #311706' }}
+                >
+                  {letter}
+                </span>
+              ))}
+              {'MONDO'.split('').map((letter, index) => (
+                <span
+                  key={`mondo-${index}`}
+                  aria-hidden="true"
+                  className="text-lingo-gold"
+                  style={{ WebkitTextStroke: '0.03em #311706' }}
+                >
+                  {letter}
+                </span>
+              ))}
+            </div>
+
+            <div className="ml-[9px] flex items-center gap-1.5">
+              <span className="flex h-[26px] w-[26px] items-center justify-center rounded-md border-2 border-lingo-stroke bg-lingo-accent shadow-lingo-pop-sm">
+                <Mic size={15} className="text-lingo-paper" strokeWidth={2.5} />
+              </span>
+              <span
+                className="font-lingo-brand text-[22px] leading-none text-lingo-accent"
+                style={{ WebkitTextStroke: '0.07em #311706', paintOrder: 'stroke fill' }}
+              >
+                Voco
+              </span>
+            </div>
+
+            <span className="mx-3 h-[22px] w-px bg-lingo-paper/30" />
+            <span className="font-lingo-hand text-sm leading-none text-lingo-paper/75">
+              {FR.tagline}
             </span>
           </div>
 
-          <span className="mx-3 h-[22px] w-px bg-lingo-paper/30" />
-          <span className="font-lingo-hand text-sm leading-none text-lingo-paper/75">
-            {FR.tagline}
-          </span>
+          <label className="flex items-center gap-2">
+            <span className="text-[11px] uppercase tracking-wide text-lingo-paper/70">
+              {FR.l1Label}
+            </span>
+            <select
+              value={l1}
+              onChange={(event) => setL1(event.target.value)}
+              className="rounded-lg border-2 border-white/20 bg-white/10 px-2.5 py-1 text-[13px] text-lingo-paper outline-none transition-colors hover:border-lingo-accent-light focus:border-lingo-accent-light"
+            >
+              {L1_CHOICES.map((choice) => (
+                <option key={choice.code} value={choice.code} className="bg-lingo-bar">
+                  {choice.name}
+                </option>
+              ))}
+            </select>
+          </label>
         </div>
-
-        <label className="flex items-center gap-2">
-          <span className="text-[11px] uppercase tracking-wide text-lingo-paper/70">
-            {FR.l1Label}
-          </span>
-          <select
-            value={l1}
-            onChange={(event) => setL1(event.target.value)}
-            className="rounded-lg border-2 border-white/20 bg-white/10 px-2.5 py-1 text-[13px] text-lingo-paper outline-none transition-colors hover:border-lingo-accent-light focus:border-lingo-accent-light"
-          >
-            {L1_CHOICES.map((choice) => (
-              <option key={choice.code} value={choice.code} className="bg-lingo-bar">
-                {choice.name}
-              </option>
-            ))}
-          </select>
-        </label>
       </header>
 
       {loading ? (
@@ -372,14 +388,27 @@ export default function Eleve() {
           </div>
         </div>
       ) : (
-        <div className="grid min-h-0 flex-1 grid-cols-[1fr_360px] overflow-hidden">
+        /*
+          LingoLecto's `.questioner-wrap`: a 1152px cap, 16px of mat as padding
+          around the pair and again in the gap between them, and each side a card
+          of paper inside a 4px terracotta frame rounded at 24px.
+
+          THE CAP COSTS THE LEFT COLUMN NOTHING AND BUYS IT THE DISTANCE. The face
+          and the balloon are centred and capped at 36rem already, so on a wide
+          monitor they sit on the same pixels either way — what changes is how far
+          the end of a spoken line is from the panel that answers for it, which on
+          a 1920 screen was most of the width of the desk. That trip is the whole
+          interaction of this page, the same way it is the whole interaction of
+          LingoLecto's reading view.
+        */
+        <div className="mx-auto grid min-h-0 w-full max-w-6xl flex-1 grid-cols-[1fr_360px] gap-4 overflow-hidden p-4">
           {/*
             `overflow-hidden`, not `auto`: the column is laid out so that it
             always fits — the balloon and the spacer between them absorb
             everything that grows — and a scrollbar here would only ever appear
             as the symptom of that having failed. See TutorStage.
           */}
-          <div className="flex min-h-0 flex-col overflow-hidden border-r border-lingo-border px-8 py-8">
+          <div className="flex min-h-0 flex-col overflow-hidden rounded-3xl border-4 border-lingo-terracotta bg-lingo-paper px-8 py-8 shadow-lingo-pop">
             <TutorStage
               session={session}
               kit={kit}
@@ -409,7 +438,7 @@ export default function Eleve() {
             )}
           </div>
 
-          <aside className="flex min-h-0 flex-col overflow-hidden bg-lingo-paper">
+          <aside className="flex min-h-0 flex-col overflow-hidden rounded-3xl border-4 border-lingo-terracotta bg-lingo-paper shadow-lingo-pop">
             {/*
               LingoLecto's tab strip, tile for tile (its `.qr-tabs` / `.qr-tab`).
               A student who reads a text there and then talks about it here meets
@@ -422,6 +451,10 @@ export default function Eleve() {
               active tab is a filled orange tile rather than an underlined word —
               orange means "this is the thing", and at this size an underline is
               too quiet to find at a glance.
+
+              Its top corners are cut by the card's radius, which is the card's
+              doing rather than the strip's: the frame clips, so the strip needs
+              no corner of its own and cannot get one wrong when the radius moves.
             */}
             <div className="flex shrink-0 border-b-[3px] border-lingo-terracotta bg-lingo-panel-warm [&>button+button]:border-l-2 [&>button+button]:border-l-lingo-terracotta">
               {TABS.map((entry) => (

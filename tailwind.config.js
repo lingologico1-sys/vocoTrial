@@ -62,6 +62,17 @@ export default {
            */
           terracotta: '#b27467',
           'panel-warm': '#fbec99',
+          /**
+           * The ground the two panels sit on, and the only reason they read as
+           * panels.
+           *
+           * LingoLecto's `--mat`: cream-light carried 20% toward terracotta,
+           * 1.23:1 against the cards themselves. Both cards are `paper`, so the
+           * page behind them cannot also be paper — with one surface throughout
+           * the terracotta frame is the only thing saying a card ends, which is
+           * an outline drawn on a field rather than an object laid on a mat.
+           */
+          mat: '#f0d9c9',
           /** Header lockup: sky-deep bar, rust rule, dark stroke on the wordmark. */
           bar: '#466577',
           rule: '#b83612',
