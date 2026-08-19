@@ -25,7 +25,7 @@ export const FR = {
   l1Label: 'Ma langue',
   tabEvaluation: 'Évaluation',
   tabDictionary: 'Dictionnaire',
-  tabVocab: 'Mon lexique',
+  tabVocab: 'Vocabulaire',
 
   // --- The call
   starting: 'Connexion…',
@@ -81,13 +81,13 @@ export const FR = {
   dictEmpty: 'Tape un mot français, ou appuie longuement sur un mot de la conversation.',
   dictLoading: 'Je cherche…',
   dictNoResult: 'Je n’ai rien trouvé pour ce mot.',
-  dictSave: 'Ajouter à mon lexique',
-  dictSaved: 'Dans ton lexique',
+  dictSave: 'Ajouter à mon vocabulaire',
+  dictSaved: 'Dans ton vocabulaire',
   dictConjugation: 'Conjugaison',
 
   // --- Vocab
   vocabEmpty:
-    'Ton lexique est vide. Cherche un mot dans le dictionnaire, puis ajoute-le à ton lexique.',
+    'Ton vocabulaire est vide. Cherche un mot dans le dictionnaire, puis ajoute-le à ton vocabulaire.',
   vocabEmptyCategory: 'Aucun mot dans cette catégorie.',
   vocabSortAlpha: 'A–Z',
   vocabSortRecent: 'Récent',

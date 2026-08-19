@@ -260,16 +260,32 @@ export default function Eleve() {
   return (
     <div className="lingo-light flex h-screen flex-col overflow-hidden bg-lingo-paper font-lingo text-lingo-ink">
       <header className="flex h-14 shrink-0 items-center justify-between border-b-4 border-lingo-rule bg-lingo-bar px-6">
-        <div className="flex items-center gap-2">
+        {/*
+          No `gap` on this row: every piece of the lockup carries its own
+          margin, copied one for one from LingoLecto, and a gap here would add
+          itself to each of them — which is how the wordmark came to sit 14px
+          from `Voco` where LingoLecto puts it at 9.
+        */}
+        <div className="flex items-center">
           {/*
             Chock A Block draws the tile box as part of each glyph, so the
             wordmark is text with a stroke rather than text on a fill — a CSS
             background would cover the whole inline box and turn the blocks'
             transparent interiors opaque. Cream on this blue is about 1.3:1, so
             the stroke is doing the real work.
+
+            The sizes are LingoLecto's `.brand-lock--inline`, not a fresh guess:
+            30px wordmark, 26px badge around a 15px glyph, 22px sub-name, 22px
+            divider. That variant exists because its reading view is a 100vh
+            flex column where a pixel of header is a pixel of passage, so the
+            lockup is grown inside a fixed 56px bar rather than by growing the
+            bar — the wordmark plus its stroke is ~32px of the 56, and that is
+            the ceiling here, not the font size. This page is the same shape and
+            the same bar, so it takes the same numbers; anything smaller and the
+            two apps read as different headers, which is what they did.
           */}
           <div
-            className="flex gap-0.5 font-lingo-block text-xl leading-none"
+            className="flex gap-0.5 font-lingo-block text-[30px] leading-none"
             role="img"
             aria-label="LingoMondo"
           >
@@ -295,20 +311,20 @@ export default function Eleve() {
             ))}
           </div>
 
-          <div className="ml-1.5 flex items-center gap-1.5">
-            <span className="flex h-[22px] w-[22px] items-center justify-center rounded-[5px] border-2 border-lingo-stroke bg-lingo-accent shadow-lingo-pop-sm">
-              <Mic size={12} className="text-lingo-paper" strokeWidth={2.5} />
+          <div className="ml-[9px] flex items-center gap-1.5">
+            <span className="flex h-[26px] w-[26px] items-center justify-center rounded-md border-2 border-lingo-stroke bg-lingo-accent shadow-lingo-pop-sm">
+              <Mic size={15} className="text-lingo-paper" strokeWidth={2.5} />
             </span>
             <span
-              className="font-lingo-brand text-[17px] leading-none text-lingo-accent"
+              className="font-lingo-brand text-[22px] leading-none text-lingo-accent"
               style={{ WebkitTextStroke: '0.07em #311706', paintOrder: 'stroke fill' }}
             >
               Voco
             </span>
           </div>
 
-          <span className="mx-2 h-4 w-px bg-lingo-paper/30" />
-          <span className="font-lingo-hand text-[15px] leading-none text-lingo-paper/75">
+          <span className="mx-3 h-[22px] w-px bg-lingo-paper/30" />
+          <span className="font-lingo-hand text-sm leading-none text-lingo-paper/75">
             {FR.tagline}
           </span>
         </div>
@@ -394,16 +410,29 @@ export default function Eleve() {
           </div>
 
           <aside className="flex min-h-0 flex-col overflow-hidden bg-lingo-paper">
-            <div className="flex shrink-0 border-b border-lingo-border">
+            {/*
+              LingoLecto's tab strip, tile for tile (its `.qr-tabs` / `.qr-tab`).
+              A student who reads a text there and then talks about it here meets
+              the same three tabs in the same clothes, so the two pages read as
+              one product rather than as two tools that happen to share a header.
+
+              The strip is a header, not the top of the scroll area, and three
+              things say so together: the warm ground behind it, the terracotta
+              rule closing it, and the terracotta hairlines between the tabs. The
+              active tab is a filled orange tile rather than an underlined word —
+              orange means "this is the thing", and at this size an underline is
+              too quiet to find at a glance.
+            */}
+            <div className="flex shrink-0 border-b-[3px] border-lingo-terracotta bg-lingo-panel-warm [&>button+button]:border-l-2 [&>button+button]:border-l-lingo-terracotta">
               {TABS.map((entry) => (
                 <button
                   key={entry.id}
                   type="button"
                   onClick={() => setTab(entry.id)}
-                  className={`flex-1 select-none border-b-2 py-2.5 text-[13px] font-semibold transition-colors ${
+                  className={`flex-1 select-none border-b-2 py-[9px] text-center font-lingo-brand text-[15px] font-normal transition-all duration-150 ${
                     tab === entry.id
-                      ? 'border-lingo-accent text-lingo-accent'
-                      : 'border-transparent text-lingo-muted hover:text-lingo-ink'
+                      ? 'border-b-lingo-accent-deep bg-lingo-accent text-lingo-paper'
+                      : 'border-b-transparent text-lingo-muted hover:text-lingo-ink'
                   }`}
                 >
                   {entry.label}

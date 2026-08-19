@@ -47,6 +47,21 @@ export default {
           'error-bg': '#fdf0f0',
           success: '#35916c',
           'success-bg': '#edf7f0',
+          /**
+           * The structural rule, and the warm ground that sits above it.
+           *
+           * `rule` below is the rust hairline under the brand bar, which is the
+           * guide's `--brand-rule`; this terracotta is the guide's `--rule`, the
+           * heavier line that says one region of a panel ends and another
+           * begins. Two different lines with the same name in the family CSS, so
+           * the one that arrived second gets the colour's own name here.
+           *
+           * `panel-warm` (the guide's `sunny-soft`) is what LingoLecto puts
+           * behind its tab strip, and it is why the strip reads as a header
+           * rather than as the top of the scroll area.
+           */
+          terracotta: '#b27467',
+          'panel-warm': '#fbec99',
           /** Header lockup: sky-deep bar, rust rule, dark stroke on the wordmark. */
           bar: '#466577',
           rule: '#b83612',
