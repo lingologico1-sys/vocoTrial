@@ -4,7 +4,7 @@ import { FR } from './strings';
 import { useLongPress } from './useLongPress';
 
 /**
- * The learner's own words, and the microphone that caught them.
+ * The learner's own words, the microphone that caught them, and the call.
  *
  * ONLY COMPLETED UTTERANCES REACH IT. The provider streams a partial
  * transcription of the user as they speak, and it is bad — it revises itself
@@ -19,6 +19,14 @@ import { useLongPress } from './useLongPress';
  * provider's own voice detection rather than by a level meter: that is the same
  * signal the tutor is using to decide you have finished talking, so what the
  * pill shows is what the tutor believes.
+ *
+ * AND IT CARRIES THE CALL. Commencer and Raccrocher used to sit under the pill
+ * as a separate block, which put three stacked things between the tutor's words
+ * and the foot of the page and spent the height on air. They belong here: the
+ * pill is already the learner's half of the conversation — their voice, their
+ * microphone — and starting or ending the call is the same kind of act. One
+ * strip now holds all three, and the whole of what it gave back went to the
+ * balloon above it.
  */
 
 interface LearnerPillProps {
@@ -28,6 +36,11 @@ interface LearnerPillProps {
   muted: boolean;
   /** Whether the microphone is hearing a voice right now. */
   heard: boolean;
+  /** What the call button says now: Commencer, Recommencer, Raccrocher, Connexion… */
+  callLabel: string;
+  /** Whether the call is mid-connect, which is the one moment it cannot be pressed. */
+  callBusy: boolean;
+  onCall: () => void;
   onToggleMute: () => void;
   onWord: (word: string, context: string) => void;
 }
@@ -37,6 +50,9 @@ export default function LearnerPill({
   live,
   muted,
   heard,
+  callLabel,
+  callBusy,
+  onCall,
   onToggleMute,
   onWord,
 }: LearnerPillProps) {
@@ -54,7 +70,7 @@ export default function LearnerPill({
   const listening = live && !muted && heard;
 
   return (
-    <div className="relative mx-auto w-full max-w-xl">
+    <div className="relative mx-auto w-full max-w-xl shrink-0">
       {/*
         The pulse is a sibling rather than a ring on the pill itself, so it can
         scale past the pill's own edge without the text moving with it.
@@ -67,8 +83,13 @@ export default function LearnerPill({
         />
       )}
 
+      {/*
+        Padded by the gap between its two controls rather than by a text inset,
+        which is what makes the round microphone and the call button sit at even
+        clearance from the rim instead of one of them looking pushed in.
+      */}
       <div
-        className={`relative flex items-center gap-4 rounded-full border-2 bg-lingo-cream px-6 py-4 shadow-lingo-pop-sm transition-colors ${
+        className={`relative flex items-center gap-3 rounded-full border-2 bg-lingo-cream p-3 shadow-lingo-pop-sm transition-colors ${
           listening ? 'border-lingo-accent' : 'border-lingo-border-strong'
         }`}
       >
@@ -97,8 +118,24 @@ export default function LearnerPill({
           {text || hint}
         </div>
 
-        {/* Balances the button so the text stays optically centred. */}
-        <span aria-hidden="true" className="h-11 w-11 shrink-0" />
+        {/*
+          Orange while there is a call to start, quiet once there is one running
+          — the same swap the block below the pill used to make, and the reason
+          it is one button rather than two: the learner's only control over the
+          tutor is when to talk to it, so there is only ever one thing to press.
+        */}
+        <button
+          type="button"
+          onClick={onCall}
+          disabled={callBusy}
+          className={`h-11 shrink-0 rounded-full px-6 text-[15px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+            live
+              ? 'border-2 border-lingo-border-strong bg-lingo-paper text-lingo-muted hover:border-lingo-accent-deep hover:bg-lingo-accent-glow hover:text-lingo-accent-deep'
+              : 'bg-lingo-accent text-white shadow-lingo-pop-sm hover:bg-lingo-accent-deep'
+          }`}
+        >
+          {callLabel}
+        </button>
       </div>
     </div>
   );

@@ -227,6 +227,21 @@ export default function Eleve() {
 
   const elapsedMs = call.connectedAt === null ? null : now - call.connectedAt;
 
+  /**
+   * The one word on the call button, which is now the only control in the pill
+   * that is not the microphone. Four states, and the third is why it is derived
+   * here rather than inside LearnerPill: `lastCallMs` is the page's memory of
+   * whether this learner has already had a conversation, and nothing in the
+   * pill has any business knowing that.
+   */
+  const callLabel = call.busy
+    ? FR.starting
+    : call.live
+      ? FR.hangUp
+      : call.lastCallMs === null
+        ? FR.start
+        : FR.again;
+
   const TABS: Array<{ id: Tab; label: string }> = [
     { id: 'evaluation', label: FR.tabEvaluation },
     { id: 'dictionary', label: FR.tabDictionary },
@@ -345,35 +360,24 @@ export default function Eleve() {
               muted={call.muted}
               live={call.live}
               tiltCue={call.tiltCue}
+              callLabel={callLabel}
+              callBusy={call.busy}
+              onCall={() => (call.live ? call.hangUp() : start())}
               onToggleMute={call.toggleMute}
               onWord={askDictionary}
             />
 
-            <div className="mx-auto mt-7 w-full max-w-xs shrink-0">
-              {call.live ? (
-                <button
-                  type="button"
-                  onClick={() => call.hangUp()}
-                  className="w-full rounded-2xl border-2 border-lingo-border-strong bg-lingo-paper px-7 py-3.5 text-[15px] font-semibold text-lingo-muted transition-colors hover:border-lingo-accent-deep hover:bg-lingo-accent-glow hover:text-lingo-accent-deep"
-                >
-                  {FR.hangUp}
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  onClick={start}
-                  disabled={call.busy}
-                  className="w-full rounded-2xl bg-lingo-accent px-7 py-3.5 text-[15px] font-semibold text-white shadow-lingo-pop-sm transition-all hover:-translate-y-px hover:bg-lingo-accent-deep hover:shadow-lingo-pop disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {call.busy ? FR.starting : call.lastCallMs === null ? FR.start : FR.again}
-                </button>
-              )}
-              {call.detail && (
-                <p className="mt-2.5 text-center text-xs leading-relaxed text-lingo-muted">
-                  {call.detail}
-                </p>
-              )}
-            </div>
+            {/*
+              All that is left below the pill, and it stays outside TutorStage
+              so the pill keeps the foot of the panel: this line is usually
+              absent, and a spacer that reserved room for it would leave a gap
+              on every call that goes well.
+            */}
+            {call.detail && (
+              <p className="mx-auto mt-3 max-w-xl shrink-0 text-center text-xs leading-relaxed text-lingo-muted">
+                {call.detail}
+              </p>
+            )}
           </div>
 
           <aside className="flex min-h-0 flex-col overflow-hidden bg-lingo-paper">

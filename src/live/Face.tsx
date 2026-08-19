@@ -205,6 +205,29 @@ interface FaceProps {
    * which is the caller's business to stop.
    */
   hold?: boolean;
+  /**
+   * Lets a kit's artwork paint past the frame, for a caller that clips already.
+   *
+   * The clip this turns off is described where it is applied: the picture is
+   * drawn OVERSCAN wider than the frame so a lean cannot uncover a corner, and
+   * something has to cut that back or a portrait bleeds over its neighbours.
+   * That is the right default and the live stage depends on it — a speech
+   * balloon sits exactly where the spill would land.
+   *
+   * It is the wrong answer for a round frame. The overscan eats a twentieth of
+   * the canvas off every edge, and a portrait has less clearance than that above
+   * the crown — the bundled kit has 3.5% against the 9% a tilt-armed frame takes
+   * — so the square cut lands *on the hair* and flattens the top of the head.
+   * A circle inscribed in the same square is nowhere near the crown: it clears
+   * it by a comfortable margin at the one place the head is tallest, because it
+   * only has to reach the middle of the top edge rather than the whole of it.
+   *
+   * So the roundel asks for the spill and clips it itself. See TutorStage, which
+   * is the only caller that sets this, and which owes the overscan one thing in
+   * return: its own background has to be the white a kit is flattened onto, so
+   * that the sliver of frame a deep lean can still uncover does not show.
+   */
+  bleed?: boolean;
   /** Anchor for the speech bubble's tail. Marks the mouth, not the head. */
   mouthRef?: React.Ref<SVGCircleElement>;
 }
@@ -245,6 +268,7 @@ export default function Face({
   tiltCue,
   speaking = false,
   hold = false,
+  bleed = false,
   mouthRef,
 }: FaceProps) {
   const [blinking, setBlinking] = useState(false);
@@ -561,8 +585,16 @@ export default function Face({
         has to cut it back to the frame or a portrait bleeds a tenth of its width
         over whatever sits beside it. The live stage puts a speech balloon
         exactly there and does not clip on its own account.
+
+        Unless the caller says it clips already, which a round frame does and
+        which is the only way to keep a crown that sits nearer the canvas edge
+        than the overscan is deep. See `bleed`.
       */
-      <svg viewBox="0 0 200 200" className="h-full w-full overflow-hidden" aria-hidden="true">
+      <svg
+        viewBox="0 0 200 200"
+        className={`h-full w-full ${bleed ? 'overflow-visible' : 'overflow-hidden'}`}
+        aria-hidden="true"
+      >
         {/*
           Three ramps, in bounding-box units so one definition serves a strip of
           any size. Black at full opacity hides, transparent reveals, and a mask

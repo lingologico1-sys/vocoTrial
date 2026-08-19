@@ -66,6 +66,8 @@ interface SpeakingFaceProps {
   tiltCue?: TiltCue | null;
   /** Whether the agent's audio is playing. Only the tilt reads it. */
   speaking?: boolean;
+  /** Lets a kit paint past the frame, for a caller that clips already. See Face. */
+  bleed?: boolean;
   mouthRef?: React.Ref<SVGCircleElement>;
 }
 
@@ -94,6 +96,7 @@ export default function SpeakingFace({
   tiltRoll,
   tiltCue,
   speaking,
+  bleed,
   mouthRef,
 }: SpeakingFaceProps) {
   const [mouth, setMouth] = useState(RESTING);
@@ -190,6 +193,7 @@ export default function SpeakingFace({
       tiltRoll={tiltRoll}
       tiltCue={tiltCue}
       speaking={speaking}
+      bleed={bleed}
       mouthRef={mouthRef}
     />
   );

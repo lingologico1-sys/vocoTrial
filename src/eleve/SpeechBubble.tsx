@@ -14,9 +14,17 @@ import { useLongPress } from './useLongPress';
  *
  * IT GROWS DOWNWARD AND THEN SCROLLS. The whole turn is kept, because a learner
  * reading back a sentence they half caught should find it there. Past a cap it
- * scrolls inside itself rather than pushing the pill and the button down the
- * page — a control that moves while you are reaching for it is worse than a
- * scrollbar.
+ * scrolls inside itself rather than pushing the pill down the page — a control
+ * that moves while you are reaching for it is worse than a scrollbar.
+ *
+ * THE CAP IS BOTH A CEILING AND A FLOOR IT WILL GIVE UP. Twenty rems is what a
+ * tutor's turn is allowed to claim on a tall window, and it is deliberately
+ * most of the room the call button freed when it moved into the pill — a turn
+ * of five or six sentences is ordinary and the old sixteen cut it in half. But
+ * the balloon is also the one thing in the column that yields on a short one:
+ * `flex-auto` with `min-h-0` lets it shrink under the panel's own squeeze
+ * instead of pushing the pill off the bottom, and what it loses to that it
+ * takes back as scroll.
  */
 
 interface SpeechBubbleProps {
@@ -48,7 +56,7 @@ export default function SpeechBubble({ text, placeholder, stale, onWord }: Speec
   }, [text]);
 
   return (
-    <div className="relative mx-auto w-full max-w-xl">
+    <div className="relative mx-auto flex min-h-0 w-full max-w-xl flex-col">
       {/*
         Drawn in two passes so the seam does not show. The filled triangle sits
         two pixels into the bubble, covering the border line that would
@@ -76,7 +84,7 @@ export default function SpeechBubble({ text, placeholder, stale, onWord }: Speec
       <div
         ref={scroller}
         data-dict-context
-        className={`max-h-64 overflow-y-auto rounded-2xl border-2 border-lingo-border-strong bg-lingo-surface px-6 py-5 text-center text-lg leading-relaxed shadow-lingo-pop transition-opacity ${
+        className={`max-h-80 min-h-0 flex-auto overflow-y-auto rounded-2xl border-2 border-lingo-border-strong bg-lingo-surface px-6 py-5 text-center text-lg leading-relaxed shadow-lingo-pop transition-opacity ${
           empty ? 'text-lingo-muted/70 italic' : 'text-lingo-ink'
         } ${stale && !empty ? 'opacity-90' : 'opacity-100'}`}
       >
