@@ -86,14 +86,20 @@ interface StageProps {
   listenNod?: boolean;
   /** How far it dips, in head units. See DEFAULT_NOD_DEPTH in headMotion.ts. */
   nodDepth?: number;
+  /** What share of answers get one. See DEFAULT_NOD_CHANCE in headMotion.ts. */
+  nodChance?: number;
   /** How far the brows travel, in head units. See DEFAULT_BROW_LIFT in headMotion.ts. */
   browLift?: number;
+  /** What share of blinks carry a flash. See DEFAULT_BROW_FLASH_CHANCE. */
+  browFlashChance?: number;
   /** Which events may lean the head sideways. See TILT_TRIGGERS in headMotion.ts. */
   tilt?: readonly TiltTrigger[];
   /** How far it leans, in degrees. See DEFAULT_TILT_ROLL in headMotion.ts. */
   tiltRoll?: number;
   /** How long it takes to get there. See DEFAULT_TILT_SETTLE. */
   tiltSettle?: number;
+  /** What share of its events are taken. See DEFAULT_TILT_CHANCE. */
+  tiltChance?: number;
   /** The latest question or handover. See TiltCue in headMotion.ts. */
   tiltCue?: TiltCue | null;
   /**
@@ -124,10 +130,13 @@ export default function Stage({
   heard,
   listenNod,
   nodDepth,
+  nodChance,
   browLift,
+  browFlashChance,
   tilt,
   tiltRoll,
   tiltSettle,
+  tiltChance,
   tiltCue,
   speaking,
 }: StageProps) {
@@ -228,10 +237,13 @@ export default function Stage({
               heard={heard}
               listenNod={listenNod}
               nodDepth={nodDepth}
+              nodChance={nodChance}
               browLift={browLift}
+              browFlashChance={browFlashChance}
               tilt={tilt}
               tiltRoll={tiltRoll}
               tiltSettle={tiltSettle}
+              tiltChance={tiltChance}
               tiltCue={tiltCue}
               speaking={speaking}
               mouthRef={mouth}

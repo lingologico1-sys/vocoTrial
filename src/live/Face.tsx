@@ -4,12 +4,15 @@ import { browHeadroom, type FaceKit } from '../facekit/kit';
 import { BROW_BOXES } from '../facekit/slots';
 import {
   DEFAULT_BROW_BLINK,
+  DEFAULT_BROW_FLASH_CHANCE,
   DEFAULT_BROW_LIFT,
   DEFAULT_CADENCE,
   DEFAULT_HEAD_MOTION,
   DEFAULT_LISTEN_NOD,
+  DEFAULT_NOD_CHANCE,
   DEFAULT_NOD_DEPTH,
   DEFAULT_PRESS_TRIGGERS,
+  DEFAULT_TILT_CHANCE,
   DEFAULT_TILT_ROLL,
   DEFAULT_TILT_SETTLE,
   DEFAULT_TILT_TRIGGERS,
@@ -154,6 +157,13 @@ interface FaceProps {
    */
   nodDepth?: number;
   /**
+   * What share of finished answers get one, 0 to 1. See DEFAULT_NOD_CHANCE.
+   *
+   * Rolled per answer inside the performer, so this is odds rather than a
+   * schedule: there is no cadence here to be caught keeping.
+   */
+  nodChance?: number;
+  /**
    * How far the brows travel at full lift, in head units. See DEFAULT_BROW_LIFT.
    *
    * What a kit's brows get is this or what its box affords, whichever is smaller —
@@ -162,6 +172,18 @@ interface FaceProps {
    * registered to them and take it in full, times PLACEHOLDER_BROW_BOLDNESS.
    */
   browLift?: number;
+  /**
+   * What share of blinks carry a brow flash, 0 to 1. See DEFAULT_BROW_FLASH_CHANCE.
+   *
+   * Read at the moment a lid closes rather than per frame, which is why it is
+   * handed to `blinked` below instead of riding on the cue with the other two
+   * rates — the blink's clock lives in this component and the performer only
+   * ever hears about it as an event.
+   *
+   * Does nothing while `browBlink` is false. The tick is whether the brows
+   * answer blinks at all; this is how many of them they answer.
+   */
+  browFlashChance?: number;
   /** Which events may lean the head sideways. See TILT_TRIGGERS. Empty is off. */
   tilt?: readonly TiltTrigger[];
   /**
@@ -180,6 +202,14 @@ interface FaceProps {
    * caller's.
    */
   tiltSettle?: number;
+  /**
+   * What share of the tilt's conversation events are taken, 0 to 1.
+   *
+   * See DEFAULT_TILT_CHANCE. `waiting` is not subject to it and neither is a
+   * probe, so a preview driving the head through `tiltCue` still leans every
+   * time it asks — which is what makes this safe to default low.
+   */
+  tiltChance?: number;
   /**
    * The latest question or handover, or null if there has not been one.
    *
@@ -272,10 +302,13 @@ export default function Face({
   heard = false,
   listenNod = DEFAULT_LISTEN_NOD,
   nodDepth = DEFAULT_NOD_DEPTH,
+  nodChance = DEFAULT_NOD_CHANCE,
   browLift = DEFAULT_BROW_LIFT,
+  browFlashChance = DEFAULT_BROW_FLASH_CHANCE,
   tilt = DEFAULT_TILT_TRIGGERS,
   tiltRoll = DEFAULT_TILT_ROLL,
   tiltSettle = DEFAULT_TILT_SETTLE,
+  tiltChance = DEFAULT_TILT_CHANCE,
   tiltCue,
   speaking = false,
   hold = false,
@@ -321,11 +354,40 @@ export default function Face({
     tilt,
     speaking,
     listenNod,
+    nodChance,
+    browFlashChance,
     tiltSettle,
+    tiltChance,
   });
   useEffect(() => {
-    latest.current = { level, cadence, browBlink, press, heard, tilt, speaking, listenNod, tiltSettle };
-  }, [level, cadence, browBlink, press, heard, tilt, speaking, listenNod, tiltSettle]);
+    latest.current = {
+      level,
+      cadence,
+      browBlink,
+      press,
+      heard,
+      tilt,
+      speaking,
+      listenNod,
+      nodChance,
+      browFlashChance,
+      tiltSettle,
+      tiltChance,
+    };
+  }, [
+    level,
+    cadence,
+    browBlink,
+    press,
+    heard,
+    tilt,
+    speaking,
+    listenNod,
+    nodChance,
+    browFlashChance,
+    tiltSettle,
+    tiltChance,
+  ]);
 
   /**
    * Questions and handovers, handed to the performer as they arrive.
@@ -352,7 +414,9 @@ export default function Face({
           // Told at the moment the lids start to close, not when they open
           // again: the brow and the blink are meant to read as one movement,
           // and the brow's own attack is already the slower of the two.
-          if (latest.current.browBlink) performer.current?.blinked();
+          if (latest.current.browBlink) {
+            performer.current?.blinked(latest.current.browFlashChance);
+          }
           timers.current.push(
             window.setTimeout(() => {
               setBlinking(false);
@@ -402,7 +466,9 @@ export default function Face({
         heard: latest.current.heard,
         press: latest.current.press,
         nod: latest.current.listenNod,
+        nodChance: latest.current.nodChance,
         settle: latest.current.tiltSettle,
+        tiltChance: latest.current.tiltChance,
       });
       // Returning the identical object when nothing has moved is what keeps a
       // silent face cheap: between flashes this loop costs one callback a frame

@@ -56,14 +56,20 @@ interface SpeakingFaceProps {
   listenNod?: boolean;
   /** How far it dips, in head units. See DEFAULT_NOD_DEPTH. */
   nodDepth?: number;
+  /** What share of finished answers get one. See DEFAULT_NOD_CHANCE. */
+  nodChance?: number;
   /** How far the brows travel, in head units. Switchable mid-call, like the lean. */
   browLift?: number;
+  /** What share of blinks carry a flash. See DEFAULT_BROW_FLASH_CHANCE. */
+  browFlashChance?: number;
   /** Which events may lean the head sideways. See TILT_TRIGGERS. */
   tilt?: readonly TiltTrigger[];
   /** How far it leans, in degrees. Switchable mid-call, like the lookahead. */
   tiltRoll?: number;
   /** How long it takes to get there. See DEFAULT_TILT_SETTLE. */
   tiltSettle?: number;
+  /** What share of its conversation events are taken. See DEFAULT_TILT_CHANCE. */
+  tiltChance?: number;
   /** The latest question or handover. See TiltCue. */
   tiltCue?: TiltCue | null;
   /** Whether the agent's audio is playing. Only the tilt reads it. */
@@ -93,10 +99,13 @@ export default function SpeakingFace({
   heard,
   listenNod,
   nodDepth,
+  nodChance,
   browLift,
+  browFlashChance,
   tilt,
   tiltRoll,
   tiltSettle,
+  tiltChance,
   tiltCue,
   speaking,
   bleed,
@@ -191,10 +200,13 @@ export default function SpeakingFace({
       heard={heard}
       listenNod={listenNod}
       nodDepth={nodDepth}
+      nodChance={nodChance}
       browLift={browLift}
+      browFlashChance={browFlashChance}
       tilt={tilt}
       tiltRoll={tiltRoll}
       tiltSettle={tiltSettle}
+      tiltChance={tiltChance}
       tiltCue={tiltCue}
       speaking={speaking}
       bleed={bleed}

@@ -478,6 +478,39 @@ const NOD_GAP = 3.5;
 const NOD_MIN_SPEECH = 0.8;
 
 /**
+ * How many finished answers get one, as a probability.
+ *
+ * The nod arrived firing on all of them, and every argument in this file for
+ * that was about *when* rather than how often: the end of an answer is the one
+ * honest moment for it, NOD_GAP caps a stutter, NOD_MIN_SPEECH keeps a cough
+ * from earning one. All true, and together they still produced a face that dips
+ * its head at the end of every single thing you say. That is not a listener. It
+ * is a metronome you are driving with your own voice, and the giveaway is that
+ * it never once fails to happen — which is the one thing that never holds of a
+ * person agreeing with you.
+ *
+ * A third, so most answers pass without one. What this buys is not less
+ * movement, it is a *reason* — a gesture that lands on some answers and not
+ * others reads as a response to the answer, because that is the only way a
+ * viewer can read it. Fired every time, the same dip reads as punctuation on
+ * the interface.
+ *
+ * Rolled at the edge rather than inside NodChannel, and not merely for tidiness.
+ * A refused roll must cost nothing: nothing is spent, no lockout is taken, and
+ * the next answer is a fresh question. Rolled inside the channel it would have
+ * to decide whether a declined nod still bought NOD_GAP's silence, and there is
+ * no good answer to that — the gap exists to stop a run of real nods, not to
+ * punish an answer for the coin landing wrong.
+ *
+ * Written 0.35 rather than 1/3, and the difference is entirely about the slider
+ * this now sits behind. CHANCE_MIN and the panel's 0.05 step put the reachable
+ * values at 0.05, 0.10 and so on; a default of 0.333 would be a value the
+ * control cannot return to, so a user who dragged it once could only get back
+ * by Reset. A default off its own grid is a default you can lose.
+ */
+export const DEFAULT_NOD_CHANCE = 0.35;
+
+/**
  * Where the picture turns.
  *
  * Low and centred — down at the base of the neck, which is where a real head is
@@ -911,18 +944,50 @@ const BROW_FLASH_LIFT = 0.7;
 const BROW_FLASH_LIFT_IDLE = 0.25;
 
 /**
- * How many blinks carry one, as a probability.
+ * How many blinks carry one, as a probability — the first of three rate dials.
  *
  * Not all of them. Blinks land every four seconds or so, and brows moving that
  * often is the exact failure BROW_LOCKOUT exists to prevent — a face that lifts
  * its brows every four seconds is not waiting, it is reacting to something you
- * cannot see. At a half the flashes land about eight seconds apart, which is
- * BROW_LOCKOUT's seven arrived at from the other direction.
+ * cannot see. This shipped at a half on the arithmetic that a half puts the
+ * flashes eight seconds apart, which is BROW_LOCKOUT's seven arrived at from the
+ * other direction.
+ *
+ * The arithmetic was right and it was answering the wrong question. A lockout
+ * says how close together two flashes may fall; it says nothing about how often
+ * one should happen at all, and BROW_FLASH_LIFT_IDLE's comment had already
+ * worked out that these two are different questions with different answers.
+ * Every eight seconds, forever, is not a rate a face arrives at — it is a
+ * metronome slow enough to be deniable, and a viewer watching for a minute
+ * catches it. A quarter puts them sixteen seconds apart on average and, more to
+ * the point, puts them at *no* average a viewer can hold: three blinks pass
+ * bare, then two carry one.
  *
  * Rolled per blink rather than scheduled, so it inherits the blink's jitter for
- * free and cannot fall into a rhythm of its own.
+ * free and cannot fall into a rhythm of its own. That was always the mechanism;
+ * at a half the mechanism was being wasted on odds too short to hide behind it.
  */
-const BROW_FLASH_CHANCE = 0.5;
+export const DEFAULT_BROW_FLASH_CHANCE = 0.25;
+
+/**
+ * And the ends of the three rate dials, shared because the argument is shared.
+ *
+ * The floor is not zero, and the difference matters more here than it does on
+ * the depth sliders next to them. Zero on a depth slider is a legible request —
+ * hold the brows still, and the tick above it says the feature is on. Zero on a
+ * rate is a ticked box that never fires, which is a control contradicting its
+ * neighbour rather than a setting. A twentieth is the same demonstration
+ * honestly: rare enough to answer "what if almost never", and still a number of
+ * events rather than none.
+ *
+ * The ceiling is one, which is every one of these gestures as it behaved before
+ * this constant existed. Kept reachable because that is what these dials are
+ * for — the complaint that produced them ("it looks strange when it happens
+ * each time") is a comparison, and a bench that cannot put back the thing being
+ * compared against is asking to be believed rather than checked.
+ */
+export const CHANCE_MIN = 0.05;
+export const CHANCE_MAX = 1;
 
 /**
  * The shape of a tilt, and the one envelope here that is a pose rather than a beat.
@@ -1020,6 +1085,37 @@ export const TILT_SETTLE_MAX = 2.4;
  * costs at most a different tilt rather than a second one.
  */
 const TILT_LOCKOUT = 5;
+
+/**
+ * How many of the events that could lean the head actually do, as a probability.
+ *
+ * The nod's argument, applied to a gesture that had it coming for longer. Three
+ * of the four triggers below fire on something in the conversation — a question
+ * heard, a pause found, the floor handed back — and each fired on every one of
+ * them. A head that leans at every question is not curious about the questions;
+ * it has a rule about question marks, and a viewer works that out in about four
+ * of them.
+ *
+ * A third, matching the nod, and the match is not laziness. Both are gestures
+ * that answer a discrete event, and the thing being bought in both cases is
+ * that failing to happen has to be the common case before happening can mean
+ * anything.
+ *
+ * `waiting` is deliberately exempt, and it is the exemption that makes the rest
+ * of this coherent. That trigger does not answer an event — it answers a
+ * silence, on TILT_WAIT_ONSET's own jittered clock, which is already this
+ * constant's job done by a different mechanism. Rolling dice on top would not
+ * make it rarer in any way a viewer could name; it would make a six-second
+ * silence sometimes produce nothing at all, and a silence with no answer is the
+ * exact state that trigger exists to end. Two randomisers on one gesture is one
+ * more than the gesture has meanings.
+ *
+ * The probe is exempt for a plainer reason: it is a button, and a button that
+ * works two times in three is broken.
+ *
+ * 0.35 rather than 1/3, for DEFAULT_NOD_CHANCE's grid reason.
+ */
+export const DEFAULT_TILT_CHANCE = 0.35;
 
 /**
  * How long a silence has to run before the head leans into it, and how long
@@ -1150,9 +1246,17 @@ export const DEFAULT_PRESS_TRIGGERS: readonly PressTrigger[] = ['turn', 'reply',
  * already has a tilt landing in it; four seconds of nothing is not a handover,
  * it is a learner who is stuck — which is both the moment worth having a face
  * for and the moment there is least else on screen. Fourteen seconds between
- * them makes this comfortably the rarest thing the face does: the blink is four,
- * the flash eight, the nod three and a half. Both are jittered like every other
- * schedule here.
+ * them made this comfortably the rarest thing the face did, back when the
+ * comparison was against lockouts alone: the blink is four, the flash was eight,
+ * the nod three and a half. Both are jittered like every other schedule here.
+ *
+ * It is no longer the rarest, and nothing about it changed. The three rate dials
+ * moved the others — a flash on a quarter of blinks is one every sixteen seconds,
+ * and the nod and the tilt now go most of the times they could — which leaves
+ * this the only gesture on the face still doing a thing on a schedule every time
+ * the schedule says so. That is correct for this one and only this one: a lip
+ * press answers a mouth drying rather than anything in the conversation, so
+ * there is no event for it to be a sometimes-response to.
  *
  * Unlike the second trigger, this one *is* a frequency change and not merely a
  * choice of moment — DEFAULT_PRESS_TRIGGERS' argument that ticking two costs no
@@ -1472,6 +1576,22 @@ export interface CueInput {
    * DEFAULT_LISTEN_NOD.
    */
   nod: boolean;
+  /**
+   * What share of finished answers it takes when it may. See DEFAULT_NOD_CHANCE.
+   *
+   * On the cue for `settle`'s reason — a live setting, read per frame, outliving
+   * no performer and rebuilding nothing when it moves. Rolled only on the frame
+   * an answer ends, so a slider dragged mid-nod cannot retroactively cancel one.
+   */
+  nodChance: number;
+  /**
+   * And what share of the tilt's conversation events land. See DEFAULT_TILT_CHANCE.
+   *
+   * `waiting` and the probe are not subject to it, which is the whole of the
+   * difference between this and a rate on the gesture: it governs how many
+   * *reasons* are taken up, not how often the head leans.
+   */
+  tiltChance: number;
 }
 
 /**
@@ -1759,10 +1879,19 @@ export class HeadPerformer {
    *
    * The dice live here rather than at the call site so that everything
    * deciding how brows behave is in one file. The caller's job is to report
-   * that an eye closed.
+   * that an eye closed, and — since the odds became a slider — what the odds
+   * currently are. Handing in the number is not handing in the decision: the
+   * caller still cannot make a flash happen, and still does not know what a
+   * flash is.
+   *
+   * A parameter rather than a field on CueInput because this is not read on a
+   * frame. The blink's clock lives in the component that draws the lids, for the
+   * reason two paragraphs up, so this arrives as an event or not at all.
+   *
+   * @param chance Share of blinks that carry a flash. See DEFAULT_BROW_FLASH_CHANCE.
    */
-  blinked(): void {
-    if (Math.random() < BROW_FLASH_CHANCE) this.flashPending = true;
+  blinked(chance = DEFAULT_BROW_FLASH_CHANCE): void {
+    if (Math.random() < chance) this.flashPending = true;
   }
 
   /**
@@ -1908,11 +2037,22 @@ export class HeadPerformer {
       Only the first is an answer ending. Barging in produces the identical edge
       and must not produce a nod — a face that nods at the moment it starts
       talking is agreeing with itself.
+
+      The dice come last, after both gates, and the order is what makes them
+      cheap: they are rolled once per answer that had already earned a nod, never
+      per frame and never on an answer that was not going to get one. Written
+      ahead of the gates the roll would be a coin flipped sixty times a second,
+      and every answer would take a nod on whichever frame it first came up —
+      which is the behaviour being removed, arrived at by a longer road. See
+      DEFAULT_NOD_CHANCE for why most answers now go without one.
     */
     const listening = cue.heard && !cue.speaking;
     const finished = !listening && !cue.speaking && this.listeningFor >= NOD_MIN_SPEECH;
     this.listeningFor = listening ? this.listeningFor + dt : 0;
-    const nod = this.nodChannel.advance(dt, cue.nod && finished);
+    const nod = this.nodChannel.advance(
+      dt,
+      cue.nod && finished && Math.random() < cue.nodChance,
+    );
 
     // The gap detector. Runs whether or not `hesitation` is ticked, so that
     // ticking it mid-call does not inherit a pause that started a minute ago —
@@ -1956,12 +2096,29 @@ export class HeadPerformer {
       finishes on its own terms.
     */
     if (this.probePending) this.tiltChannel.unlock();
-    const fireTilt =
+    /*
+      The three that answer something in the conversation, held apart from the
+      two that answer nothing, so the dice can be rolled over exactly these.
+
+      Rolled once over the disjunction rather than once per trigger. Three
+      separate rolls would quietly make the face leanier the more boxes are
+      ticked — tick all three and something fires over half the time, which is a
+      rate nobody chose and the panel does not show. One roll asks the honest
+      question instead: this frame has a reason to lean, is it taking it. Two
+      reasons landing on one frame does not want a second coin, since the lockout
+      would refuse the second lean whatever it said.
+
+      The flags are cleared either way, refused rolls included, for the reason
+      the comment above already gives about the flash: a lean banked on a
+      question asked ten seconds ago is a lean with nothing in the room to
+      account for it, and "the coin said no" is not a reason to keep it owing.
+    */
+    const eventTilt =
       (this.questionPending && wanted('question')) ||
       (this.yieldPending && wanted('listening')) ||
-      (inPause && wanted('hesitation')) ||
-      waitTilt ||
-      this.probePending;
+      (inPause && wanted('hesitation'));
+    const fireTilt =
+      (eventTilt && Math.random() < cue.tiltChance) || waitTilt || this.probePending;
     this.questionPending = false;
     this.yieldPending = false;
     this.probePending = false;

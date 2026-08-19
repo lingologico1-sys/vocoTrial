@@ -122,8 +122,21 @@ export interface StudentSession {
    * is the whole mechanism and the reason this needs no migration.
    */
   tiltSettle?: number;
+  /**
+   * What share of the tilt's conversation events are taken, and of finished
+   * answers that get a nod, and of blinks that carry a brow flash.
+   *
+   * Optional for `tiltSettle`'s reason and by the same mechanism — setups
+   * published before these existed are in R2 and have to keep opening, and
+   * undefined handed to a defaulted prop is the face's own default rather than
+   * zero. Zero would be the worst possible reading of a missing rate: a session
+   * with every gesture switched on and none of them ever firing.
+   */
+  tiltChance?: number;
   listenNod: boolean;
   nodDepth: number;
+  nodChance?: number;
+  browFlashChance?: number;
 
   /**
    * Turn-taking, and the reason this block is optional throughout.
@@ -191,7 +204,10 @@ export function looksLikeSession(value: unknown): value is StudentSession {
     isStringArray(session.tilt) &&
     typeof session.tiltRoll === 'number' &&
     (session.tiltSettle === undefined || typeof session.tiltSettle === 'number') &&
+    (session.tiltChance === undefined || typeof session.tiltChance === 'number') &&
     typeof session.listenNod === 'boolean' &&
-    typeof session.nodDepth === 'number'
+    typeof session.nodDepth === 'number' &&
+    (session.nodChance === undefined || typeof session.nodChance === 'number') &&
+    (session.browFlashChance === undefined || typeof session.browFlashChance === 'number')
   );
 }

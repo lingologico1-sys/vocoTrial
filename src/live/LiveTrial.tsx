@@ -21,13 +21,18 @@ import { useVoiceCall } from './useVoiceCall';
 import {
   BROW_LIFT_MAX,
   BROW_LIFT_MIN,
+  CHANCE_MAX,
+  CHANCE_MIN,
   DEFAULT_BROW_BLINK,
+  DEFAULT_BROW_FLASH_CHANCE,
   DEFAULT_BROW_LIFT,
   DEFAULT_CADENCE,
   DEFAULT_HEAD_MOTION,
   DEFAULT_LISTEN_NOD,
+  DEFAULT_NOD_CHANCE,
   DEFAULT_NOD_DEPTH,
   DEFAULT_PRESS_TRIGGERS,
+  DEFAULT_TILT_CHANCE,
   DEFAULT_TILT_ROLL,
   DEFAULT_TILT_SETTLE,
   DEFAULT_TILT_TRIGGERS,
@@ -157,8 +162,11 @@ interface Prefs {
   tilt: TiltTrigger[];
   tiltRoll: number;
   tiltSettle: number;
+  tiltChance: number;
   listenNod: boolean;
   nodDepth: number;
+  nodChance: number;
+  browFlashChance: number;
   roundness: RoundnessMode;
 }
 
@@ -289,6 +297,17 @@ export default function LiveTrial() {
   // value you are comparing against a memory.
   const [tiltRoll, setTiltRoll] = useState<number>(prefs.tiltRoll ?? DEFAULT_TILT_ROLL);
   const [tiltSettle, setTiltSettle] = useState<number>(prefs.tiltSettle ?? DEFAULT_TILT_SETTLE);
+  /*
+    And how many of its reasons it takes, which is the one setting on this row
+    that changes how often the gesture happens rather than what it looks like.
+
+    Three of these now, one per gesture, and they arrived together because the
+    complaint was one complaint: a movement that answers an event and never once
+    misses is read as a rule about the event rather than as an answer to it. See
+    DEFAULT_TILT_CHANCE, DEFAULT_NOD_CHANCE and DEFAULT_BROW_FLASH_CHANCE, which
+    argue it three times because the three gestures fail it differently.
+  */
+  const [tiltChance, setTiltChance] = useState<number>(prefs.tiltChance ?? DEFAULT_TILT_CHANCE);
 
   // The head's one movement during the user's turn. Stored like the rest, and
   // absent from anybody's saved prefs until they touch it — which is what the
@@ -296,6 +315,10 @@ export default function LiveTrial() {
   // bumped: there is no stale value for the new default to lose to.
   const [listenNod, setListenNod] = useState<boolean>(prefs.listenNod ?? DEFAULT_LISTEN_NOD);
   const [nodDepth, setNodDepth] = useState<number>(prefs.nodDepth ?? DEFAULT_NOD_DEPTH);
+  const [nodChance, setNodChance] = useState<number>(prefs.nodChance ?? DEFAULT_NOD_CHANCE);
+  const [browFlashChance, setBrowFlashChance] = useState<number>(
+    prefs.browFlashChance ?? DEFAULT_BROW_FLASH_CHANCE,
+  );
 
   /*
     The ten controls the Head motion fieldset owns, gathered so it can be put
@@ -315,24 +338,30 @@ export default function LiveTrial() {
     cadence === DEFAULT_CADENCE &&
     browBlink === DEFAULT_BROW_BLINK &&
     browLift === DEFAULT_BROW_LIFT &&
+    browFlashChance === DEFAULT_BROW_FLASH_CHANCE &&
     sameSet(press, DEFAULT_PRESS_TRIGGERS) &&
     listenNod === DEFAULT_LISTEN_NOD &&
     nodDepth === DEFAULT_NOD_DEPTH &&
+    nodChance === DEFAULT_NOD_CHANCE &&
     sameSet(tilt, DEFAULT_TILT_TRIGGERS) &&
     tiltRoll === DEFAULT_TILT_ROLL &&
-    tiltSettle === DEFAULT_TILT_SETTLE;
+    tiltSettle === DEFAULT_TILT_SETTLE &&
+    tiltChance === DEFAULT_TILT_CHANCE;
 
   const resetMotion = () => {
     setMotion(DEFAULT_HEAD_MOTION);
     setCadence(DEFAULT_CADENCE);
     setBrowBlink(DEFAULT_BROW_BLINK);
     setBrowLift(DEFAULT_BROW_LIFT);
+    setBrowFlashChance(DEFAULT_BROW_FLASH_CHANCE);
     setPress([...DEFAULT_PRESS_TRIGGERS]);
     setListenNod(DEFAULT_LISTEN_NOD);
     setNodDepth(DEFAULT_NOD_DEPTH);
+    setNodChance(DEFAULT_NOD_CHANCE);
     setTilt([...DEFAULT_TILT_TRIGGERS]);
     setTiltRoll(DEFAULT_TILT_ROLL);
     setTiltSettle(DEFAULT_TILT_SETTLE);
+    setTiltChance(DEFAULT_TILT_CHANCE);
   };
 
   const [showLog, setShowLog] = useState(false);
@@ -468,8 +497,11 @@ export default function LiveTrial() {
           tilt,
           tiltRoll,
           tiltSettle,
+          tiltChance,
           listenNod,
           nodDepth,
+          nodChance,
+          browFlashChance,
           roundness,
         } satisfies Prefs),
       );
@@ -490,8 +522,11 @@ export default function LiveTrial() {
     tilt,
     tiltRoll,
     tiltSettle,
+    tiltChance,
     listenNod,
     nodDepth,
+    nodChance,
+    browFlashChance,
     roundness,
   ]);
 
@@ -627,8 +662,11 @@ export default function LiveTrial() {
         tilt,
         tiltRoll,
         tiltSettle,
+        tiltChance,
         listenNod,
         nodDepth,
+        nodChance,
+        browFlashChance,
       };
       setPublished(await publishSession(setup));
     } catch (error) {
@@ -695,10 +733,13 @@ export default function LiveTrial() {
           heard={heard}
           listenNod={listenNod}
           nodDepth={nodDepth}
+          nodChance={nodChance}
           browLift={browLift}
+          browFlashChance={browFlashChance}
           tilt={tilt}
           tiltRoll={tiltRoll}
           tiltSettle={tiltSettle}
+          tiltChance={tiltChance}
           tiltCue={leanCue}
           speaking={speaking}
         />
@@ -1016,6 +1057,39 @@ export default function LiveTrial() {
             )}
 
             {/*
+              And how many of the ticked events actually get one, which is the
+              only control on this row that changes the gesture's frequency
+              rather than its shape.
+
+              Hidden when `waiting` is the only box ticked, and that is the same
+              rule as the two sliders above rather than an exception to it. This
+              governs the three triggers that answer a conversation event; the
+              waiting lean answers a clock and is deliberately left alone — see
+              DEFAULT_TILT_CHANCE. With only that one on, this would be a slider
+              with nothing under it, which is the thing the comment above refuses.
+            */}
+            {tilt.some((id) => id !== 'waiting') && (
+              <label
+                title="How many of the ticked events actually lean the head, rolled per event. Below 100% the same question sometimes gets a tilt and sometimes does not, which is what stops the movement reading as a rule about question marks. Waiting is not counted here — that one leans on its own jittered clock and already happens only sometimes."
+                className="flex min-w-[11rem] flex-1 cursor-help items-center gap-2 text-xs text-slate-500"
+              >
+                How often
+                <input
+                  type="range"
+                  min={CHANCE_MIN}
+                  max={CHANCE_MAX}
+                  step={0.05}
+                  value={tiltChance}
+                  onChange={(event) => setTiltChance(Number(event.target.value))}
+                  className="flex-1 accent-sky-500"
+                />
+                <span className="w-24 text-right font-mono text-slate-300">
+                  {Math.round(tiltChance * 100)}% of events
+                </span>
+              </label>
+            )}
+
+            {/*
               The two sliders above govern a gesture that will not happen while
               you are looking at them: the trigger this ships on needs a live
               call to say anything, and the other three are rare by design. A
@@ -1043,7 +1117,7 @@ export default function LiveTrial() {
           <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
             <span className="w-16 shrink-0 text-xs text-slate-500">Nod</span>
             <label
-              title="Dips the head once as you finish speaking — about half a second after your last word, which is when the microphone is sure you have stopped. The only movement on this panel that answers something you did. It used to nod every few seconds while you talked, which is what real listeners do and was distracting to be on the other end of."
+              title="Dips the head as you finish speaking — about half a second after your last word, which is when the microphone is sure you have stopped. The only movement on this panel that answers something you did. Not on every answer: how many is the slider beside this, and the reason it is not all of them is that a nod which never once misses stops reading as agreement. It used to nod every few seconds while you talked, which is what real listeners do and was distracting to be on the other end of."
               className="flex cursor-help items-center gap-2 text-sm text-slate-300"
             >
               <input
@@ -1076,6 +1150,27 @@ export default function LiveTrial() {
                 </span>
               </label>
             )}
+
+            {listenNod && (
+              <label
+                title="How many finished answers actually get one, rolled once per answer. At 100% the head dips at the end of every single thing you say, which is what this shipped as and what it was changed for — a nod that never fails to happen is not agreement, it is punctuation. Nothing is spent on an answer the roll declines, so the next one is a fresh chance."
+                className="flex min-w-[11rem] flex-1 cursor-help items-center gap-2 text-xs text-slate-500"
+              >
+                How often
+                <input
+                  type="range"
+                  min={CHANCE_MIN}
+                  max={CHANCE_MAX}
+                  step={0.05}
+                  value={nodChance}
+                  onChange={(event) => setNodChance(Number(event.target.value))}
+                  className="flex-1 accent-sky-500"
+                />
+                <span className="w-24 text-right font-mono text-slate-300">
+                  {Math.round(nodChance * 100)}% of answers
+                </span>
+              </label>
+            )}
           </div>
 
           {/*
@@ -1089,7 +1184,7 @@ export default function LiveTrial() {
           <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
             <span className="w-16 shrink-0 text-xs text-slate-500">Brows</span>
             <label
-              title="About half of all blinks carry a small brow lift, so the face keeps moving between turns without the head drifting. Untick it to see how still the face is with nobody speaking."
+              title="Some blinks carry a small brow lift, so the face keeps moving between turns without the head drifting. How many of them is the slider beside this. Untick it to see how still the face is with nobody speaking."
               className="flex cursor-help items-center gap-2 text-sm text-slate-300"
             >
               <input
@@ -1100,6 +1195,32 @@ export default function LiveTrial() {
               />
               Lift with blinks
             </label>
+
+            {/*
+              Between the tick and the travel, which is the row's own order: what
+              fires the movement, then how often, then how far. The nod and the
+              tilt rows above now read the same way.
+            */}
+            {browBlink && (
+              <label
+                title="How many blinks carry the lift, rolled per blink. This shipped at half, which put a flash every eight seconds forever — slow enough to seem unplanned for a minute and no longer. A quarter is roughly one every sixteen seconds and, more to the point, at no interval you can hold: some blinks pass bare, then two in a row carry one."
+                className="flex min-w-[11rem] flex-1 cursor-help items-center gap-2 text-xs text-slate-500"
+              >
+                How often
+                <input
+                  type="range"
+                  min={CHANCE_MIN}
+                  max={CHANCE_MAX}
+                  step={0.05}
+                  value={browFlashChance}
+                  onChange={(event) => setBrowFlashChance(Number(event.target.value))}
+                  className="flex-1 accent-sky-500"
+                />
+                <span className="w-24 text-right font-mono text-slate-300">
+                  {Math.round(browFlashChance * 100)}% of blinks
+                </span>
+              </label>
+            )}
 
             <label
               title="How far the brows travel at their fullest, as a share of the head's own height. A kit only gets as much of this as its brow boxes say there is clear forehead for, so a portrait with a low fringe will stop responding partway up — that is the picture's answer, not the slider's. Drag it to nothing to hear the same sentence with the brows held still."
@@ -1267,12 +1388,14 @@ export default function LiveTrial() {
           </Why>
 
           {/*
-            Ten controls, and until now no way back from them.
+            Thirteen controls, and no way back from them but this.
 
-            They are not ten independent settings. The lockouts and schedules in
-            headMotion.ts are picked against one another — the flash's eight
-            seconds against the blink's four, the tilt's five against the nod's
-            three and a half — so a panel dragged around for twenty minutes is
+            They are not thirteen independent settings. The lockouts, schedules
+            and odds in headMotion.ts are picked against one another — the
+            flash's quarter against the blink's four seconds, the tilt's five
+            against the nod's three and a half, and the three rates against each
+            other so that no two gestures come due together — so a panel dragged
+            around for twenty minutes is
             not a set of separable mistakes to undo one at a time. It is a face
             that has stopped demonstrating anything, and the defaults are the one
             configuration this repo actually argues for.
@@ -1287,7 +1410,7 @@ export default function LiveTrial() {
               type="button"
               onClick={resetMotion}
               disabled={motionAtDefaults}
-              title="Puts every control in this fieldset back to the value the code ships with — direction, cadence, brows, lips, tilt and nod. Nothing outside it moves: the artwork, the mouth driver and the language are left where they are."
+              title="Puts every control in this fieldset back to the value the code ships with — direction, cadence, brows, lips, tilt and nod, rates included. Nothing outside it moves: the artwork, the mouth driver and the language are left where they are."
               className="rounded border border-slate-700 px-2 py-1 text-xs text-slate-400 transition-colors hover:border-slate-500 hover:text-slate-100 disabled:border-slate-800 disabled:text-slate-600 disabled:hover:border-slate-800 disabled:hover:text-slate-600"
             >
               {motionAtDefaults ? 'At defaults' : 'Reset to defaults'}

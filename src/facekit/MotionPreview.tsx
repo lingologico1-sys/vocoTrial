@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import Face from '../live/Face';
 import {
   BROW_LIFT_MAX,
+  CHANCE_MAX,
   DEFAULT_CADENCE,
   DEFAULT_HEAD_MOTION,
   HEAD_MOTIONS,
@@ -368,6 +369,20 @@ export default function MotionPreview({ kit, focus, note }: MotionPreviewProps) 
             // the artwork. Whatever survives here survives anywhere the live
             // slider can be dragged to.
             browLift={BROW_LIFT_MAX}
+            /*
+              Every rate pinned open, which is the same rule as the two extremes
+              around it read the other way up.
+
+              The live page rolls dice on these — a quarter of blinks carry a
+              flash, a third of tilt events are taken — and those odds are right
+              for a face somebody is talking to and wrong for a panel whose whole
+              job is to tell you whether something fired. A brow box judged
+              against a coin is not judged; it is waited at, and then blamed for
+              a flash the roll declined. Whatever survives every blink and every
+              cue survives any rate the live slider can be set to.
+            */
+            browFlashChance={CHANCE_MAX}
+            tiltChance={CHANCE_MAX}
             tilt={tilting ? TILT_DEMO : TILT_OFF}
             // Leaned as far as the live page's slider goes, never at its default.
             // The panel's own rule, applied to a second movement: the extreme is

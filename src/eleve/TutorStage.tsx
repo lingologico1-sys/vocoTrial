@@ -117,10 +117,13 @@ export default function TutorStage({
             heard={heard}
             listenNod={session.listenNod}
             nodDepth={session.nodDepth}
+            nodChance={session.nodChance}
             browLift={session.browLift}
+            browFlashChance={session.browFlashChance}
             tilt={session.tilt}
             tiltRoll={session.tiltRoll}
             tiltSettle={session.tiltSettle}
+            tiltChance={session.tiltChance}
             tiltCue={tiltCue}
             speaking={speaking}
             bleed
