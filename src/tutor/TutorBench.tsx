@@ -28,6 +28,18 @@ import {
   type UsageTotals,
 } from '../realtime/cost';
 import type { SessionStatus, TranscriptDelta, VoiceSession } from '../realtime/types';
+import type { Evaluator } from '../realtime/evaluators';
+import {
+  deleteEvaluator,
+  lastEvaluatorId,
+  listEvaluators,
+  newEvaluatorId,
+  rememberEvaluator,
+  saveEvaluator,
+} from '../realtime/evaluatorStore';
+import type { SessionReport } from '../realtime/report';
+import EvaluatorPanel from './EvaluatorPanel';
+import ReportPanel from './ReportPanel';
 
 interface Turn {
   /** Google's id for this turn, when it gives one. See TranscriptDelta. */
@@ -78,6 +90,14 @@ interface Prefs {
   instructions: string;
   edited: boolean;
   settings: SessionSettings;
+  /**
+   * The learner's own language, which the end-of-call report is written in.
+   *
+   * Here rather than in the evaluator store because it belongs to the person
+   * using the bench, not to the scale — switching scales must not switch the
+   * language the report comes back in.
+   */
+  l1Code?: string;
 }
 
 /**
@@ -142,6 +162,25 @@ export default function TutorBench() {
    */
   const [presetError, setPresetError] = useState<string | null>(null);
 
+  /**
+   * The scale the finished call is read against, and the library it came from.
+   *
+   * The list is fetched rather than read from a store: evaluators live in R2 so
+   * that one authored here reaches a student on another machine, which means
+   * the browser cannot know them at first paint. listEvaluators always yields
+   * at least the built-in, so there is no empty state to render.
+   */
+  const [evaluators, setEvaluators] = useState<Evaluator[]>([]);
+  const [evaluatorId, setEvaluatorId] = useState('');
+  const [evaluatorError, setEvaluatorError] = useState<string | undefined>();
+  const [l1Code, setL1Code] = useState(() => prefs.l1Code ?? 'en');
+
+  /** The report for the call just ended. Cleared when the next one starts. */
+  const [report, setReport] = useState<SessionReport | null>(null);
+  const [reportUsd, setReportUsd] = useState(0);
+  const [reporting, setReporting] = useState(false);
+  const [reportError, setReportError] = useState<string | null>(null);
+
   const [status, setStatus] = useState<SessionStatus>('idle');
   const [detail, setDetail] = useState<string | null>(null);
   const [speaking, setSpeaking] = useState(false);
@@ -202,12 +241,27 @@ export default function TutorBench() {
     try {
       window.localStorage.setItem(
         PREFS_KEY,
-        JSON.stringify({ presetKey, instructions, edited, settings } satisfies Prefs),
+        JSON.stringify({ presetKey, instructions, edited, settings, l1Code } satisfies Prefs),
       );
     } catch {
       // Private browsing, or a full quota. Losing the cache is not worth an error.
     }
-  }, [presetKey, instructions, edited, settings]);
+  }, [presetKey, instructions, edited, settings, l1Code]);
+
+  // The library, once, at mount. A failure leaves the built-in selected and
+  // says so beside the panel rather than blocking the page.
+  useEffect(() => {
+    let live = true;
+    void listEvaluators().then(({ evaluators: found, error }) => {
+      if (!live) return;
+      setEvaluators(found);
+      setEvaluatorId(lastEvaluatorId(found));
+      setEvaluatorError(error);
+    });
+    return () => {
+      live = false;
+    };
+  }, []);
 
   /**
    * An untouched prompt follows the language picker; an edited one does not.
@@ -253,6 +307,8 @@ export default function TutorBench() {
 
   const connect = async () => {
     setTurns([]);
+    setReport(null);
+    setReportError(null);
     setDetail(null);
     setMuted(false);
     setUsage(null);
@@ -421,6 +477,85 @@ export default function TutorBench() {
   // ordering but has nothing to draw.
   const spoken = turns.filter((turn) => turn.text);
 
+  const chooseEvaluator = useCallback((id: string) => {
+    setEvaluatorId(id);
+    rememberEvaluator(id);
+    setEvaluatorError(undefined);
+  }, []);
+
+  /**
+   * Saves a scale and re-selects it.
+   *
+   * The id is minted here rather than in the panel because "save as new" and
+   * "save a copy of the built-in" are the same operation to the store and the
+   * panel should not have to know that — it sends an empty id to mean either.
+   */
+  const saveScale = useCallback(async (draft: Evaluator) => {
+    setEvaluatorError(undefined);
+    try {
+      const saved = await saveEvaluator({ ...draft, id: draft.id || newEvaluatorId() });
+      setEvaluators((current) => [
+        current[0],
+        saved,
+        ...current.slice(1).filter((entry) => entry.id !== saved.id),
+      ]);
+      setEvaluatorId(saved.id);
+      rememberEvaluator(saved.id);
+    } catch (error) {
+      setEvaluatorError(error instanceof Error ? error.message : 'Could not save that scale');
+    }
+  }, []);
+
+  const removeScale = useCallback(async (id: string) => {
+    setEvaluatorError(undefined);
+    try {
+      await deleteEvaluator(id);
+      setEvaluators((current) => current.filter((entry) => entry.id !== id));
+      // Back to the built-in, which is always present and never deletable.
+      setEvaluatorId((current) => (current === id ? (evaluators[0]?.id ?? '') : current));
+    } catch (error) {
+      setEvaluatorError(error instanceof Error ? error.message : 'Could not delete that scale');
+    }
+  }, [evaluators]);
+
+  /**
+   * Reads the finished call against the chosen scale.
+   *
+   * Deliberately a button rather than something that fires on hang-up. A report
+   * costs about a penny and most calls on this bench are half a sentence long
+   * to check a knob — paying for a reading of every one of them, and waiting
+   * for it, would make the bench worse at the thing it is for.
+   */
+  const makeReport = useCallback(async () => {
+    setReporting(true);
+    setReportError(null);
+    try {
+      const response = await fetch('/api/report/analyse', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({
+          languageCode: language,
+          l1Code,
+          evaluatorId,
+          turns: spoken.map((turn) => ({ role: turn.role, text: turn.text })),
+        }),
+      });
+      const answer = (await response.json().catch(() => null)) as
+        | { report?: SessionReport; usd?: number; error?: string }
+        | null;
+      if (!response.ok || !answer?.report) {
+        throw new Error(answer?.error || 'The report could not be written');
+      }
+      setReport(answer.report);
+      setReportUsd(answer.usd ?? 0);
+    } catch (error) {
+      setReportError(error instanceof Error ? error.message : 'The report could not be written');
+    } finally {
+      setReporting(false);
+    }
+  }, [language, l1Code, evaluatorId, spoken]);
+
   // Only after the call, and only if the provider actually reported something.
   const ended = status === 'closed' || status === 'error';
   const summary =
@@ -535,6 +670,18 @@ export default function TutorBench() {
               the panel has since been collapsed over it. */}
           {presetError && <p className="mt-1 px-1 text-xs text-rose-400">{presetError}</p>}
         </div>
+
+        <EvaluatorPanel
+          disabled={live || busy}
+          evaluators={evaluators}
+          evaluatorId={evaluatorId}
+          onEvaluator={chooseEvaluator}
+          l1Code={l1Code}
+          onL1={setL1Code}
+          onSave={saveScale}
+          onDelete={removeScale}
+          error={evaluatorError}
+        />
 
         <div className="flex items-center gap-3 rounded-lg border border-slate-800 px-4 py-3">
           <Radio
@@ -677,6 +824,23 @@ export default function TutorBench() {
               bill. Excludes the Cloudflare Worker time the relay bills.
               {summary.truncated && ' The call ended abnormally, so the final usage may be missing.'}
             </p>
+          </div>
+        )}
+
+        {!live && spoken.some((turn) => turn.role === 'user') && (
+          <div className="space-y-3">
+            {!report && (
+              <button
+                type="button"
+                onClick={makeReport}
+                disabled={reporting || !evaluatorId}
+                className="w-full rounded-lg border border-slate-700 px-4 py-2.5 text-sm font-medium text-slate-300 hover:bg-slate-900 disabled:opacity-50"
+              >
+                {reporting ? 'Reading the call…' : 'Read this call against the scale'}
+              </button>
+            )}
+            {reportError && <p className="px-1 text-xs text-rose-400">{reportError}</p>}
+            {report && <ReportPanel report={report} usd={reportUsd} />}
           </div>
         )}
 

@@ -1,5 +1,5 @@
 import { findLanguage } from '../../../src/realtime/languages';
-import { findLevel } from '../../../src/realtime/levels';
+import { BUILTIN_EVALUATOR, BUILTIN_EVALUATOR_ID, type Evaluator } from '../../../src/realtime/evaluators';
 import {
   MAX_TRANSCRIPT,
   REPORT_MODEL,
@@ -10,6 +10,10 @@ import {
 } from '../../../src/realtime/report';
 import { type GateEnv, json } from '../_middleware';
 import { VERTEX_KEY_NAMES, vertexGenerateContentUrl, vertexKey } from '../_vertex';
+import { type LibraryEnv, readLibrary } from '../evaluators/_library';
+
+/** Both bindings: the key that pays for the call, and the bucket of scales. */
+type ReportEnv = GateEnv & LibraryEnv;
 
 /**
  * The end-of-call report: a finished transcript in, a structured reading out.
@@ -21,12 +25,17 @@ import { VERTEX_KEY_NAMES, vertexGenerateContentUrl, vertexKey } from '../_verte
  * call it is the student page, and a student authors neither prompts nor
  * models. See the direction note in the README.
  *
- * THE CODES ARE RESOLVED HERE, NOT TRUSTED. Language, first language and level
- * arrive as codes and are looked up before anything is built from them — the
- * same rule models.ts and languages.ts follow on the live path. It matters less
- * here than there, since none of the three picks what gets spent, but a label
- * taken straight off the wire is a string of the caller's choosing landing in a
- * system prompt, and there is no reason to accept one.
+ * THE CODES ARE RESOLVED HERE, NOT TRUSTED. Language, first language and the
+ * evaluator arrive as ids and are looked up before anything is built from them
+ * — the same rule models.ts and languages.ts follow on the live path. It
+ * matters less here than there, since none of the three picks what gets spent,
+ * but the scale lands in a *system* prompt, and a caller who could post one
+ * inline could write the instruction rather than choose it.
+ *
+ * That is why the evaluator is fetched from the bucket by id rather than
+ * accepted whole, even though the browser already holds it and posting it would
+ * save a read. The saving is a fraction of a millisecond; the property is that
+ * every scale in a system prompt is one somebody authored through save.ts.
  *
  * The transcript itself is the caller's text and cannot be resolved against
  * anything. It travels as user content rather than inside the instruction, and
@@ -37,7 +46,7 @@ import { VERTEX_KEY_NAMES, vertexGenerateContentUrl, vertexKey } from '../_verte
 interface AnalyseBody {
   languageCode?: unknown;
   l1Code?: unknown;
-  levelCode?: unknown;
+  evaluatorId?: unknown;
   turns?: unknown;
 }
 
@@ -103,7 +112,7 @@ function readTurns(value: unknown): ReportTurn[] | null {
 }
 
 export async function onRequestPost(
-  context: EventContext<GateEnv, string, Record<string, unknown>>,
+  context: EventContext<ReportEnv, string, Record<string, unknown>>,
 ): Promise<Response> {
   const { request, env } = context;
 
@@ -136,9 +145,22 @@ export async function onRequestPost(
     return json({ error: 'Unknown first language', code: 'bad_l1' }, 400);
   }
 
-  const level = typeof body?.levelCode === 'string' ? findLevel(body.levelCode) : undefined;
-  if (!level) {
-    return json({ error: 'Unknown level', code: 'bad_level' }, 400);
+  /*
+   * The built-in short-circuits the bucket, which is what lets a deployment
+   * with no binding — or one where nobody has authored a scale yet — still
+   * produce a report. Only a saved id pays for a read.
+   */
+  const evaluatorId = typeof body?.evaluatorId === 'string' ? body.evaluatorId : '';
+  let evaluator: Evaluator | undefined;
+  if (!evaluatorId || evaluatorId === BUILTIN_EVALUATOR_ID) {
+    evaluator = BUILTIN_EVALUATOR;
+  } else if (!env.EVALUATORS) {
+    return json({ error: 'No evaluator library is configured', code: 'no_bucket' }, 500);
+  } else {
+    evaluator = (await readLibrary(env.EVALUATORS)).find((entry) => entry.id === evaluatorId);
+  }
+  if (!evaluator) {
+    return json({ error: 'Unknown evaluator', code: 'bad_evaluator' }, 400);
   }
 
   const turns = readTurns(body?.turns);
@@ -168,7 +190,7 @@ export async function onRequestPost(
       method: 'POST',
       headers: { 'x-goog-api-key': key, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        systemInstruction: { parts: [{ text: reportInstruction({ language, l1, level }) }] },
+        systemInstruction: { parts: [{ text: reportInstruction({ language, l1, evaluator }) }] },
         contents: [{ role: 'user', parts: [{ text: transcript }] }],
         generationConfig: {
           responseMimeType: 'application/json',

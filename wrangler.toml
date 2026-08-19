@@ -49,3 +49,18 @@ pages_build_output_dir = "dist"
 [[r2_buckets]]
 binding = "FACES"
 bucket_name = "vocotrial-faces"
+
+# The shared evaluator library. tutorBench authors a level scale here and every
+# other browser reads it back — the same journey faces made, and for the same
+# reason: a scale authored on one laptop has to reach a student on another.
+#
+# Create it once before the first save:
+#
+#   npx wrangler r2 bucket create vocotrial-evaluators
+#
+# Its own bucket rather than a prefix inside FACES, because a binding named
+# FACES holding level scales is a lie the next reader has to unpick. Buckets
+# cost nothing to create. See functions/api/evaluators/.
+[[r2_buckets]]
+binding = "EVALUATORS"
+bucket_name = "vocotrial-evaluators"
