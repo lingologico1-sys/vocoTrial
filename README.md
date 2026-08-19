@@ -14,6 +14,58 @@ Pages, on **Gemini Live** over a relayed WebSocket.
 > too — see the foot of [src/facekit/imageModels.ts](src/facekit/imageModels.ts)
 > — so the secret can be deleted from the dashboard whenever convenient.
 
+## Three tiers, three kinds of page
+
+Everything in this repo used to be one person's workshop. It is now split by who
+a page is *for*, which is the distinction to keep in mind when adding anything:
+
+| Tier | Pages | Look |
+| --- | --- | --- |
+| **Administrator** | `/` tutorBench, `/facekit`, `/livetrial` | Dark, English, every knob exposed |
+| **Teacher** | *none yet* — publishing is done from `/livetrial` | — |
+| **Student** | `/eleve` | Light, French, no settings at all |
+
+`/eleve` is the only page a learner sees. It authors nothing — no model, no
+prompt, no face, no scale — and runs entirely on a setup published from
+liveTrial. It is the first light page here because it is the first page not
+aimed at the maintainer; it wears the LingoLabo look that ScriptoMondo and
+LingoLecto wear, so the three read as one product.
+
+The one control a student has is which language *they* already speak, which
+decides the language their word lookups and their end-of-call evaluation are
+written in. The page around them stays in the language they are learning.
+
+## The student session
+
+liveTrial's settings live in `localStorage`, which reaches exactly one browser.
+A student opening `/eleve` on their own laptop would otherwise meet the
+defaults — a different voice, a different face, a different prompt — with no way
+of telling. So a setup travels through R2, the road faces and evaluators
+already took.
+
+```
+liveTrial ──publish──► R2 ──get──► /eleve
+                        sessions/<CODE>.json   one published setup
+                        current.json           { "code": "VOCO-7K2M" }
+```
+
+`/eleve` resolves `?c=<CODE>` first, then the pointer, then shows a card saying
+no tutor is ready. **Join codes are not a feature yet** — nothing mints one for
+a student and there is no card to type one into — but the storage is keyed for
+them from the start, so adding them is a form rather than a migration.
+
+Two things worth knowing about what is published:
+
+- **The prompt travels as rendered text, not as a preset key.** Presets live in
+  `localStorage`; a key would name a prompt the student's browser has never
+  heard of. It also means editing a prompt after publishing cannot change a
+  conversation that was already handed out.
+- **Publishing is a snapshot.** The student gets the setup as it stood when the
+  button was pressed.
+
+See [src/realtime/session.ts](src/realtime/session.ts) and
+[functions/api/sessions/](functions/api/sessions/).
+
 ## How it fits together
 
 ```
@@ -296,16 +348,27 @@ gates the build.
 
    They have to go in the dashboard: because `wrangler.toml` exists, Pages takes
    plain-text vars from that file and the dashboard will only accept Secrets.
-4. **Create the face bucket**, once, before the first save:
+4. **Create the three buckets**, once, and do it *before the deploy that adds
+   the binding* rather than before the first save:
 
    ```bash
    npx wrangler r2 bucket create vocotrial-faces
+   npx wrangler r2 bucket create vocotrial-evaluators
+   npx wrangler r2 bucket create vocotrial-sessions
    ```
 
-   The binding is already in [wrangler.toml](wrangler.toml) — a binding name is
-   not a credential, so unlike the keys it belongs in the file. Without the
-   bucket, faceKit's save button and liveTrial's picker both say no library
-   is configured, and nothing else is affected.
+   The bindings are already in [wrangler.toml](wrangler.toml) — a binding name
+   is not a credential, so unlike the keys they belong in the file. **Pages
+   validates every binding when it builds**, so a block naming a bucket that
+   does not exist fails the whole deployment and the site stays on the previous
+   commit. It reads as a build failure rather than as a missing bucket; the fix
+   is to create it and redeploy, and nothing needs reverting.
+
+   Each is independently survivable if you skip it. Without `vocotrial-faces`,
+   faceKit's save and liveTrial's picker say no library is configured. Without
+   `vocotrial-evaluators`, the built-in scale still works — it ships in the code
+   and is merged in by the browser. Without `vocotrial-sessions`, liveTrial
+   cannot publish and `/eleve` says no tutor is ready.
 5. Push to `main`. Every push deploys; every PR gets a preview URL.
 
 Set `SITE_PASSWORD` **before** the first deploy that includes the gate. It fails
@@ -520,6 +583,20 @@ page may hold, and if one exists it will be a Vertex one.
 - **No session resumption.** A dropped socket ends the call rather than
   reconnecting; the Live API supports resumption handles if that becomes worth
   wiring up.
+- **A student's vocabulary is browser-local.** `Mon lexique` lives in
+  `localStorage`, so clearing the browser loses the words, and a learner who
+  moves to another machine starts empty. There is no student account to hang a
+  list on — the site is one shared password — and inventing a user store before
+  anybody is using the page would be building the wrong thing early. Same
+  reasoning as the row below, and the same trigger for revisiting it.
+- **The dictionary is French-only, and says so.** Every rule in the instruction
+  is French lexicography — `un`/`une`, the six-form conjugation, the `-e → -es`
+  plural. A second target language is a second instruction, not a parameter;
+  templating the language name into this one would produce confidently wrong
+  grammar notes. The student UI is likewise a French string table, shaped so a
+  second language is a second table.
+- **`/eleve` is desktop-only.** LingoLecto stacks its right-hand column under
+  the reading below a breakpoint; this does not yet.
 - **Students will reach every page.** The site is one shared password, so
   anyone who can practise can also open faceKit and spend the image keys, and
   every metered call is anonymous — there is nothing to attribute a bill to or

@@ -1,12 +1,15 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Mic, MicOff, PhoneOff, Radio, SlidersHorizontal, User } from 'lucide-react';
-import { startGeminiSession } from '../realtime/gemini';
 import { findModel } from '../realtime/models';
 import { LANGUAGES, defaultLanguageCode, findLanguage } from '../realtime/languages';
 import { lastUsedKey, listPresets, rememberPreset, renderPreset } from '../realtime/presets';
 import { MAX_INSTRUCTIONS, withPersona } from '../realtime/instructions';
 import { VOICES } from '../realtime/settings';
-import type { AudioTap, SessionStatus, TranscriptDelta, VoiceSession } from '../realtime/types';
+import { BUILTIN_EVALUATOR_ID, type Evaluator } from '../realtime/evaluators';
+import { lastEvaluatorId, listEvaluators } from '../realtime/evaluatorStore';
+import { newSessionCode, type StudentSession } from '../realtime/session';
+import { publishSession } from '../realtime/sessionStore';
+import type { SessionStatus } from '../realtime/types';
 import type { FaceKit } from '../facekit/kit';
 import { hasPersona } from '../facekit/persona';
 import { loadBundledKit } from '../facekit/bundled';
@@ -14,7 +17,7 @@ import { listPublished } from '../facekit/library';
 import type { PublishedFace } from '../facekit/published';
 import { activeKit, publishedKit, selectFace, selectedFace } from '../facekit/store';
 import Stage from './Stage';
-import { RevealQueue } from './reveal';
+import { useVoiceCall } from './useVoiceCall';
 import {
   BROW_LIFT_MAX,
   BROW_LIFT_MIN,
@@ -37,7 +40,6 @@ import {
   type HeadMotion,
   type MotionCadence,
   type PressTrigger,
-  type TiltCue,
   type TiltTrigger,
 } from './headMotion';
 import {
@@ -122,10 +124,6 @@ function Why({ summary, children }: { summary: ReactNode; children?: ReactNode }
   );
 }
 
-/** As tutorBench: audio bills per second of connection, so a forgotten tab costs. */
-const IDLE_TIMEOUT_MS = 90_000;
-const IDLE_POLL_MS = 5_000;
-
 /** How many sentences stay in the balloon. The rest are still in the log. */
 const BUBBLE_SENTENCES = 2;
 
@@ -157,43 +155,6 @@ interface Prefs {
   nodDepth: number;
   roundness: RoundnessMode;
 }
-
-/**
- * Whether a chunk of speech that just became audible carried a question.
- *
- * Deliberately looser than "the last character is a question mark". The
- * transcript arrives in fragments split wherever the model felt like splitting
- * them, so the mark is very often followed by the opening of the next sentence
- * in the same delta — and it is the mark being *heard* that matters, not where
- * the chunk happens to stop. A mark anywhere in newly audible text means the
- * question has just landed.
- *
- * Three marks rather than one, which is the difference between this working in
- * the language the page happens to be set to and working in the one it was
- * written in. `?` covers most of the list including Spanish, whose opening `¿`
- * is decorative here — the closing mark is the ordinary ASCII one and it is the
- * one that lands last. `？` is the full-width form Chinese and Japanese use, and
- * `؟` is Arabic's. Without them the tilt is simply dead in four of the languages
- * on offer, silently and only for the people using them.
- */
-const ASKS = /[?？؟]/;
-
-/**
- * Greek, which asks with a semicolon and cannot share the pattern above.
- *
- * U+037E, the Greek question mark, canonically decomposes to the ordinary
- * semicolon and in practice Greek text simply uses U+003B — so there is nothing
- * to match that is not also the mark French and German use in the middle of a
- * sentence. Adding it to ASKS would have the face lean at a clause boundary in
- * half of Europe, which is a worse failure than the one it fixes, so it is
- * gated on the language actually being Greek.
- *
- * A special case rather than a field on LanguageChoice: that type is shared with
- * the Pages Functions and is the allowlist a request is checked against, and one
- * language's punctuation is not something the server has any business carrying.
- */
-const ASKS_EL = /[?？؟;]/;
-const asksIn = (code: string) => (code === 'el' ? ASKS_EL : ASKS);
 
 /**
  * The two ways of driving the mouth, side by side.
@@ -239,12 +200,6 @@ function loadPrefs(): Partial<Prefs> {
   } catch {
     return {};
   }
-}
-
-interface Turn {
-  role: 'user' | 'agent';
-  text: string;
-  done: boolean;
 }
 
 const STATUS_LABEL: Record<SessionStatus, string> = {
@@ -335,31 +290,7 @@ export default function LiveTrial() {
   const [listenNod, setListenNod] = useState<boolean>(prefs.listenNod ?? DEFAULT_LISTEN_NOD);
   const [nodDepth, setNodDepth] = useState<number>(prefs.nodDepth ?? DEFAULT_NOD_DEPTH);
 
-  const [status, setStatus] = useState<SessionStatus>('idle');
-  const [detail, setDetail] = useState<string | null>(null);
-  const [muted, setMuted] = useState(false);
-  const [speaking, setSpeaking] = useState(false);
-  /**
-   * Whether the microphone is hearing the user right now.
-   *
-   * State rather than a ref, because the face is a component and has to be told.
-   * It is cheap to hold as state only because MicCapture debounces it into an
-   * on/off — this changes once or twice per turn, where the level behind it
-   * changes eight times a second.
-   *
-   * Never set outside a call: it is cleared when the session closes, below, and
-   * MicCapture reports false on both mute and stop, so a call that ends
-   * mid-sentence cannot leave the face believing it is still being spoken to.
-   */
-  const [heard, setHeard] = useState(false);
-  const [turns, setTurns] = useState<Turn[]>([]);
   const [showLog, setShowLog] = useState(false);
-  /**
-   * The tap is state, not a ref: the mouth is a component that has to re-run
-   * its animation loop when one appears, and a ref would not tell it.
-   */
-  const [tap, setTap] = useState<AudioTap | null>(null);
-
   /**
    * The artwork the face wears.
    *
@@ -387,21 +318,6 @@ export default function LiveTrial() {
   const [bundled, setBundled] = useState<FaceKit | null>(null);
   const [chosen, setChosen] = useState<string | null>(selectedFace);
   const [swapping, setSwapping] = useState(false);
-
-  /**
-   * The last thing that happened worth leaning at.
-   *
-   * State rather than a ref because the face has to be told, and told by a
-   * change of identity — which is also why it is never rebuilt inline. Its
-   * counter is a ref: two questions in a row have to be two distinct objects,
-   * and nothing on screen depends on how many there have been.
-   */
-  const [tiltCue, setTiltCue] = useState<TiltCue | null>(null);
-  const cueCount = useRef(0);
-  const cue = useCallback((kind: TiltCue['kind']) => {
-    cueCount.current += 1;
-    setTiltCue({ kind, seq: cueCount.current });
-  }, []);
 
   useEffect(() => {
     let live = true;
@@ -489,11 +405,6 @@ export default function LiveTrial() {
     [faces, chosen],
   );
 
-  const session = useRef<VoiceSession | null>(null);
-  /** Agent words waiting for the audio that carries them. See reveal.ts. */
-  const queue = useRef(new RevealQueue());
-  const lastActivity = useRef(Date.now());
-
   useEffect(() => {
     try {
       window.localStorage.setItem(
@@ -537,86 +448,6 @@ export default function LiveTrial() {
     roundness,
   ]);
 
-  useEffect(() => () => session.current?.stop(), []);
-
-  /** Extends the open turn for that role, or starts a new one. */
-  const append = useCallback((role: 'user' | 'agent', text: string, done: boolean) => {
-    if (!text && !done) return;
-    setTurns((current) => {
-      const tail = current.length - 1;
-      if (tail >= 0 && current[tail].role === role && !current[tail].done) {
-        const next = [...current];
-        next[tail] = { ...next[tail], text: next[tail].text + text, done };
-        return next;
-      }
-      return text ? [...current, { role, text, done }] : current;
-    });
-  }, []);
-
-  const onTranscript = useCallback(
-    (delta: TranscriptDelta) => {
-      lastActivity.current = Date.now();
-
-      // The user's own transcript lags their speech rather than leading it, so
-      // there is nothing to hold it back for.
-      if (delta.role === 'user') {
-        append('user', delta.text, delta.done);
-        return;
-      }
-
-      // A delta with no stamp has no better information than "now", which is
-      // what -Infinity means to the queue: due on the next frame.
-      queue.current.push({ text: delta.text, done: delta.done, at: delta.at ?? -Infinity });
-    },
-    [append],
-  );
-
-  /** Moves whatever has become audible out of the queue and onto the screen. */
-  const flush = useCallback(
-    (now: number) => {
-      const due = queue.current.take(now);
-      for (const item of due) append('agent', item.text, item.done);
-      // The right side of the queue to read a question off, and the only one.
-      // Deltas arrive here seconds before the voice reaches them and anything
-      // still waiting is thrown away on barge-in — so a mark seen on the way in
-      // would tilt the head at a question that was either not yet asked or, if
-      // the user cut in, never asked at all. Everything in `due` has just been
-      // heard, which is the moment the gesture belongs to.
-      const asks = asksIn(language);
-      if (due.some((item) => asks.test(item.text))) cue('question');
-    },
-    [append, cue, language],
-  );
-
-  useEffect(() => {
-    if (status !== 'live') return;
-    let frame = 0;
-
-    const step = () => {
-      // The session reports `live` from inside startGeminiSession and only hands
-      // back its tap when that call returns, so for a moment there is a live
-      // call and no clock. Wait it out rather than falling back to the wall
-      // clock, which would dump the greeting on screen before it was spoken.
-      // Nothing is lost by waiting: onStatus drains the queue when the call ends.
-      if (tap) flush(tap.now());
-      frame = requestAnimationFrame(step);
-    };
-
-    frame = requestAnimationFrame(step);
-    return () => cancelAnimationFrame(frame);
-  }, [status, tap, flush]);
-
-  useEffect(() => {
-    if (status !== 'live') return;
-
-    const timer = setInterval(() => {
-      if (Date.now() - lastActivity.current < IDLE_TIMEOUT_MS) return;
-      hangUp(`Ended automatically after ${IDLE_TIMEOUT_MS / 1000}s with no one talking`);
-    }, IDLE_POLL_MS);
-
-    return () => clearInterval(timer);
-  }, [status]);
-
   /**
    * What this page would actually send, kept where it can be looked at.
    *
@@ -652,111 +483,115 @@ export default function LiveTrial() {
   );
   const tooLong = composed.length > MAX_INSTRUCTIONS;
 
-  const connect = async () => {
-    setTurns([]);
-    setDetail(null);
-    setMuted(false);
-    queue.current.discard();
+  /**
+   * The call itself, which this page no longer runs by hand.
+   *
+   * Everything from the socket to the reveal queue moved into useVoiceCall when
+   * /eleve needed the same behaviour — see the header there on why that was a
+   * lift rather than a copy. What stays here is the half that is about this
+   * page: which prompt, which voice, and the refusal below.
+   */
+  const call = useVoiceCall({
+    modelKey: MODEL_KEY,
+    language,
+    // The preset decides what the tutor does; the worn face decides who is
+    // doing it. Composed at the call rather than held in state so that the
+    // prompt cannot go stale against a face swapped since — and composed by a
+    // function that leaves the preset's own text untouched, which is what makes
+    // a persona-on run comparable with a persona-off one.
+    instructions: composed,
+    // Absent rather than empty when nothing is picked: the Worker drops a
+    // blank, but sending one at all reads as a choice nobody made.
+    settings: voice ? { voice } : {},
+  });
+  const { status, detail, turns, tap, speaking, heard, muted, tiltCue, live, busy } = call;
+  const { hangUp, toggleMute } = call;
 
+  /**
+   * Publishing, and the picker this page never needed until now.
+   *
+   * The evaluator lives on tutorBench, because that is where scales are
+   * authored. It has to be chosen here too, and only here, because it is part
+   * of what a student is handed — a published setup with no scale is a page
+   * whose Évalue-moi button has nothing to measure against. A compact select
+   * rather than tutorBench's whole EvaluatorPanel: this is a pick, not an
+   * authoring surface.
+   */
+  const [evaluators, setEvaluators] = useState<Evaluator[]>([]);
+  const [evaluatorId, setEvaluatorId] = useState<string>(BUILTIN_EVALUATOR_ID);
+  const [publishing, setPublishing] = useState(false);
+  const [published, setPublished] = useState<StudentSession | null>(null);
+  const [publishError, setPublishError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    void listEvaluators().then(({ evaluators: found }) => {
+      if (!alive) return;
+      setEvaluators(found);
+      setEvaluatorId(lastEvaluatorId(found));
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const publish = async () => {
+    setPublishing(true);
+    setPublishError(null);
+    try {
+      /*
+       * The code is minted fresh on every publish, which is deliberate while
+       * there are no join codes: each publish is "this is the tutor now", and
+       * reusing one key would make the history unrecoverable the moment codes
+       * do arrive. The pointer is what /eleve follows, so the churn is
+       * invisible until then.
+       */
+      const setup: StudentSession = {
+        code: published?.code ?? newSessionCode(),
+        updatedAt: Date.now(),
+        language,
+        // The rendered text, not the preset key. A key names a prompt that
+        // lives in this browser's localStorage and nowhere else.
+        instructions: composed,
+        voice,
+        faceId: chosen,
+        evaluatorId,
+        driver,
+        lookaheadMs,
+        roundness,
+        motion,
+        cadence,
+        browBlink,
+        press,
+        browLift,
+        tilt,
+        tiltRoll,
+        listenNod,
+        nodDepth,
+      };
+      setPublished(await publishSession(setup));
+    } catch (error) {
+      setPublishError(error instanceof Error ? error.message : 'Could not publish');
+    } finally {
+      setPublishing(false);
+    }
+  };
+
+  const connect = () => {
     // Refused here rather than at the socket. Nothing is spent either way — the
     // Worker checks this before it mints anything — but a call that fails at
     // connect looks like the model being unreachable, which is the wrong thing
-    // to go and debug.
+    // to go and debug. It is refused in the page rather than in the hook
+    // because the message has to name both halves of the overflow, and only
+    // this page knows there are two.
     if (tooLong) {
-      setStatus('error');
-      setDetail(
+      call.fail(
         `That prompt and this persona come to ${composed.length} characters together, and a session takes ${MAX_INSTRUCTIONS}. Shorten the prompt (${presetChars}), shorten the background on faceKit, or switch the persona off.`,
       );
       return;
     }
-
-    const handlers = {
-      onStatus: (next: SessionStatus, message?: string) => {
-        setStatus(next);
-        setDetail(message ?? null);
-        if (next === 'closed' || next === 'error') {
-          // Whatever was still queued was said, or was a word away from it.
-          // Dropping it silently would lose the end of every conversation.
-          for (const item of queue.current.drain()) append('agent', item.text, item.done);
-          session.current = null;
-          setTap(null);
-          setSpeaking(false);
-          setHeard(false);
-        }
-      },
-      onTranscript,
-      onSpeaking: (next: boolean) => {
-        lastActivity.current = Date.now();
-        setSpeaking(next);
-        // Every false, barge-in included, and no attempt to tell them apart:
-        // both are the agent's audio ending and the floor going back to the
-        // user, which is the whole of what a listening tilt responds to. The
-        // channel's own lockout takes care of a provider that says it twice.
-        if (!next) cue('listening');
-      },
-      /**
-       * The user's voice, straight through to the face.
-       *
-       * No arming and no edge detection on the way, which is the part worth
-       * noticing: both live in HeadPerformer, beside the gesture they decide.
-       * This page's job is to report that a microphone heard something, and it
-       * is deliberately the same shape as `speaking` above — a fact about the
-       * present moment, not a claim about what it means.
-       *
-       * It counts as activity for the idle timer, and that is a small fix
-       * rather than a side effect. The timer previously only saw the agent:
-       * transcription of the user arrives at the end of an utterance, so a
-       * learner talking steadily to a tutor that had stopped answering could
-       * have the call hung up underneath them.
-       */
-      onVoice: (active: boolean) => {
-        if (active) lastActivity.current = Date.now();
-        setHeard(active);
-      },
-      // Barge-in. The audio for anything still queued was thrown away unplayed,
-      // so showing those words would put sentences on screen that were cut off
-      // mid-breath and never spoken.
-      onInterrupted: () => queue.current.discard(),
-    };
-
-    try {
-      lastActivity.current = Date.now();
-      const started = await startGeminiSession(handlers, MODEL_KEY, language, {
-        // The preset decides what the tutor does; the worn face decides who is
-        // doing it. Composed at the call rather than held in state so that the
-        // prompt cannot go stale against a face swapped since — and composed
-        // by a function that leaves the preset's own text untouched, which is
-        // what makes a persona-on run comparable with a persona-off one.
-        instructions: composed,
-        // Absent rather than empty when nothing is picked: the Worker drops a
-        // blank, but sending one at all reads as a choice nobody made.
-        settings: voice ? { voice } : {},
-      });
-      session.current = started;
-      setTap(started.tap ?? null);
-    } catch (error) {
-      session.current = null;
-      setTap(null);
-      setStatus('error');
-      setDetail(error instanceof Error ? error.message : 'Could not start the session');
-    }
+    void call.connect();
   };
-
-  const hangUp = (reason?: string) => {
-    session.current?.stop();
-    session.current = null;
-    // stop() drives onStatus('closed'), which clears detail — so say why after.
-    if (reason) setDetail(reason);
-  };
-
-  const toggleMute = () => {
-    const next = !muted;
-    setMuted(next);
-    session.current?.setMuted(next);
-  };
-
-  const live = status === 'live';
-  const busy = status === 'connecting';
 
   const lastOf = (role: 'user' | 'agent') =>
     [...turns].reverse().find((turn) => turn.role === role)?.text ?? '';
@@ -1502,6 +1337,68 @@ export default function LiveTrial() {
             </div>
           )}
         </div>
+
+        {/*
+          The handover to the student page.
+
+          Here rather than on a page of its own because there is no teacher tier
+          yet — publishing is a maintainer's act, done from the page where the
+          tuning happened, and moving it later is moving one fieldset. What it
+          sends is a snapshot: the student gets the setup as it stood when this
+          was pressed, not as it stands now, so editing a prompt afterwards
+          cannot change a conversation that was already handed out.
+        */}
+        <fieldset className="rounded-lg border border-slate-800 px-3 pb-3 pt-1">
+          <legend className="px-1 text-[11px] uppercase tracking-wide text-slate-500">
+            Student page
+          </legend>
+
+          <label className="mt-1 flex items-center gap-3">
+            <span className="text-xs uppercase tracking-wide text-slate-500">Scale</span>
+            <select
+              value={evaluatorId}
+              onChange={(event) => setEvaluatorId(event.target.value)}
+              disabled={publishing}
+              className="flex-1 bg-transparent text-sm text-slate-200 outline-none disabled:opacity-40"
+            >
+              {evaluators.map((entry) => (
+                <option key={entry.id} value={entry.id} className="bg-slate-900">
+                  {entry.name}
+                  {entry.id === BUILTIN_EVALUATOR_ID ? ' (built in)' : ''}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <div className="mt-3 flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => void publish()}
+              disabled={publishing || tooLong || !evaluatorId}
+              className="rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-200 hover:bg-slate-900 disabled:opacity-40"
+            >
+              {publishing ? 'Publishing…' : 'Publish to /eleve'}
+            </button>
+            <a href="/eleve" className="text-xs text-slate-500 underline-offset-4 hover:underline">
+              Open /eleve →
+            </a>
+          </div>
+
+          {published && (
+            <p className="mt-2 text-[11px] text-slate-500">
+              Published as <span className="font-mono text-slate-400">{published.code}</span> at{' '}
+              {new Date(published.updatedAt).toLocaleTimeString()}. A student opening /eleve now
+              gets this language, prompt, voice, face and motion.
+            </p>
+          )}
+          {publishError && <p className="mt-2 text-xs text-rose-400">{publishError}</p>}
+          {!published && !publishError && (
+            <p className="mt-2 text-[11px] leading-relaxed text-slate-500">
+              Sends everything on this page to the student page, which has no settings of its
+              own. Until this is pressed, /eleve says no tutor is ready.
+            </p>
+          )}
+        </fieldset>
       </div>
     </div>
   );

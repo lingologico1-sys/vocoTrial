@@ -2,6 +2,40 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * The workshop is dark, and says so, so form controls and scrollbars come back
+ * dark from the browser rather than being styled one at a time.
+ */
 html {
   color-scheme: dark;
+}
+
+/*
+ * /eleve is the exception, and has to say so on its own root.
+ *
+ * `color-scheme` is inherited, so a cream page inside a dark-declared document
+ * gets dark <select> menus, dark scrollbars and a dark autofill wash over a
+ * layout built entirely in warm light tones. Scoped to the class rather than
+ * flipped on <html>, because the two looks coexist in one deployment and only
+ * one page at a time is wearing this one.
+ */
+.lingo-light {
+  color-scheme: light;
+}
+
+/*
+ * The LINGOMONDO wordmark face, served from our own origin.
+ *
+ * The same file LingoLecto and scribo ship at /ChockABlockNF.ttf, copied rather
+ * than hot-linked so the apps cannot break each other. Chock A Block draws the
+ * tile box as part of each glyph, which is why the wordmark is styled as text
+ * with a stroke rather than as text on a filled background — a CSS fill would
+ * cover the whole inline box and turn the blocks' transparent interiors opaque.
+ */
+@font-face {
+  font-family: 'Chock A Block';
+  src: url('/ChockABlockNF.ttf') format('truetype');
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
 }

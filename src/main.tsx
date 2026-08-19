@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import TutorBench from './tutor/TutorBench';
 import LiveTrial from './live/LiveTrial';
 import FaceKit from './facekit/FaceKit';
+import Eleve from './eleve/Eleve';
 import PasswordGate from './PasswordGate';
 import './index.css';
 
@@ -17,6 +18,8 @@ import './index.css';
 const PAGES: Record<string, () => JSX.Element> = {
   '/livetrial': LiveTrial,
   '/facekit': FaceKit,
+  // The one page here that is not the workshop. See src/eleve/Eleve.tsx.
+  '/eleve': Eleve,
 };
 
 const page = window.location.pathname.replace(/\/+$/, '').toLowerCase();

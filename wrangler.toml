@@ -71,3 +71,22 @@ bucket_name = "vocotrial-faces"
 [[r2_buckets]]
 binding = "EVALUATORS"
 bucket_name = "vocotrial-evaluators"
+
+# The published session library. liveTrial publishes one tutor setup here and
+# the student page at /eleve reads it back — the only way the language, prompt,
+# voice, face and motion tuned on one laptop reach a student on another. Without
+# it a student meets the defaults, which is a different tutor wearing the same
+# name.
+#
+# CREATE THE BUCKET BEFORE PUSHING A BINDING FOR IT, for the reason spelled out
+# above on EVALUATORS — Pages validates bindings at build time, so a block
+# naming a bucket that does not exist fails the whole deployment:
+#
+#   npx wrangler r2 bucket create vocotrial-sessions
+#
+# Its own bucket rather than a prefix inside EVALUATORS, on the same reasoning:
+# a binding named for one thing holding another is a lie the next reader has to
+# unpick, and buckets cost nothing to create.
+[[r2_buckets]]
+binding = "SESSIONS"
+bucket_name = "vocotrial-sessions"
