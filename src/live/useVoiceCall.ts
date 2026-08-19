@@ -29,9 +29,23 @@ import type { TiltCue } from './headMotion';
  * /eleve renders one bubble and a pill from the same turns.
  */
 
-/** As tutorBench: audio bills per second of connection, so a forgotten tab costs. */
+/**
+ * As tutorBench: audio bills per second of connection, so a forgotten tab costs.
+ *
+ * The default, not the rule. /eleve overrides it down to thirty seconds — see
+ * `idleTimeoutMs` below for why the two pages want different numbers.
+ */
 export const IDLE_TIMEOUT_MS = 90_000;
-const IDLE_POLL_MS = 5_000;
+
+/**
+ * How often the silence is checked, which bounds how late the hang-up is.
+ *
+ * A second rather than five. The comparison is two numbers and runs while a
+ * websocket is streaming audio, so the cost is not worth measuring — and at the
+ * old five-second poll a thirty-second rule cut somewhere between thirty and
+ * thirty-five, which is a tenth of the interval it is meant to be enforcing.
+ */
+const IDLE_POLL_MS = 1_000;
 
 export interface Turn {
   role: 'user' | 'agent';
@@ -85,6 +99,24 @@ export interface VoiceCallOptions {
   instructions: string;
   /** Voice and turn-taking. Absent fields are not sent — see settings.ts. */
   settings?: SessionSettings;
+  /**
+   * How long everyone can be silent before the call is dropped.
+   *
+   * A page-level decision rather than a constant, because the same silence
+   * means different things on the two pages that dial. On the workshop pages a
+   * quiet minute is somebody reading a settings panel with a call open; on the
+   * student page it is a learner who has stopped, and the connection bills by
+   * the second either way. Defaults to IDLE_TIMEOUT_MS.
+   */
+  idleTimeoutMs?: number;
+  /**
+   * What to say when that happens, in the language of the page saying it.
+   *
+   * The fallback below is English, which is right for the workshop and wrong
+   * for a French page shown to a student — and this is the one message the call
+   * layer produces that a learner is ever meant to read.
+   */
+  idleNotice?: string;
 }
 
 export interface VoiceCall {
@@ -281,8 +313,16 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
     if (status !== 'live') return;
 
     const timer = setInterval(() => {
-      if (Date.now() - lastActivity.current < IDLE_TIMEOUT_MS) return;
-      hangUp(`Ended automatically after ${IDLE_TIMEOUT_MS / 1000}s with no one talking`);
+      // Read through the ref rather than through the effect's deps: both of
+      // these can change with the session that is loaded, and re-running the
+      // effect would restart the interval — and with it the window it is
+      // measuring — every time the page re-renders with a new options object.
+      const limit = latest.current.idleTimeoutMs ?? IDLE_TIMEOUT_MS;
+      if (Date.now() - lastActivity.current < limit) return;
+      hangUp(
+        latest.current.idleNotice ??
+          `Ended automatically after ${limit / 1000}s with no one talking`,
+      );
     }, IDLE_POLL_MS);
 
     return () => clearInterval(timer);

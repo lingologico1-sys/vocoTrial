@@ -28,17 +28,21 @@ export const FR = {
   tabVocab: 'Mon lexique',
 
   // --- The call
-  start: 'Commencer',
   starting: 'Connexion…',
   hangUp: 'Raccrocher',
-  again: 'Recommencer',
-  pillIdle: 'Appuie sur Commencer et dis bonjour.',
+  micStart: 'Commencer la conversation',
+  pillStart: 'Clique ici pour commencer',
+  pillAgain: 'Clique ici pour recommencer',
   pillListening: 'Je t’écoute…',
-  pillMuted: 'Micro coupé',
   pillWaiting: 'À toi de parler.',
-  muteOn: 'Couper le micro',
-  muteOff: 'Rallumer le micro',
   bubbleIdle: 'Ton tuteur te parlera ici.',
+  /*
+   * Said in the first person plural on purpose. The call was not dropped and
+   * nothing went wrong — it ended because nobody was using it, and a learner who
+   * walked away should come back to a page that reads as patient rather than as
+   * broken. The one thing it must not do is look like the errors above it.
+   */
+  idleEnded: 'La conversation s’est arrêtée : personne ne parlait plus.',
 
   // --- No session published
   noTutorTitle: 'Aucun tuteur n’est prêt',

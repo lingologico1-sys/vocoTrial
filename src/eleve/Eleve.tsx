@@ -71,6 +71,19 @@ export default function Eleve() {
     modelKey: 'gemini-native-audio',
     language: session?.language ?? 'fr',
     instructions: session?.instructions ?? '',
+    /*
+     * Thirty seconds of nobody talking ends the call, where the workshop pages
+     * allow ninety.
+     *
+     * The two numbers are answering different questions. On tutorBench you are
+     * reading a prompt or a settings panel with a call open and half a minute
+     * of quiet is a normal part of the work. Here a silence that long means the
+     * learner has stopped — walked off, or run out of things to say — and the
+     * call is billing by the second either way. It is also, now, the thing that
+     * closes a session nobody pressed the microphone to end.
+     */
+    idleTimeoutMs: 30_000,
+    idleNotice: FR.idleEnded,
     settings: useMemo(() => {
       if (!session) return {};
       // Absent rather than empty throughout — see settings.ts on why "leave it
@@ -228,19 +241,15 @@ export default function Eleve() {
   const elapsedMs = call.connectedAt === null ? null : now - call.connectedAt;
 
   /**
-   * The one word on the call button, which is now the only control in the pill
-   * that is not the microphone. Four states, and the third is why it is derived
-   * here rather than inside LearnerPill: `lastCallMs` is the page's memory of
-   * whether this learner has already had a conversation, and nothing in the
-   * pill has any business knowing that.
+   * What the arrow in the pill points at when there is no call running.
+   *
+   * All that survives of a call button that used to say four different things:
+   * the microphone is the control now, and the only part of its label the pill
+   * cannot work out for itself is whether this is a first conversation or
+   * another one. `lastCallMs` is the page's memory of that, and nothing in the
+   * pill has any business knowing it.
    */
-  const callLabel = call.busy
-    ? FR.starting
-    : call.live
-      ? FR.hangUp
-      : call.lastCallMs === null
-        ? FR.start
-        : FR.again;
+  const idleHint = call.lastCallMs === null ? FR.pillStart : FR.pillAgain;
 
   const TABS: Array<{ id: Tab; label: string }> = [
     { id: 'evaluation', label: FR.tabEvaluation },
@@ -348,7 +357,13 @@ export default function Eleve() {
         </div>
       ) : (
         <div className="grid min-h-0 flex-1 grid-cols-[1fr_360px] overflow-hidden">
-          <div className="flex min-h-0 flex-col overflow-y-auto border-r border-lingo-border px-8 py-8">
+          {/*
+            `overflow-hidden`, not `auto`: the column is laid out so that it
+            always fits — the balloon and the spacer between them absorb
+            everything that grows — and a scrollbar here would only ever appear
+            as the symptom of that having failed. See TutorStage.
+          */}
+          <div className="flex min-h-0 flex-col overflow-hidden border-r border-lingo-border px-8 py-8">
             <TutorStage
               session={session}
               kit={kit}
@@ -357,13 +372,11 @@ export default function Eleve() {
               tap={call.tap}
               speaking={call.speaking}
               heard={call.heard}
-              muted={call.muted}
               live={call.live}
+              busy={call.busy}
               tiltCue={call.tiltCue}
-              callLabel={callLabel}
-              callBusy={call.busy}
+              idleHint={idleHint}
               onCall={() => (call.live ? call.hangUp() : start())}
-              onToggleMute={call.toggleMute}
               onWord={askDictionary}
             />
 

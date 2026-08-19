@@ -9,7 +9,7 @@ import { FR } from './strings';
 
 /**
  * The left-hand panel: a face, what it is saying, and what you said back —
- * with the call button riding in that last strip rather than under it.
+ * with the whole of the call now riding on the microphone in that last strip.
  *
  * Laid out top to bottom rather than side by side, which is the one structural
  * difference from liveTrial's Stage and the reason this is a separate component
@@ -31,14 +31,13 @@ interface TutorStageProps {
   tap: AudioTap | null;
   speaking: boolean;
   heard: boolean;
-  muted: boolean;
   live: boolean;
+  /** Mid-connect. The microphone carries this too — see LearnerPill. */
+  busy: boolean;
   tiltCue: TiltCue | null;
-  /** What the call button says now. It rides in the pill — see LearnerPill. */
-  callLabel: string;
-  callBusy: boolean;
+  /** What the pill says before a call: start, or start again. */
+  idleHint: string;
   onCall: () => void;
-  onToggleMute: () => void;
   onWord: (word: string, context: string) => void;
 }
 
@@ -50,23 +49,36 @@ export default function TutorStage({
   tap,
   speaking,
   heard,
-  muted,
   live,
+  busy,
   tiltCue,
-  callLabel,
-  callBusy,
+  idleHint,
   onCall,
-  onToggleMute,
   onWord,
 }: TutorStageProps) {
   /*
-   * `min-h-0` on the column so the balloon is what gives when the window is
-   * short. Without it this refuses to shrink below its content and the pill —
-   * the one thing on the page the learner has to be able to reach — slides off
-   * the bottom instead.
+   * NOTHING IN THIS COLUMN SCROLLS, AND THE ORDER OF WHO YIELDS IS WHY.
+   *
+   * `min-h-0` lets the column shrink below its content; the face is fixed, the
+   * balloon is `flex-initial` and so takes only what its text needs, and the
+   * spacer below it holds every remaining pixel. So a pill that wraps to three
+   * lines eats the spacer and grows upward — where it used to grow downward,
+   * overflow the panel and hand the whole left-hand side a scrollbar with the
+   * one control the learner has to reach sitting below its fold.
+   *
+   * Once the spacer is gone the balloon gives next, and only then does anything
+   * scroll at all: quietly, inside the balloon, which is the one place a
+   * conversation can genuinely outrun the window. See SpeechBubble.
    */
   return (
-    <div className="flex h-full min-h-0 flex-col items-center gap-8">
+    /*
+      `flex-1`, not `h-full`. The panel holding this also carries the line that
+      says why a call ended, and a stage claiming the full height of the column
+      would push that line out of a panel that — since it stopped scrolling —
+      clips instead of scrolling it back into reach. Sharing the column means
+      the notice costs the stage its own height, which the spacer below pays.
+    */
+    <div className="flex min-h-0 flex-1 flex-col items-center gap-8">
       {/*
         The head is inset inside the ring rather than cropped to it.
 
@@ -138,18 +150,20 @@ export default function TutorStage({
         onWord={onWord}
       />
 
-      {/* Pushes the pill to the foot of the panel, wherever the bubble ends. */}
-      <div className="flex-1" />
+      {/*
+        Pushes the pill to the foot of the panel, wherever the bubble ends — and
+        is also the slack the pill grows into, which is the same thing said from
+        the other end. `min-h-0` so it can be spent down to nothing.
+      */}
+      <div className="min-h-0 flex-1" />
 
       <LearnerPill
         text={learnerText}
         live={live}
-        muted={muted}
+        busy={busy}
         heard={heard}
-        callLabel={callLabel}
-        callBusy={callBusy}
+        idleHint={idleHint}
         onCall={onCall}
-        onToggleMute={onToggleMute}
         onWord={onWord}
       />
     </div>

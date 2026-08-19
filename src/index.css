@@ -39,3 +39,23 @@ html {
   font-style: normal;
   font-display: swap;
 }
+
+/*
+ * A scroller with no bar down its side.
+ *
+ * For the tutor's speech balloon on /eleve, which has to stay readable when a
+ * turn is longer than the window is tall and must not put a scrollbar inside a
+ * cartoon speech bubble to do it. The content stays scrollable — by wheel, by
+ * trackpad, by keyboard, and by the auto-scroll that follows the voice — and a
+ * gradient over the top edge is what tells the reader there is more above. Both
+ * spellings are needed: `scrollbar-width` is the standard one Firefox
+ * implements, the pseudo-element is WebKit's.
+ */
+.lingo-quiet-scroll {
+  scrollbar-width: none;
+}
+
+.lingo-quiet-scroll::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}

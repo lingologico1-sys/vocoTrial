@@ -66,6 +66,33 @@ export default {
         'lingo-pop': '0 4px 14px -2px rgba(0,0,0,0.15), 0 2px 6px -1px rgba(0,0,0,0.1)',
         'lingo-pop-sm': '0 2px 8px -1px rgba(0,0,0,0.12), 0 1px 3px -1px rgba(0,0,0,0.08)',
       },
+      /*
+       * Two small motions the student page needs and Tailwind's own do not give.
+       *
+       * `halo` is a ping that stays inside its parent. Tailwind's `animate-ping`
+       * scales to 2x, which on a 64px microphone throws a red wash 32px past
+       * every edge of the pill holding it — the exact spread the button was made
+       * big enough to replace. 1.28 is the most a 64px circle can grow inside a
+       * 92px pill without touching the rim.
+       *
+       * `nudge` is for the arrow pointing at that button before the first call.
+       * Three pixels, once every couple of seconds: enough to be caught by the
+       * eye that is not looking at it, small enough not to nag the eye that is.
+       */
+      keyframes: {
+        'lingo-halo': {
+          '0%': { transform: 'scale(1)', opacity: '0.5' },
+          '100%': { transform: 'scale(1.28)', opacity: '0' },
+        },
+        'lingo-nudge': {
+          '0%, 70%, 100%': { transform: 'translateX(0)' },
+          '85%': { transform: 'translateX(-3px)' },
+        },
+      },
+      animation: {
+        'lingo-halo': 'lingo-halo 1.5s cubic-bezier(0, 0, 0.2, 1) infinite',
+        'lingo-nudge': 'lingo-nudge 2.4s ease-in-out infinite',
+      },
     },
   },
   plugins: [],
