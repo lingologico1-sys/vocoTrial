@@ -109,8 +109,20 @@ export default function TutorStage({
         the colour a kit is flattened onto — see flattenBackground — so the
         sliver is invisible instead of nearly invisible.
       */}
+      {/*
+        FOUR PIXELS, MATCHING THE RIGHT-HAND PANEL'S FRAME RATHER THAN THE 3 IT
+        USED TO CARRY. The column around this lost its card, so the panel across
+        the gutter is now the only heavy edge on the page and the eye drifts to
+        it — toward the reference material and away from the person talking.
+        This ring is the left side's anchor, so it takes the same weight.
+
+        Still tan and not terracotta: clay-pink is the frame colour, and a
+        second saturated edge would be two things claiming to be the boundary.
+        The percentage inset below is unaffected — it is measured against the
+        content box, so the geometry scales with the extra pixel.
+      */}
       <div
-        className={`relative h-56 w-56 shrink-0 overflow-hidden rounded-full border-[3px] bg-lingo-surface shadow-lingo-pop transition-colors duration-300 ${
+        className={`relative h-56 w-56 shrink-0 overflow-hidden rounded-full border-4 bg-lingo-surface shadow-lingo-pop transition-colors duration-300 ${
           speaking ? 'border-lingo-accent' : 'border-lingo-border-strong'
         }`}
       >

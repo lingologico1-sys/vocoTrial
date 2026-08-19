@@ -390,8 +390,9 @@ export default function Eleve() {
       ) : (
         /*
           LingoLecto's `.questioner-wrap`: a 1152px cap, 16px of mat as padding
-          around the pair and again in the gap between them, and each side a card
-          of paper inside a 4px terracotta frame rounded at 24px.
+          around the pair and again in the gap between them. Only the right side
+          is a card — paper inside a 4px terracotta frame rounded at 24px. The
+          note on the left column says why it is not the other one.
 
           THE CAP COSTS THE LEFT COLUMN NOTHING AND BUYS IT THE DISTANCE. The face
           and the balloon are centred and capped at 36rem already, so on a wide
@@ -403,12 +404,42 @@ export default function Eleve() {
         */
         <div className="mx-auto grid min-h-0 w-full max-w-6xl flex-1 grid-cols-[1fr_360px] gap-4 overflow-hidden p-4">
           {/*
-            `overflow-hidden`, not `auto`: the column is laid out so that it
-            always fits — the balloon and the spacer between them absorb
-            everything that grows — and a scrollbar here would only ever appear
-            as the symptom of that having failed. See TutorStage.
+            NO CARD ON THIS SIDE, AND THE CONTRAST IS THE ARGUMENT.
+
+            Everything this column holds is already a finished object with its
+            own edge: a 3px ring around the face, a bordered balloon with a
+            drawn tail, a bordered pill. A frame around the three of them is a
+            fourth concentric edge to get past before the eye reaches the face,
+            and it was containing nothing — the right-hand panel is a tab strip
+            welded to a scroll area and genuinely needs a boundary, this was a
+            backdrop.
+
+            It was also flattening its own contents. The balloon is white and
+            the pill is cream, and on `paper` those land at about 1.10:1 and
+            1.03:1 — the two things the learner actually reads were held up
+            entirely by their borders. On the mat they sit near 1.38:1 and
+            1.33:1. Taking the card away separates them rather than setting
+            them adrift, which is the opposite of what removing a card usually
+            does.
+
+            And it changes what the gap above the pill means. That space is
+            deliberate — the spacer in TutorStage keeps the microphone at the
+            foot — but framed it read as a mostly empty box, and unframed it
+            reads as room between the tutor and the control.
+
+            What this costs: the page is no longer LingoLecto's matched
+            `.questioner-wrap` pair. That is on purpose. Two identical frames
+            claimed the conversation and the reference panel were peers; they
+            are not. The conversation is the page.
+
+            `overflow-hidden`, not `auto`, and the padding stays: the column is
+            laid out so that it always fits — the balloon and the spacer between
+            them absorb everything that grows — and a scrollbar here would only
+            ever appear as the symptom of that having failed. That contract is
+            layout rather than decoration, so it survives the frame. See
+            TutorStage.
           */}
-          <div className="flex min-h-0 flex-col overflow-hidden rounded-3xl border-4 border-lingo-terracotta bg-lingo-paper px-8 py-8 shadow-lingo-pop">
+          <div className="flex min-h-0 flex-col overflow-hidden px-8 py-8">
             <TutorStage
               session={session}
               kit={kit}
