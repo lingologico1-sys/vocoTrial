@@ -98,6 +98,7 @@ business reading.
 tutor style  ─┐
 face persona ─┼─► instructions  (composed in the publish route)
 lesson block ─┘
+face persona ───► voice         (the other half of the same kit)
 ```
 
 Three things worth knowing about what is published:
@@ -122,12 +123,22 @@ See [src/realtime/session.ts](src/realtime/session.ts) and
 
 A Voco Session is one prepared lesson: a few questions on a theme, the consigne
 the student is handed, the structures the teacher wants to hear, and the tutor
-that asks them — a language, a manner, a face, a voice and a scale. Written on
-`/teach`, and copied into a published setup as text.
+that asks them — a language, a manner, a face and a scale. Written on `/teach`,
+and copied into a published setup as text.
 
 It used to be called a *sheet* and held only the lesson half; the tutor half was
 picked separately in the studio at publish time and never saved, so reopening
-last week's material meant re-choosing the face and the voice from memory.
+last week's material meant re-choosing the face from memory.
+
+**The voice is not one of a teacher's picks.** It belongs to the face, on the
+same persona as the biography, and an administrator writes both in faceKit. A
+Voco Session did briefly carry its own — a dropdown next to the face grid,
+defaulting to nothing — which meant the ordinary path of leaving it alone
+published somebody's carefully written tutor in a voice nobody had chosen for
+them, and the deliberate path let two people choose the two halves of one
+character a week apart. The publish route now reads voice and bio out of the
+kit together. Old rows still holding a `voice` string are ignored, and the
+field drains the next time the lesson is saved.
 
 ```
 /teach ──save──► R2 sheets.json
@@ -193,7 +204,9 @@ ever seeing them.
 A style is a *rendered* prompt, not a preset key — presets live in
 `localStorage`, so a key would name a prompt the teacher's browser has never
 heard of. The persona is deliberately not baked in: which face is worn is
-decided per lesson on `/teach`, so the wrap is applied at publish.
+decided per lesson on `/teach`, so the wrap is applied at publish — and the
+voice rides in on the same read, which is why a teacher picking a portrait is
+picking a whole character rather than a picture.
 
 There is a library of styles and exactly one profile, and the asymmetry is the
 point. A manner is a pedagogical choice a teacher should make per lesson. How

@@ -22,14 +22,20 @@ import { type VocoSessionEnv, readVocoSessions, writeVocoSessions } from './_lib
  * either produces a tutor asking a blank question or a report grading against
  * nothing.
  *
- * THE TUTOR HALF IS CARRIED, NOT VALIDATED. `language`, `styleId`, `voice`,
- * `faceId` and `evaluatorId` are ids and enum values naming things in four
- * other libraries, and checking them here would mean four reads on every save
- * — and would still be stale by the time anybody published, because a face can
- * be deleted between the two. They are resolved where they are spent, in the
- * publish route, which is the same posture `looksLikeSetup` takes on the motion
- * enums and for the same reason. A Voco Session naming a face since deleted is
- * a picker that has lost its selection, not a corrupt row.
+ * THE TUTOR HALF IS CARRIED, NOT VALIDATED. `language`, `styleId`, `faceId`
+ * and `evaluatorId` are ids naming things in four other libraries, and checking
+ * them here would mean four reads on every save — and would still be stale by
+ * the time anybody published, because a face can be deleted between the two.
+ * They are resolved where they are spent, in the publish route, which is the
+ * same posture `looksLikeSetup` takes on the motion enums and for the same
+ * reason. A Voco Session naming a face since deleted is a picker that has lost
+ * its selection, not a corrupt row.
+ *
+ * `voice` is not among them and is not carried. It was, until the voice became
+ * the face's — see vocoSessions.ts. Dropping it here rather than passing it
+ * through is what drains the stale field off rows that still have one: a save
+ * writes the whole object, so the key is gone the next time a teacher touches
+ * an old lesson.
  *
  * There is no built-in id to refuse, unlike evaluators/save.ts. Nothing ships,
  * so nothing can be shadowed by collision.
@@ -94,7 +100,6 @@ export async function onRequestPost(
     questions,
     language: carried<string>(incoming.language, isText),
     styleId: carried<string>(incoming.styleId, isText),
-    voice: carried<string>(incoming.voice, isText),
     faceId: incoming.faceId === null ? null : carried<string>(incoming.faceId, isText),
     evaluatorId: carried<string>(incoming.evaluatorId, isText),
     updatedAt: Date.now(),

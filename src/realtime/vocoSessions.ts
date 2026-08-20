@@ -3,16 +3,29 @@
  *
  * WHAT IT IS. Everything one lesson needs — a few questions on a theme, the
  * consigne the learner is handed with them, the structures the teacher wants to
- * hear, and the tutor that will ask them: a language, a manner, a face, a voice
- * and the scale the report reads against. It is the thing a teacher prepares
- * before a lesson and reuses next year, which is why it is a library rather
- * than a field on anything.
+ * hear, and the tutor that will ask them: a language, a manner, a face and the
+ * scale the report reads against. It is the thing a teacher prepares before a
+ * lesson and reuses next year, which is why it is a library rather than a field
+ * on anything.
  *
  * IT USED TO BE CALLED A SHEET, and held only the lesson half. The tutor half
  * was picked separately in studio at publish time and never saved, so reopening
- * last week's material meant re-choosing the face and the voice from memory.
- * Folding the two together is what makes /teach a page a teacher can finish on:
- * one object, authored once, published as often as there are classes.
+ * last week's material meant re-choosing the face from memory. Folding the two
+ * together is what makes /teach a page a teacher can finish on: one object,
+ * authored once, published as often as there are classes.
+ *
+ * THERE IS NO VOICE HERE, and its absence is a decision rather than an
+ * oversight. This object briefly carried one, beside `faceId` and chosen from
+ * the same page — which made the voice a teacher's to pick and the face an
+ * administrator's to author, so the paragraph saying "my name is Marta, I'm 34"
+ * and the voice delivering it could be chosen by two people who never spoke.
+ * The voice now lives on the kit's persona, where the bio is, and the publish
+ * route reads both out of it together. See functions/api/sessions/publish.ts.
+ *
+ * Rows saved while the field existed still hold a stale `voice` string. Nothing
+ * reads it and the save route stops rewriting it, so it drains on the next save
+ * — a dead key in R2 is cheaper than a migration over a field that no longer
+ * decides anything.
  *
  * IT IS AUTHORED HERE AND PUBLISHED ELSEWHERE, and the two are different
  * objects on purpose. Publishing snapshots a Voco Session into a `PublishedSetup`
@@ -98,9 +111,13 @@ export interface VocoSession {
    * which is where that resolution happens because it is where the library is.
    */
   styleId?: string;
-  /** Prebuilt voice name, or empty for the provider's own default. */
-  voice?: string;
-  /** A face in the shared library, or null for the deployment's own. */
+  /**
+   * A face in the shared library, or null for the deployment's own.
+   *
+   * Carries the voice with it. The kit's persona names one and the publish
+   * route spends it, so this single pick is the whole of who the student meets
+   * — see the header on why there is no `voice` beside it.
+   */
   faceId?: string | null;
   /** Which scale the end-of-call report reads against. */
   evaluatorId?: string;

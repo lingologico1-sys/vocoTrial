@@ -51,6 +51,24 @@ import { codeTaken, writeSetup, type SessionEnv } from './_library';
  * no backstory is a working tutor, and a teacher pressing publish two minutes
  * before a lesson should not meet a face bucket's outage.
  *
+ * THE VOICE COMES OFF THAT SAME PERSONA, and nothing else may set it. A teacher
+ * picks a person to put in front of a class, not a larynx: a paragraph saying
+ * "my name is Marta, I'm 34" and the voice that delivers it are two halves of
+ * one character, and the only thing that knows both is the kit an administrator
+ * authored. /teach used to carry its own voice picker beside the face picker,
+ * which meant the two halves could be chosen by different people on different
+ * days — so it is gone, and this is where the voice is resolved instead.
+ *
+ * It is spent here the way `performance` below is spent here, and for the same
+ * reason: both are an administrator's, both live in a library a teacher never
+ * opens, and both are flattened into the setup so that retuning one next week
+ * cannot change a lesson already in front of a class.
+ *
+ * A face with no opinion — and the deployment's own face, which has no kit in
+ * the bucket to hold one — publishes an empty string. settings.ts reads that as
+ * "leave it upstream" rather than "pin today's default", which is the same
+ * answer the bio gives on the same faces.
+ *
  * THE CODE IS MINTED HERE, AND CHECKED. Six characters is a billion, which is
  * unlikely to collide and not unlikely enough to overwrite somebody's live
  * lesson on. Drawn and tested against the bucket, a bounded number of times,
@@ -220,7 +238,10 @@ export async function onRequestPost(
     updatedAt: Date.now(),
     language: language.code,
     instructions,
-    voice: typeof incoming.voice === 'string' ? incoming.voice : '',
+    // Off the face, never off the request — see the header. An incoming `voice`
+    // is a field /teach no longer sends, and honouring one would leave the door
+    // open for a hand-written POST to put Fenrir behind Marta's biography.
+    voice: persona?.voice ?? '',
     faceId,
     evaluatorId: typeof incoming.evaluatorId === 'string' ? incoming.evaluatorId : '',
     // The lesson, copied rather than referenced — see session.ts. The questions

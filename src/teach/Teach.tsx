@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from 'react';
 import { Check, Copy, Loader2 } from 'lucide-react';
 import BrandBar from '../lingo/BrandBar';
 import { LANGUAGES, defaultLanguageCode } from '../realtime/languages';
-import { VOICES } from '../realtime/settings';
 import { BUILTIN_EVALUATOR_ID, type Evaluator } from '../realtime/evaluators';
 import { listEvaluators } from '../realtime/evaluatorStore';
 import { fetchHouse, resolveStyle } from '../realtime/houseStore';
@@ -48,11 +47,25 @@ import type { PublishedSetup } from '../realtime/session';
  * says nothing about the person writing the questions.
  *
  * WHAT A TEACHER IS NOT ASKED. No prompt, no model, no motion knobs, no
- * turn-taking. Those are an administrator's, and they reach a student anyway —
- * a tutor style and a house performance profile, both published from studio and
- * both spent server-side at publish. See house.ts. What is left here is what a
- * teacher actually decides: the questions, the consigne, the language, the
- * manner, the face, the voice and the scale.
+ * turn-taking, and no voice. Those are an administrator's, and they reach a
+ * student anyway — a tutor style, a house performance profile and the voice
+ * written on the chosen face, all authored in the workshop and all spent
+ * server-side at publish. See house.ts. What is left here is what a teacher
+ * actually decides: the questions, the consigne, the language, the manner, the
+ * face and the scale.
+ *
+ * THE VOICE WENT WITH THE FACE, which is worth saying because there was a
+ * dropdown for it here and somebody will look for it. It sat beside the face
+ * grid and defaulted to nothing, so the ordinary path — leave it alone, pick a
+ * portrait — published an administrator's face and biography in a voice neither
+ * of them had chosen. It is on the kit's persona now, next to the bio, and the
+ * publish route reads the two together.
+ *
+ * That means this page cannot show which voice a face carries, and should not
+ * try: the face index it fetches is names and thumbnails, and the persona lives
+ * inside the kit, which is megabytes of artwork per face. The name under the
+ * grid is the whole of what a teacher gets, and the fix if that is not enough
+ * is a voice on the index rather than a kit fetch from here.
  *
  * WHAT IS EDITED HERE IS NOT WHAT A STUDENT IS LOOKING AT. Publishing composes
  * and copies — see functions/api/sessions/publish.ts — so nothing on this page
@@ -79,7 +92,6 @@ function empty(): VocoSession {
     questions: [],
     language: defaultLanguageCode(),
     styleId: '',
-    voice: '',
     faceId: null,
     evaluatorId: BUILTIN_EVALUATOR_ID,
   };
@@ -114,7 +126,6 @@ export default function Teach() {
   // The tutor.
   const [language, setLanguage] = useState(defaultLanguageCode);
   const [styleId, setStyleId] = useState('');
-  const [voice, setVoice] = useState('');
   const [faceId, setFaceId] = useState<string | null>(null);
   const [evaluatorId, setEvaluatorId] = useState(BUILTIN_EVALUATOR_ID);
 
@@ -201,7 +212,6 @@ export default function Teach() {
     setQuestionText(joinLines(source.questions));
     setLanguage(source.language || defaultLanguageCode());
     setStyleId(source.styleId ?? '');
-    setVoice(source.voice ?? '');
     setFaceId(source.faceId ?? null);
     setEvaluatorId(source.evaluatorId || BUILTIN_EVALUATOR_ID);
     setSaved('');
@@ -234,7 +244,6 @@ export default function Teach() {
     questions,
     language,
     styleId: style?.id ?? '',
-    voice,
     faceId,
     evaluatorId,
   });
@@ -474,6 +483,14 @@ export default function Teach() {
             </div>
 
             <div className="flex flex-col gap-4 p-5">
+              {/*
+                Still a two-column grid holding one field, which is deliberate.
+                The voice picker was the other column; a language name is three
+                words at most, and letting it stretch the full width of the
+                panel now that it is alone would make the shortest field on the
+                page the widest. The empty half is where the next tutor-level
+                pick goes, if there is ever one a teacher should make.
+              */}
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="flex flex-col gap-1.5">
                   <label className={label} htmlFor="voco-language">
@@ -489,26 +506,6 @@ export default function Teach() {
                     {LANGUAGES.map((entry) => (
                       <option key={entry.code} value={entry.code}>
                         {entry.endonym}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="flex flex-col gap-1.5">
-                  <label className={label} htmlFor="voco-voice">
-                    Voice
-                  </label>
-                  <select
-                    id="voco-voice"
-                    value={voice}
-                    onChange={(event) => setVoice(event.target.value)}
-                    disabled={busy}
-                    className={`${field} cursor-pointer`}
-                  >
-                    <option value="">Default</option>
-                    {VOICES.map((entry) => (
-                      <option key={entry.value} value={entry.value}>
-                        {entry.label}
                       </option>
                     ))}
                   </select>
@@ -593,9 +590,18 @@ export default function Teach() {
                 </div>
                 <p className="text-[11px] text-lingo-muted">
                   {faceId === null
-                    ? 'The face this deployment ships with.'
+                    ? 'The face this deployment ships with. It carries no voice of its own, so the provider picks one.'
                     : (faces.find((face) => face.id === faceId)?.name ??
                       'That face is no longer in the library — pick another.')}
+                </p>
+                {/*
+                  Where the voice went, said once on the page that used to have
+                  a dropdown for it. Not a name, because this page has no way to
+                  read one — see the header.
+                */}
+                <p className="text-[11px] text-lingo-muted">
+                  A face brings its own voice and background with it, both written by an
+                  administrator in the workshop.
                 </p>
               </div>
 
