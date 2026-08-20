@@ -11,9 +11,14 @@ import {
 import { type GateEnv, json } from '../_middleware';
 import { VERTEX_KEY_NAMES, vertexGenerateContentUrl, vertexKey } from '../_vertex';
 import { type LibraryEnv, readLibrary } from '../evaluators/_library';
+import { type SessionEnv, readCurrent, readSession } from '../sessions/_library';
 
-/** Both bindings: the key that pays for the call, and the bucket of scales. */
-type ReportEnv = GateEnv & LibraryEnv;
+/**
+ * The key that pays for the call, the bucket of scales, and the bucket of
+ * published setups — the last one only so the lesson's targets can be read from
+ * where they were published rather than taken from the caller. See below.
+ */
+type ReportEnv = GateEnv & LibraryEnv & SessionEnv;
 
 /**
  * The end-of-call report: a finished transcript in, a structured reading out.
@@ -47,6 +52,20 @@ interface AnalyseBody {
   languageCode?: unknown;
   l1Code?: unknown;
   evaluatorId?: unknown;
+  /**
+   * Which published setup this conversation was held under, if any.
+   *
+   * A CODE, NOT THE TARGETS THEMSELVES, for the reason the header gives about
+   * the evaluator: a lesson's targets land in a *system* prompt, and a caller
+   * who could post them inline could write the instruction rather than name it.
+   * Resolving from the bucket means every target the model is asked to check is
+   * one somebody published through sessions/publish.ts.
+   *
+   * Absent from tutorBench, which runs no lesson and gets no task section. That
+   * is the correct outcome rather than a gap: the workshop is measuring the
+   * model, not a student against a consigne.
+   */
+  sessionCode?: unknown;
   turns?: unknown;
 }
 
@@ -163,6 +182,31 @@ export async function onRequestPost(
     return json({ error: 'Unknown evaluator', code: 'bad_evaluator' }, 400);
   }
 
+  /*
+   * The lesson's targets, read from the setup the student was actually handed.
+   *
+   * Every failure here is silent and yields no targets, which is the right
+   * shape: the section is optional by design — a session with no sheet has none
+   * — so an unreachable bucket or a code naming a setup that has since been
+   * republished costs the task section rather than the whole report. A learner
+   * who waited two minutes for a reading should not be told to try again
+   * because the half of it that is a bonus could not be assembled.
+   *
+   * The pointer is followed when no code is given, matching sessions/get.ts, so
+   * a student page that has not been handed a code still reports against the
+   * lesson it is running.
+   */
+  let targets: string[] | undefined;
+  if (typeof body?.sessionCode === 'string' && env.SESSIONS) {
+    try {
+      const code = body.sessionCode.trim().toUpperCase() || (await readCurrent(env.SESSIONS));
+      const published = code ? await readSession(env.SESSIONS, code) : null;
+      if (published?.targets?.length) targets = published.targets;
+    } catch {
+      // See above: no targets is a survivable answer, a failed report is not.
+    }
+  }
+
   const turns = readTurns(body?.turns);
   if (!turns) {
     return json({ error: 'A transcript is required', code: 'bad_turns' }, 400);
@@ -190,7 +234,9 @@ export async function onRequestPost(
       method: 'POST',
       headers: { 'x-goog-api-key': key, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        systemInstruction: { parts: [{ text: reportInstruction({ language, l1, evaluator }) }] },
+        systemInstruction: {
+          parts: [{ text: reportInstruction({ language, l1, evaluator, targets }) }],
+        },
         contents: [{ role: 'user', parts: [{ text: transcript }] }],
         generationConfig: {
           responseMimeType: 'application/json',

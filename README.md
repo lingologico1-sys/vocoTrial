@@ -22,8 +22,13 @@ a page is *for*, which is the distinction to keep in mind when adding anything:
 | Tier | Pages | Look |
 | --- | --- | --- |
 | **Administrator** | `/` tutorBench, `/facekit`, `/livetrial` | Dark, English, every knob exposed |
-| **Teacher** | *none yet* — publishing is done from `/livetrial` | — |
+| **Teacher** | `/consignes` — but publishing is still done from `/livetrial` | Dark, English, one job |
 | **Student** | `/eleve` | Light, French, no settings at all |
+
+`/consignes` is the first page written for the middle tier, and it is only half
+of one: a teacher can write a lesson there, but handing it to a class still
+means opening liveTrial and pressing publish beside every knob in the workshop.
+That split is the next thing worth closing.
 
 `/eleve` is the only page a learner sees. It authors nothing — no model, no
 prompt, no face, no scale — and runs entirely on a setup published from
@@ -62,9 +67,65 @@ Two things worth knowing about what is published:
   conversation that was already handed out.
 - **Publishing is a snapshot.** The student gets the setup as it stood when the
   button was pressed.
+- **The lesson travels by value too**, for the same reason and one more. A
+  question sheet is read by the student's own browser mid-conversation, so a
+  reference would let a teacher editing next week's questions rewrite the screen
+  of somebody who is talking right now.
 
 See [src/realtime/session.ts](src/realtime/session.ts) and
 [functions/api/sessions/](functions/api/sessions/).
+
+## Question sheets
+
+A sheet is one lesson: a few questions on a theme, the consigne the student is
+handed, and the structures the teacher wants to hear. Written on `/consignes`,
+chosen on liveTrial at publish, and copied into the session as text.
+
+```
+/consignes ──save──► R2 sheets.json
+                       │
+                       └──chosen at publish──► session ──► /eleve   (questions, consigne)
+                                                        └──► report  (targets)
+```
+
+**The prose and the targets go to different readers**, which is the one thing
+worth reading twice:
+
+| | Student sees | Tutor is told | Report checks |
+| --- | --- | --- | --- |
+| `brief` — the consigne, prose | ✅ verbatim | ❌ | ❌ |
+| `questions` — ordered | ✅ as a list | ✅ works down them | ❌ |
+| `targets` — nameable structures | ❌ | ✅ steers, never announces | ✅ one verdict each |
+
+The consigne is addressed to the learner — *"Réponds aux questions suivantes"* is
+an instruction to the person answering, and handing it to the tutor gives a model
+an instruction meant for somebody else, which these models act on. The targets
+are the machine-readable half of the same intent, which is what lets the report
+return a verdict per target instead of a paragraph of judgement about a
+paragraph of prose.
+
+**There is no built-in sheet**, unlike the evaluator. A report with no scale
+cannot be written at all, so a scale ships in the code; a conversation with no
+questions is just a conversation, which is what every session before this
+feature was. "No questions" stays a supported thing to publish.
+
+On `/eleve` the first tab carries the consigne under the name **Consignes**,
+keeps it up *during* the call — a learner three questions in wants to check what
+the fourth one is — and turns over to **Évaluation** once a conversation has
+ended. When the report arrives, consigne and button both go and the reading has
+the panel to itself. Starting another call clears the report, which brings the
+consigne back with no machinery of its own.
+
+The report gains a **second axis, not a second scale**: `task` says whether the
+lesson's targets were met, `bands` says where the learner stands, and neither
+feeds the other. A secure A2 can miss the target and a shaky B1 can hit it. The
+targets are resolved server-side from the published session rather than taken
+from the caller, for the reason the evaluator already is — they land in a system
+prompt.
+
+See [src/realtime/sheets.ts](src/realtime/sheets.ts),
+[functions/api/sheets/](functions/api/sheets/) and
+[src/sheets/Sheets.tsx](src/sheets/Sheets.tsx).
 
 ## How it fits together
 
@@ -145,6 +206,10 @@ the key private at the cost of a latency leg and some billed Worker time.
 | [functions/api/faces/](functions/api/faces/) | The shared face library on R2 — list, get, original, source, publish, ready, delete |
 | [src/facekit/published.ts](src/facekit/published.ts) | What that library holds and where, read by the Worker and the browser alike |
 | [src/facekit/store.ts](src/facekit/store.ts) | IndexedDB: a cache of the faces this browser has fetched, and which one is worn |
+| [src/sheets/Sheets.tsx](src/sheets/Sheets.tsx) | **consignes**, at `/consignes` — writes one lesson: the questions, the consigne, the targets |
+| [src/realtime/sheets.ts](src/realtime/sheets.ts) | What a sheet is, and the block the tutor is told. Pure, shared with the Worker |
+| [functions/api/sheets/](functions/api/sheets/) | The shared sheet library on R2 — list, save, delete |
+| [src/eleve/ConsignePanel.tsx](src/eleve/ConsignePanel.tsx) | The consigne and questions as the student reads them, up during the call |
 
 ## What a call can be configured with
 
@@ -348,13 +413,14 @@ gates the build.
 
    They have to go in the dashboard: because `wrangler.toml` exists, Pages takes
    plain-text vars from that file and the dashboard will only accept Secrets.
-4. **Create the three buckets**, once, and do it *before the deploy that adds
+4. **Create the four buckets**, once, and do it *before the deploy that adds
    the binding* rather than before the first save:
 
    ```bash
    npx wrangler r2 bucket create vocotrial-faces
    npx wrangler r2 bucket create vocotrial-evaluators
    npx wrangler r2 bucket create vocotrial-sessions
+   npx wrangler r2 bucket create vocotrial-sheets
    ```
 
    The bindings are already in [wrangler.toml](wrangler.toml) — a binding name
@@ -368,7 +434,9 @@ gates the build.
    faceKit's save and liveTrial's picker say no library is configured. Without
    `vocotrial-evaluators`, the built-in scale still works — it ships in the code
    and is merged in by the browser. Without `vocotrial-sessions`, liveTrial
-   cannot publish and `/eleve` says no tutor is ready.
+   cannot publish and `/eleve` says no tutor is ready. Without
+   `vocotrial-sheets`, `/consignes` cannot save and liveTrial's lesson picker
+   offers only "no questions" — which is a working session, not a broken one.
 5. Push to `main`. Every push deploys; every PR gets a preview URL.
 
 Set `SITE_PASSWORD` **before** the first deploy that includes the gate. It fails
@@ -596,7 +664,19 @@ page may hold, and if one exists it will be a Vertex one.
   grammar notes. The student UI is likewise a French string table, shaped so a
   second language is a second table.
 - **`/eleve` is desktop-only.** LingoLecto stacks its right-hand column under
-  the reading below a breakpoint; this does not yet.
+  the reading below a breakpoint; this does not yet. The consigne panel makes
+  this worse, not better: the questions a learner most wants to glance at
+  mid-call are in the column that has nowhere to go on a phone.
+- **Publishing a lesson still means opening liveTrial.** `/consignes` writes a
+  sheet, but handing it to a class means going to the workshop page and pressing
+  publish beside every knob in it. The teacher tier is half a page short.
+- **A sheet is written in one language and cannot follow the picker.** Same
+  limitation as a saved preset, and the same reason: the text is captured once,
+  so rewriting somebody's own questions on a dropdown change would lose work.
+  Switching the target language leaves the sheet saying what it said.
+- **Nothing checks that the questions and the target language agree.** A French
+  sheet published on an Italian session produces a tutor working down French
+  questions in Italian, and no part of the app objects.
 - **Students will reach every page.** The site is one shared password, so
   anyone who can practise can also open faceKit and spend the image keys, and
   every metered call is anonymous — there is nothing to attribute a bill to or

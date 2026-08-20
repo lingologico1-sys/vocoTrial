@@ -5,9 +5,10 @@ import { loadBundledKit } from '../facekit/bundled';
 import { publishedKit } from '../facekit/store';
 import { L1_CHOICES, resolveL1 } from '../realtime/l1';
 import type { SessionReport } from '../realtime/report';
-import type { StudentSession } from '../realtime/session';
+import { hasLesson, type StudentSession } from '../realtime/session';
 import { codeFromUrl, fetchSession } from '../realtime/sessionStore';
 import { useVoiceCall } from '../live/useVoiceCall';
+import ConsignePanel from './ConsignePanel';
 import DictionaryPanel, { type LookupRequest } from './DictionaryPanel';
 import EvaluationPanel, { EvaluationGate } from './EvaluationPanel';
 import TutorStage from './TutorStage';
@@ -221,6 +222,13 @@ export default function Eleve() {
           languageCode: session?.language,
           l1Code: resolveL1(l1).reportCode,
           evaluatorId: session?.evaluatorId,
+          /*
+           * The code, not the targets, even though this page is holding them.
+           * The route reads the lesson from the bucket it was published to —
+           * see analyse.ts on why a target that lands in a system prompt has to
+           * be one somebody published rather than one a caller posted.
+           */
+          sessionCode: session?.code,
           turns: call.turns.map((turn) => ({ role: turn.role, text: turn.text })),
         }),
       });
@@ -251,8 +259,32 @@ export default function Eleve() {
    */
   const idleHint = call.lastCallMs === null ? FR.pillStart : FR.pillAgain;
 
+  /**
+   * The first tab, which is two things in sequence rather than one thing with a
+   * fixed name.
+   *
+   * Before any conversation has finished it holds the consigne, and calling it
+   * Évaluation would name something the student cannot have yet — the tab would
+   * promise a reading and deliver a list of questions. Once a call has ended
+   * the consigne has been acted on and the reading is what the panel is for, so
+   * the label turns over. `lastCallMs` is the page's memory of a finished call
+   * and is already what `idleHint` reads; nothing new is tracked for this.
+   *
+   * The threshold is a call having *ended*, not one having been long enough to
+   * evaluate. A student who talks for a minute and stops has finished a
+   * conversation, and the tab that then says Consignes while the panel under it
+   * counts down to an evaluation is contradicting itself.
+   *
+   * The id behind both names is unchanged, so nothing else on the page has to
+   * know this happens — a tab that renamed its own id would drop the student's
+   * selection at the moment a call ends, which is the one moment they are
+   * looking at it.
+   */
+  const consigne = hasLesson(session) && !report;
+  const firstTab = consigne && call.lastCallMs === null ? FR.tabConsignes : FR.tabEvaluation;
+
   const TABS: Array<{ id: Tab; label: string }> = [
-    { id: 'evaluation', label: FR.tabEvaluation },
+    { id: 'evaluation', label: firstTab },
     { id: 'dictionary', label: FR.tabDictionary },
     { id: 'vocab', label: FR.tabVocab },
   ];
@@ -504,20 +536,39 @@ export default function Eleve() {
               ))}
             </div>
 
+            {/*
+              The lifecycle of the first tab, top to bottom.
+
+              The consigne sits above the gate in every state before there is a
+              report, INCLUDING while the call is live — a learner three
+              questions in wants to check what the fourth one is, and one who
+              has to remember the consigne stops following it by the second
+              turn. The gate underneath yields instead: `under` collapses it to
+              a clock, or to nothing. See EvaluationGate.
+
+              When the report arrives both go, and the reading has the panel to
+              itself. Starting another conversation clears the report — see
+              `start` — which brings the consigne back with no machinery of its
+              own, and is why nothing here tracks a phase.
+            */}
             {tab === 'evaluation' && (
               <div className="min-h-0 flex-1 overflow-y-auto">
                 {report ? (
                   <EvaluationPanel report={report} />
                 ) : (
-                  <EvaluationGate
-                    live={call.live}
-                    elapsedMs={elapsedMs}
-                    lastCallMs={call.lastCallMs}
-                    minimumMs={MIN_EVAL_MS}
-                    busy={reporting}
-                    error={reportError}
-                    onEvaluate={() => void evaluate()}
-                  />
+                  <>
+                    {consigne && session && <ConsignePanel session={session} />}
+                    <EvaluationGate
+                      live={call.live}
+                      elapsedMs={elapsedMs}
+                      lastCallMs={call.lastCallMs}
+                      minimumMs={MIN_EVAL_MS}
+                      busy={reporting}
+                      error={reportError}
+                      under={consigne}
+                      onEvaluate={() => void evaluate()}
+                    />
+                  </>
                 )}
               </div>
             )}

@@ -99,6 +99,45 @@ export interface StudentSession {
   /** Which scale the end-of-call report reads against. */
   evaluatorId: string;
 
+  // --- The lesson: what is being asked, and what the learner is told.
+  //
+  // BY VALUE, NOT BY ID, which is the opposite of `evaluatorId` directly above
+  // and worth the paragraph. A scale is resolved server-side at report time
+  // from a bucket the student never touches, so a reference is safe there. A
+  // sheet is read by the student's own browser mid-lesson, and a reference
+  // would mean a teacher editing next week's questions silently rewriting the
+  // screen of somebody who is talking right now. So publishing copies the text,
+  // the way it already renders `instructions` rather than storing a preset key,
+  // and for the same reason: what was handed out stays handed out.
+  //
+  // All optional, and read as "no sheet" when absent. Sessions published before
+  // this existed are sitting in R2 and have to keep opening — the mechanism
+  // `tiltSettle` documents below — and "no sheet" is a supported lesson rather
+  // than a degraded one. See sheets.ts.
+  /**
+   * The consigne, shown to the student verbatim. Never sent to the tutor.
+   *
+   * The tutor's copy of the lesson is already inside `instructions`, composed
+   * at publish. This field exists so the student page can render the consigne
+   * and the questions as a list rather than as a wall of prompt, which is the
+   * whole reason they are stored structurally as well as composed.
+   */
+  brief?: string;
+  /** What the report checks, one verdict per entry. */
+  targets?: string[];
+  /** Asked in this order. Also inside `instructions`. */
+  questions?: string[];
+  /**
+   * Which sheet this came from, for the teacher's benefit only.
+   *
+   * Never resolved — nothing reads the library from a session, and the id may
+   * name a sheet since deleted. It is here so a published setup can say where
+   * its questions came from when somebody is working out which lesson a code
+   * belongs to.
+   */
+  sheetId?: string;
+  sheetName?: string;
+
   // --- How the face performs. Verbatim from liveTrial's own prefs, because
   // --- the whole point is that the student meets what was tuned rather than a
   // --- reasonable-looking approximation of it.
@@ -162,6 +201,22 @@ export interface CurrentPointer {
   code: string;
 }
 
+/**
+ * Whether this setup carries a lesson.
+ *
+ * Questions rather than a brief, because they are what everything downstream
+ * actually needs: a sheet with no consigne prose still gives the student a list
+ * to answer and the tutor a list to work down, where a consigne with no
+ * questions is a sentence about nothing. save.ts refuses the second case, and
+ * this is the reading that agrees with it.
+ *
+ * Here rather than beside the panel that asks, so the one place that decides
+ * what "has a lesson" means is the file that defines the field.
+ */
+export function hasLesson(session: StudentSession | null | undefined): boolean {
+  return !!session?.questions?.length;
+}
+
 const isString = (value: unknown): value is string => typeof value === 'string';
 
 function isStringArray(value: unknown): value is string[] {
@@ -193,6 +248,13 @@ export function looksLikeSession(value: unknown): value is StudentSession {
     isString(session.voice) &&
     (session.faceId === null || isString(session.faceId)) &&
     isString(session.evaluatorId) &&
+    // The lesson is optional throughout — a session with no sheet is a
+    // conversation, which is what every session before sheets existed was.
+    (session.brief === undefined || isString(session.brief)) &&
+    (session.targets === undefined || isStringArray(session.targets)) &&
+    (session.questions === undefined || isStringArray(session.questions)) &&
+    (session.sheetId === undefined || isString(session.sheetId)) &&
+    (session.sheetName === undefined || isString(session.sheetName)) &&
     isString(session.driver) &&
     typeof session.lookaheadMs === 'number' &&
     isString(session.roundness) &&

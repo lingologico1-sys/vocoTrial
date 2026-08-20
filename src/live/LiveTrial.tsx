@@ -7,6 +7,8 @@ import { MAX_INSTRUCTIONS, withPersona } from '../realtime/instructions';
 import { VOICES } from '../realtime/settings';
 import { BUILTIN_EVALUATOR_ID, type Evaluator } from '../realtime/evaluators';
 import { lastEvaluatorId, listEvaluators } from '../realtime/evaluatorStore';
+import { sheetBlock, type QuestionSheet } from '../realtime/sheets';
+import { NO_SHEET, lastSheetId, listSheets, rememberSheet } from '../realtime/sheetStore';
 import { newSessionCode, type StudentSession } from '../realtime/session';
 import { publishSession } from '../realtime/sessionStore';
 import type { SessionStatus } from '../realtime/types';
@@ -531,6 +533,38 @@ export default function LiveTrial() {
   ]);
 
   /**
+   * The lesson, if there is one.
+   *
+   * Declared up here rather than beside the evaluator picker below because
+   * `composed` reads it, and a useMemo's dependency array is evaluated where it
+   * is written — a sheet declared after it would be read in its own temporal
+   * dead zone. The picker that sets it still lives in the publish fieldset,
+   * which is the only place it means anything.
+   *
+   * NO_SHEET is a real, chosen state rather than a loading artefact: a session
+   * published with no sheet is a plain conversation, which is what every
+   * session before this feature was. See sheets.ts.
+   */
+  const [sheets, setSheets] = useState<QuestionSheet[]>([]);
+  const [sheetId, setSheetId] = useState<string>(NO_SHEET);
+  const sheet = useMemo(
+    () => sheets.find((entry) => entry.id === sheetId) ?? null,
+    [sheets, sheetId],
+  );
+
+  useEffect(() => {
+    let alive = true;
+    void listSheets().then(({ sheets: found }) => {
+      if (!alive) return;
+      setSheets(found);
+      setSheetId(lastSheetId(found));
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  /**
    * What this page would actually send, kept where it can be looked at.
    *
    * Composed here rather than inside `connect` so the length can be checked
@@ -538,16 +572,21 @@ export default function LiveTrial() {
    * still enforces the ceiling — it has to, it is the only side that can — but
    * its refusal arrives as "instructions are limited to 8000 characters" about
    * a box nobody typed 8000 characters into, because the overflow is the sum of
-   * two things chosen on different pages. Adding up in the browser is what lets
-   * the message name both halves.
+   * three things chosen on three different pages. Adding up in the browser is
+   * what lets the message name all of them.
+   *
+   * The sheet goes last, after the persona wrap rather than inside it. That is
+   * where instructions.ts says a constraint held across a whole call survives
+   * longest, and a question list is exactly such a constraint — see the note on
+   * `sheetBlock`.
    */
   const composed = useMemo(
     () =>
       withPersona(
         renderPreset(presetKey, findLanguage(language) ?? LANGUAGES[0]),
         persona ? kit?.persona : undefined,
-      ),
-    [presetKey, language, persona, kit],
+      ) + (sheet ? sheetBlock(sheet) : ''),
+    [presetKey, language, persona, kit, sheet],
   );
 
   /**
@@ -563,6 +602,8 @@ export default function LiveTrial() {
     () => renderPreset(presetKey, findLanguage(language) ?? LANGUAGES[0]).length,
     [presetKey, language],
   );
+  /** Measured the same way and for the same reason as `presetChars`. */
+  const sheetChars = useMemo(() => (sheet ? sheetBlock(sheet).length : 0), [sheet]);
   const tooLong = composed.length > MAX_INSTRUCTIONS;
 
   /**
@@ -651,6 +692,27 @@ export default function LiveTrial() {
         voice,
         faceId: chosen,
         evaluatorId,
+        /*
+         * The lesson, copied rather than referenced — see session.ts. The
+         * questions are already inside `instructions` above; these are the same
+         * text again, structurally, so the student page can render a list
+         * instead of a wall of prompt. A few hundred duplicated bytes against
+         * MAX_SESSION's 30,000, bought deliberately.
+         *
+         * Absent rather than empty when there is no sheet, which is the posture
+         * the turn-taking block below already takes: "no lesson" and "a lesson
+         * with nothing in it" are different things, and only one of them should
+         * make the student page draw a consigne panel.
+         */
+        ...(sheet
+          ? {
+              brief: sheet.brief,
+              targets: sheet.targets,
+              questions: sheet.questions,
+              sheetId: sheet.id,
+              sheetName: sheet.name,
+            }
+          : {}),
         driver,
         lookaheadMs,
         roundness,
@@ -685,7 +747,7 @@ export default function LiveTrial() {
     // this page knows there are two.
     if (tooLong) {
       call.fail(
-        `That prompt and this persona come to ${composed.length} characters together, and a session takes ${MAX_INSTRUCTIONS}. Shorten the prompt (${presetChars}), shorten the background on faceKit, or switch the persona off.`,
+        `That prompt, this persona and these questions come to ${composed.length} characters together, and a session takes ${MAX_INSTRUCTIONS}. Shorten the prompt (${presetChars}), cut questions on /consignes (${sheetChars}), shorten the background on faceKit, or switch the persona off.`,
       );
       return;
     }
@@ -1562,11 +1624,18 @@ export default function LiveTrial() {
         */}
         {tooLong && !live && (
           <p className="rounded-lg border border-amber-700/70 bg-amber-950/20 px-3 py-2 text-xs text-amber-300">
-            This prompt and this persona come to{' '}
+            This prompt, this persona{sheet ? ' and these questions' : ''} come to{' '}
             <span className="tabular-nums">{composed.length}</span> characters together, and a
             session takes {MAX_INSTRUCTIONS}. The prompt is{' '}
-            <span className="tabular-nums">{presetChars}</span> of it. Shorten it on tutorBench,
-            shorten the background on faceKit, or switch the persona off above.
+            <span className="tabular-nums">{presetChars}</span> of it
+            {sheet && (
+              <>
+                {' '}
+                and the questions <span className="tabular-nums">{sheetChars}</span>
+              </>
+            )}
+            . Shorten it on tutorBench{sheet ? ', cut questions on /consignes' : ''}, shorten the
+            background on faceKit, or switch the persona off above.
           </p>
         )}
 
@@ -1630,6 +1699,52 @@ export default function LiveTrial() {
             </select>
           </label>
 
+          {/*
+            The lesson. A pick rather than an authoring surface, exactly like
+            the scale above it — sheets are written on /consignes, and this page
+            is where one is chosen and handed out.
+
+            Unlike the scale, "none" is a first-class option rather than a
+            missing state: a session with no sheet is a plain conversation. The
+            picker says so in as many words rather than showing an empty select,
+            because an empty select reads as a page that failed to load.
+          */}
+          <label className="mt-2 flex items-center gap-3">
+            <span className="text-xs uppercase tracking-wide text-slate-500">Lesson</span>
+            <select
+              value={sheetId}
+              onChange={(event) => {
+                setSheetId(event.target.value);
+                rememberSheet(event.target.value);
+              }}
+              disabled={publishing}
+              className="flex-1 bg-transparent text-sm text-slate-200 outline-none disabled:opacity-40"
+            >
+              <option value={NO_SHEET} className="bg-slate-900">
+                No questions — just a conversation
+              </option>
+              {sheets.map((entry) => (
+                <option key={entry.id} value={entry.id} className="bg-slate-900">
+                  {entry.name}
+                </option>
+              ))}
+            </select>
+            <a
+              href="/consignes"
+              className="shrink-0 text-[11px] text-slate-500 underline-offset-4 hover:underline"
+            >
+              edit →
+            </a>
+          </label>
+          {sheet && (
+            <p className="mt-1 text-[11px] leading-relaxed text-slate-600">
+              {sheet.questions.length} question{sheet.questions.length === 1 ? '' : 's'}
+              {sheet.targets.length > 0 && <> · {sheet.targets.join(', ')}</>} ·{' '}
+              <span className="tabular-nums">{sheetChars}</span> characters of prompt
+              {!sheet.brief && <> · no consigne written, so the student sees only the questions</>}
+            </p>
+          )}
+
           <div className="mt-3 flex items-center gap-3">
             <button
               type="button"
@@ -1648,7 +1763,8 @@ export default function LiveTrial() {
             <p className="mt-2 text-[11px] text-slate-500">
               Published as <span className="font-mono text-slate-400">{published.code}</span> at{' '}
               {new Date(published.updatedAt).toLocaleTimeString()}. A student opening /eleve now
-              gets this language, prompt, voice, face and motion.
+              gets this language, prompt, voice, face, motion
+              {published.questions?.length ? ' and questions' : ' — and no questions'}.
             </p>
           )}
           {publishError && <p className="mt-2 text-xs text-rose-400">{publishError}</p>}

@@ -83,6 +83,76 @@ export default function EvaluationPanel({ report }: EvaluationPanelProps) {
         )}
       </section>
 
+      {/*
+        The consigne, read back.
+
+        SECOND, NOT FIRST, AND NOT LAST. The best sentences keep the opening for
+        the reason in the header — the first thing read is the thing believed —
+        but this is the question the student actually has: they were told to use
+        the passé composé an hour ago and they want to know whether they did.
+        Putting it above the level also keeps the two apart in the reading, which
+        is the point of it being a separate axis: it is not a rung, and a student
+        who meets it after their band will read it as one.
+
+        Absent for a session with no sheet, which is every session published
+        before sheets existed. See sheets.ts.
+      */}
+      {report.task?.length > 0 && (
+        <section>
+          <Heading>{FR.evalTaskTitle}</Heading>
+          <ul className="space-y-2">
+            {report.task.map((entry, index) => (
+              <li
+                key={index}
+                className={`rounded-lg border px-3 py-2.5 ${
+                  entry.verdict === 'met'
+                    ? 'border-lingo-success/40 bg-lingo-success-bg'
+                    : entry.verdict === 'partly'
+                      ? 'border-lingo-accent-light bg-lingo-accent-glow'
+                      : 'border-lingo-border-light bg-lingo-surface'
+                }`}
+              >
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="min-w-0 flex-1 text-sm font-semibold text-lingo-ink">
+                    {entry.target}
+                  </span>
+                  <span
+                    className={`shrink-0 text-[11px] font-bold uppercase tracking-wider ${
+                      entry.verdict === 'met'
+                        ? 'text-lingo-success'
+                        : entry.verdict === 'partly'
+                          ? 'text-lingo-accent-deep'
+                          : 'text-lingo-muted'
+                    }`}
+                  >
+                    {entry.verdict === 'met'
+                      ? FR.evalTaskMet
+                      : entry.verdict === 'partly'
+                        ? FR.evalTaskPartly
+                        : FR.evalTaskMissing}
+                  </span>
+                </div>
+                {entry.evidence && (
+                  <p className="mt-1.5 text-xs leading-snug">
+                    <Quote>{entry.evidence}</Quote>
+                  </p>
+                )}
+                {/*
+                  The model's line, or ours when it is "not-shown" and has
+                  nothing to say. A blank row under a grey verdict reads as a
+                  mark against the learner, and the strings table says in as
+                  many words that it is not one.
+                */}
+                <p className="mt-1 text-xs leading-relaxed text-lingo-muted">
+                  {entry.note?.trim() ||
+                    (entry.verdict === 'not-shown' ? FR.evalTaskMissingNote : '')}
+                </p>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       <section>
         <Heading>{FR.evalLevelTitle}</Heading>
         {placed ? (
@@ -197,6 +267,14 @@ export default function EvaluationPanel({ report }: EvaluationPanelProps) {
  * Kept beside the panel rather than in the page, because what they say is part
  * of the same promise — the gate is two minutes and the copy has to agree with
  * the constant that enforces it.
+ *
+ * `under` IS THE WHOLE OF WHAT THE CONSIGNE CHANGED. With questions above it
+ * the gate is no longer the panel, it is the strip at the foot of one, and the
+ * generous centred padding that made a lone message look deliberate makes a
+ * footer look like a gap. The two idle lines also stop being needed: a student
+ * reading the questions does not need to be told the evaluation comes later,
+ * because the questions are visibly the thing to be getting on with. So under a
+ * consigne those states collapse to the clock, or to nothing.
  */
 export function EvaluationGate({
   live,
@@ -205,6 +283,7 @@ export function EvaluationGate({
   minimumMs,
   busy,
   error,
+  under,
   onEvaluate,
 }: {
   live: boolean;
@@ -213,14 +292,20 @@ export function EvaluationGate({
   minimumMs: number;
   busy: boolean;
   error: string | null;
+  /** True when a consigne is rendered above this. See the header. */
+  under?: boolean;
   onEvaluate: () => void;
 }) {
+  const pad = under ? 'px-4 py-3' : 'px-4 py-8';
+
   if (live) {
     return (
-      <div className="px-4 py-6 text-center">
-        <p className="text-sm leading-relaxed text-lingo-muted">{FR.evalDuring}</p>
+      <div className={`${under ? 'px-4 py-3' : 'px-4 py-6'} text-center`}>
+        <p className="text-sm leading-relaxed text-lingo-muted">
+          {under ? FR.evalLive : FR.evalDuring}
+        </p>
         {elapsedMs !== null && (
-          <p className="mt-2 font-lingo-mono text-xs text-lingo-muted">
+          <p className="mt-1 font-lingo-mono text-xs text-lingo-muted">
             {FR.evalElapsed(frenchDuration(elapsedMs))}
           </p>
         )}
@@ -229,11 +314,14 @@ export function EvaluationGate({
   }
 
   if (busy) {
-    return <p className="px-4 py-8 text-center text-sm text-lingo-muted">{FR.evalWorking}</p>;
+    return <p className={`${pad} text-center text-sm text-lingo-muted`}>{FR.evalWorking}</p>;
   }
 
-  // Nothing has been said yet at all.
+  // Nothing has been said yet at all. Under a consigne this says nothing: the
+  // questions are the instruction, and a line telling the student their
+  // evaluation will appear later is answering a question nobody asked yet.
   if (lastCallMs === null) {
+    if (under) return null;
     return (
       <p className="px-4 py-8 text-center text-sm leading-relaxed text-lingo-muted">
         {FR.evalIdle}
@@ -243,7 +331,7 @@ export function EvaluationGate({
 
   if (lastCallMs < minimumMs) {
     return (
-      <div className="px-4 py-8 text-center">
+      <div className={`${pad} text-center`}>
         <p className="text-sm leading-relaxed text-lingo-muted">
           {FR.evalRemaining(frenchDuration(minimumMs - lastCallMs))}
         </p>
@@ -252,7 +340,7 @@ export function EvaluationGate({
   }
 
   return (
-    <div className="px-4 py-8 text-center">
+    <div className={pad}>
       <button
         type="button"
         onClick={onEvaluate}

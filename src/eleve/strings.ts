@@ -23,9 +23,26 @@ export const FR = {
   // --- Chrome
   tagline: 'Parle avec ton tuteur',
   l1Label: 'Ma langue',
+  /*
+   * ONE TAB, TWO NAMES, AND THE NAME FOLLOWS THE LESSON. Before the first
+   * conversation ends it is where the consigne lives, and calling it Évaluation
+   * then would name a thing the student cannot have yet. Afterwards the
+   * consigne has been acted on and the reading is what the tab is for. The id
+   * behind both is unchanged — see Eleve.tsx.
+   */
+  tabConsignes: 'Consignes',
   tabEvaluation: 'Évaluation',
   tabDictionary: 'Dictionnaire',
   tabVocab: 'Vocabulaire',
+
+  // --- The consigne
+  consigneTitle: 'Ta consigne',
+  consigneQuestions: 'Les questions',
+  /*
+   * Shown under the questions when there is no consigne prose, so the panel
+   * never opens on a bare numbered list with nothing saying what to do with it.
+   */
+  consigneNoBrief: 'Réponds à ces questions en parlant avec ton tuteur.',
 
   // --- The call
   starting: 'Connexion…',
@@ -61,6 +78,26 @@ export const FR = {
   evalWorking: 'Je relis notre conversation…',
   evalFailed: 'L’évaluation n’a pas pu être écrite.',
   evalElapsed: (text: string) => `Durée : ${text}`,
+
+  /*
+   * The mid-call line, said twice over because it is read in two places. The
+   * long one is what the panel says when there is no consigne to show; the
+   * short one is the strip under the questions, where the questions themselves
+   * have already made the point that a conversation is happening.
+   */
+  evalLive: 'Conversation en cours',
+
+  // --- The consigne, read back in the report
+  evalTaskTitle: 'Ta consigne',
+  evalTaskMet: 'Réussi',
+  evalTaskPartly: 'En partie',
+  evalTaskMissing: 'Pas vu',
+  /*
+   * Said in as many words because "Pas vu" on its own reads as a failure, and
+   * it is not one: the tutor steers the conversation, so a structure that never
+   * came up is as often the conversation's doing as the learner's.
+   */
+  evalTaskMissingNote: 'Cette structure n’est pas apparue dans la conversation.',
 
   evalBestTitle: 'Tes meilleures phrases',
   evalBestEmpty: 'Rien à citer cette fois — parle un peu plus la prochaine fois.',
