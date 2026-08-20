@@ -12,12 +12,12 @@ import { FR } from './strings';
  * with the whole of the call now riding on the microphone in that last strip.
  *
  * Laid out top to bottom rather than side by side, which is the one structural
- * difference from liveTrial's Stage and the reason this is a separate component
+ * difference from studio's Stage and the reason this is a separate component
  * rather than a prop on that one. Everything that made Stage complicated — the
  * measured tails, the two balloons reaching for one mouth — exists to solve a
  * problem this arrangement does not have.
  *
- * The face itself is liveTrial's, unchanged. It takes the whole performance as
+ * The face itself is studio's, unchanged. It takes the whole performance as
  * props and knows nothing about the page around it, which is exactly why the
  * student sees the tutor that was tuned rather than a second implementation of
  * it.

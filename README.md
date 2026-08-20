@@ -19,20 +19,23 @@ Pages, on **Gemini Live** over a relayed WebSocket.
 Everything in this repo used to be one person's workshop. It is now split by who
 a page is *for*, which is the distinction to keep in mind when adding anything:
 
+Every page is listed on the start page at `/`, which is the front door and the
+only route that is not a tool.
+
 | Tier | Pages | Look |
 | --- | --- | --- |
-| **Administrator** | `/` tutorBench, `/facekit`, `/livetrial` | Dark, English, every knob exposed |
-| **Teacher** | `/consignes` — but publishing is still done from `/livetrial` | Dark, English, one job |
+| **Administrator** | `/tutorbench`, `/facekit`, `/studio` | Dark, English, every knob exposed |
+| **Teacher** | `/lessons` — but publishing is still done from `/studio` | Dark, English, one job |
 | **Student** | `/eleve` | Light, French, no settings at all |
 
-`/consignes` is the first page written for the middle tier, and it is only half
+`/lessons` is the first page written for the middle tier, and it is only half
 of one: a teacher can write a lesson there, but handing it to a class still
-means opening liveTrial and pressing publish beside every knob in the workshop.
+means opening the studio and pressing publish beside every knob in the workshop.
 That split is the next thing worth closing.
 
 `/eleve` is the only page a learner sees. It authors nothing — no model, no
 prompt, no face, no scale — and runs entirely on a setup published from
-liveTrial. It is the first light page here because it is the first page not
+the studio. It is the first light page here because it is the first page not
 aimed at the maintainer; it wears the LingoLabo look that ScriptoMondo and
 LingoLecto wear, so the three read as one product.
 
@@ -42,14 +45,14 @@ written in. The page around them stays in the language they are learning.
 
 ## The student session
 
-liveTrial's settings live in `localStorage`, which reaches exactly one browser.
+The studio's settings live in `localStorage`, which reaches exactly one browser.
 A student opening `/eleve` on their own laptop would otherwise meet the
 defaults — a different voice, a different face, a different prompt — with no way
 of telling. So a setup travels through R2, the road faces and evaluators
 already took.
 
 ```
-liveTrial ──publish──► R2 ──get──► /eleve
+studio ──publish──► R2 ──get──► /eleve
                         sessions/<CODE>.json   one published setup
                         current.json           { "code": "VOCO-7K2M" }
 ```
@@ -78,11 +81,11 @@ See [src/realtime/session.ts](src/realtime/session.ts) and
 ## Question sheets
 
 A sheet is one lesson: a few questions on a theme, the consigne the student is
-handed, and the structures the teacher wants to hear. Written on `/consignes`,
-chosen on liveTrial at publish, and copied into the session as text.
+handed, and the structures the teacher wants to hear. Written on `/lessons`,
+chosen in the studio at publish, and copied into the session as text.
 
 ```
-/consignes ──save──► R2 sheets.json
+/lessons ──save──► R2 sheets.json
                        │
                        └──chosen at publish──► session ──► /eleve   (questions, consigne)
                                                         └──► report  (targets)
@@ -125,7 +128,7 @@ prompt.
 
 See [src/realtime/sheets.ts](src/realtime/sheets.ts),
 [functions/api/sheets/](functions/api/sheets/) and
-[src/sheets/Sheets.tsx](src/sheets/Sheets.tsx).
+[src/lessons/Lessons.tsx](src/lessons/Lessons.tsx).
 
 ## How it fits together
 
@@ -184,8 +187,9 @@ the key private at the cost of a latency leg and some billed Worker time.
 
 | Path | What it does |
 | --- | --- |
-| [src/tutor/TutorBench.tsx](src/tutor/TutorBench.tsx) | **tutorBench**, at `/` — every model, every knob, the prompt you write, and what the call cost |
-| [src/live/LiveTrial.tsx](src/live/LiveTrial.tsx) | **liveTrial**, at `/livetrial` — one model, a face, and the picker that chooses which face |
+| [src/start/Start.tsx](src/start/Start.tsx) | **start**, at `/` — names and explains every page; the only route that is not a tool |
+| [src/tutor/TutorBench.tsx](src/tutor/TutorBench.tsx) | **tutorBench**, at `/tutorbench` — every model, every knob, the prompt you write, and what the call cost |
+| [src/live/Studio.tsx](src/live/Studio.tsx) | **studio**, at `/studio` — dresses one tutor in a face, a voice and a lesson, and publishes it to the students |
 | [src/facekit/FaceKit.tsx](src/facekit/FaceKit.tsx) | **faceKit**, at `/facekit` — authors a face, and saves it to the shared library |
 | [functions/api/_middleware.ts](functions/api/_middleware.ts) | Same-origin **and** session-cookie gate in front of every `/api/*` route; POST-only except WebSocket upgrades |
 | [functions/api/auth/](functions/api/auth/) | Trades the site password for a signed session cookie |
@@ -206,7 +210,7 @@ the key private at the cost of a latency leg and some billed Worker time.
 | [functions/api/faces/](functions/api/faces/) | The shared face library on R2 — list, get, original, source, publish, ready, delete |
 | [src/facekit/published.ts](src/facekit/published.ts) | What that library holds and where, read by the Worker and the browser alike |
 | [src/facekit/store.ts](src/facekit/store.ts) | IndexedDB: a cache of the faces this browser has fetched, and which one is worn |
-| [src/sheets/Sheets.tsx](src/sheets/Sheets.tsx) | **consignes**, at `/consignes` — writes one lesson: the questions, the consigne, the targets |
+| [src/lessons/Lessons.tsx](src/lessons/Lessons.tsx) | **lessons**, at `/lessons` — writes one lesson: the questions, the consigne, the targets |
 | [src/realtime/sheets.ts](src/realtime/sheets.ts) | What a sheet is, and the block the tutor is told. Pure, shared with the Worker |
 | [functions/api/sheets/](functions/api/sheets/) | The shared sheet library on R2 — list, save, delete |
 | [src/eleve/ConsignePanel.tsx](src/eleve/ConsignePanel.tsx) | The consigne and questions as the student reads them, up during the call |
@@ -258,7 +262,7 @@ Saved prompts live beside them in
 `vocotrial.presets.v1` in `localStorage`. Write anything in the box, **Save as
 new**, name it, and it joins the picker; **Update** writes over the selected one
 and **Delete** removes it. Both pages read this store, so a prompt written on
-tutorBench is offered on liveTrial too, and whichever was picked last —
+tutorBench is offered in the studio too, and whichever was picked last —
 on either page — is the one both open on.
 
 One real difference, surfaced in the panel rather than hidden: a saved prompt is
@@ -279,7 +283,7 @@ bucket, and every other browser signed in to this site reads it back. There is
 one list of faces, not a private one and a shared one.
 
 ```
-faceKit ──save────► R2 ──list────► liveTrial's picker (ready faces only)
+faceKit ──save────► R2 ──list────► studio's picker (ready faces only)
  (any browser)        │  └─get────► the face it wears
      ▲                │
      └──get+original──┘  the same face, opened for editing
@@ -311,7 +315,7 @@ Five things worth knowing:
 - **`ready` is what separates saved from fit to wear.** A face reaches the
   library on its first save, half its mouths undrawn, because the library is the
   only place it can go — so "in the library" stopped answering "fit to put in
-  front of somebody". liveTrial's picker offers ready faces only, plus whichever
+  front of somebody". The studio's picker offers ready faces only, plus whichever
   is currently worn so that a draft being tested does not vanish from under the
   person testing it. faceKit shows everything, dims the drafts, and flips the
   flag through `ready.ts` — one small index write, no artwork.
@@ -431,11 +435,11 @@ gates the build.
    is to create it and redeploy, and nothing needs reverting.
 
    Each is independently survivable if you skip it. Without `vocotrial-faces`,
-   faceKit's save and liveTrial's picker say no library is configured. Without
+   faceKit's save and the studio's picker say no library is configured. Without
    `vocotrial-evaluators`, the built-in scale still works — it ships in the code
-   and is merged in by the browser. Without `vocotrial-sessions`, liveTrial
+   and is merged in by the browser. Without `vocotrial-sessions`, the studio
    cannot publish and `/eleve` says no tutor is ready. Without
-   `vocotrial-sheets`, `/consignes` cannot save and liveTrial's lesson picker
+   `vocotrial-sheets`, `/lessons` cannot save and the studio's lesson picker
    offers only "no questions" — which is a working session, not a broken one.
 5. Push to `main`. Every push deploys; every PR gets a preview URL.
 
@@ -479,7 +483,7 @@ npm run lint
 | `/api/live/models` | probes candidate ids with `generateContent`, the only call this key may make |
 | `/api/live/regions` | **run 2026-08-16** — all twelve hosts take the key; Pro is global-endpoint-only, Flash is in seven regions |
 | `/api/image/generate` | **working on Vertex** — returned an image in ~16s on Flash |
-| `/api/faces/*`, the shared library | **untested** — typechecks, lints and builds; the save → list → wear round trip, the save → get + original → edit → save one, and the `ready` flag reaching liveTrial's picker, all need a browser and a created bucket |
+| `/api/faces/*`, the shared library | **untested** — typechecks, lints and builds; the save → list → wear round trip, the save → get + original → edit → save one, and the `ready` flag reaching the studio's picker, all need a browser and a created bucket |
 | Gemini handshake | **working** — 2.5 native audio on Vertex, 3.1 Flash Live on AI Studio |
 | Gemini audio in a browser | untested; needs a mic |
 | Saved prompt presets | typechecks and builds; the create/update/delete round trip is **untested in a browser** |
@@ -667,7 +671,7 @@ page may hold, and if one exists it will be a Vertex one.
   the reading below a breakpoint; this does not yet. The consigne panel makes
   this worse, not better: the questions a learner most wants to glance at
   mid-call are in the column that has nowhere to go on a phone.
-- **Publishing a lesson still means opening liveTrial.** `/consignes` writes a
+- **Publishing a lesson still means opening the studio.** `/lessons` writes a
   sheet, but handing it to a class means going to the workshop page and pressing
   publish beside every knob in it. The teacher tier is half a page short.
 - **A sheet is written in one language and cannot follow the picker.** Same

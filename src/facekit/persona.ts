@@ -29,7 +29,7 @@
  * form is a form nobody fills in, where a text box with a portrait beside it
  * gets written. The two named fields are here because code reads them: the
  * composed prompt needs a name it can rely on even when the paragraph forgets
- * to give one, and the voice is a pick liveTrial makes on the kit's behalf.
+ * to give one, and the voice is a pick studio makes on the kit's behalf.
  */
 export interface Persona {
   /**
@@ -44,10 +44,10 @@ export interface Persona {
    * The voice this face was written for. A name from VOICES in
    * realtime/settings.ts, or absent for no opinion.
    *
-   * Here rather than in liveTrial's prefs because it belongs to the character:
+   * Here rather than in studio's prefs because it belongs to the character:
    * the loudest failure this whole feature can produce is a paragraph saying
    * "my name is Marta, I'm 34" delivered in Fenrir's voice, and the kit is the
-   * only thing that knows both halves. Advisory — liveTrial adopts it when you
+   * only thing that knows both halves. Advisory — studio adopts it when you
    * change face, and a deliberate pick afterwards still wins.
    */
   voice?: string;

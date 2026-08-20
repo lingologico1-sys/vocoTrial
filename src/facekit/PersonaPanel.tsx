@@ -16,7 +16,7 @@ import {
 /**
  * The one part of a kit that is not a picture.
  *
- * It sits on this page rather than beside the prompt picker in liveTrial for a
+ * It sits on this page rather than beside the prompt picker in studio for a
  * reason worth stating: a persona belongs to a face, so it has to be authored
  * where the face is and travel with it when the face is published. The prompt
  * on the other page is the *job*; this is the person doing it, and the two are
@@ -40,7 +40,7 @@ export default function PersonaPanel({
 }) {
   /**
    * Which language the draft is written to fit, and it is *not* stored on the
-   * kit. A face is worn under whatever language liveTrial is set to, so
+   * kit. A face is worn under whatever language studio is set to, so
    * pinning one here would be inventing a constraint the rest of the app does
    * not have. It steers one generation and then stops mattering — the
    * paragraph it produced is the thing that lasts, and it is editable.
@@ -101,7 +101,7 @@ export default function PersonaPanel({
       <div className="flex flex-wrap items-end justify-between gap-3">
         <h2 className="text-sm font-medium text-slate-300">Who they are</h2>
         <p className="text-xs text-slate-500">
-          Prompt text, not artwork. It travels with the face when you save, and liveTrial can
+          Prompt text, not artwork. It travels with the face when you save, and studio can
           switch it off — which is the point of keeping it out of the prompt itself.
         </p>
       </div>
@@ -137,7 +137,7 @@ export default function PersonaPanel({
             ))}
           </select>
           <span className="block text-slate-600">
-            Adopted by liveTrial when you switch to this face, and overridable there. Worth setting
+            Adopted by studio when you switch to this face, and overridable there. Worth setting
             if the background states an age or a gender: the voice is the half of the character
             this page cannot show you.
           </span>

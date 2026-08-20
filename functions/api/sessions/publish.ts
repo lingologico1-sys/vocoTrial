@@ -12,7 +12,7 @@ import { type SessionEnv, writeCurrent, writeSession } from './_library';
 /**
  * Publishes one setup, and points the student page at it.
  *
- * Called from liveTrial, which is maintainer UI — there is no teacher page yet.
+ * Called from studio, which is maintainer UI — there is no teacher page yet.
  * The middleware has already established that the caller knew the site
  * password, so nothing here is a security boundary; what these checks catch is
  * a setup that would fail at the far end, in a browser belonging to somebody

@@ -14,7 +14,7 @@ import type { TiltCue } from './headMotion';
  * Holding one live call: the socket, the transcript, and the timing that makes
  * the two agree.
  *
- * LIFTED OUT OF liveTrial RATHER THAN COPIED FOR /eleve. What lives here is not
+ * LIFTED OUT OF studio RATHER THAN COPIED FOR /eleve. What lives here is not
  * glue — it is the reveal queue holding the agent's words until the audio
  * carrying them is actually audible, the barge-in that throws away words whose
  * audio was dropped unplayed, and the drain that rescues whatever was still
@@ -25,7 +25,7 @@ import type { TiltCue } from './headMotion';
  *
  * WHAT IS DELIBERATELY NOT HERE. The prompt, the face, the settings panel and
  * every decision about what to show. This owns the call; the page owns the
- * conversation. That is what lets liveTrial keep two balloons and a log while
+ * conversation. That is what lets studio keep two balloons and a log while
  * /eleve renders one bubble and a pill from the same turns.
  */
 
@@ -140,7 +140,7 @@ export interface VoiceCall {
   /**
    * Refuse before dialling, in the caller's own words.
    *
-   * For the checks a page can make and this cannot — liveTrial's is that the
+   * For the checks a page can make and this cannot — studio's is that the
    * preset and the persona together overflow the instruction ceiling, and the
    * message has to name both halves because the overflow is the sum of two
    * things chosen on different pages. Nothing is spent either way; what this
@@ -224,7 +224,7 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
    * has begun answering — see gemini.ts — and by then the tutor's own first
    * words are already on the end of the list. The close found a role that did
    * not match, fell through to the push below, was empty and so did nothing,
-   * and the learner's turn stayed open for the whole call. liveTrial never
+   * and the learner's turn stayed open for the whole call. studio never
    * showed it because it reads the last turn of a role whether or not it has
    * closed; /eleve's pill waits for a closed turn, so it sat empty no matter
    * how much was said into it.

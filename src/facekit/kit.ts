@@ -241,7 +241,7 @@ export interface FaceKit {
    *
    * Optional, and absent is the ordinary state rather than a gap to fill: it
    * means this face says nothing about itself, which is exactly what every kit
-   * did before the field existed and what liveTrial sends when the persona is
+   * did before the field existed and what studio sends when the persona is
    * switched off. No format bump for the same reason `lashes` needed none —
    * nothing already drawn has to be brought forward.
    */

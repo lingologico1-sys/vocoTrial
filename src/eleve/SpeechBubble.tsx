@@ -4,7 +4,7 @@ import { useLongPress } from './useLongPress';
 /**
  * What the tutor is saying, hanging under its face.
  *
- * THE NOTCH IS FIXED AND CENTRED, unlike liveTrial's, which measures the
+ * THE NOTCH IS FIXED AND CENTRED, unlike studio's, which measures the
  * artwork and aims a polygon at the mouth. That machinery exists because a
  * balloon beside a head has to reach across to it, and the mouth moves from kit
  * to kit. Here the balloon hangs directly below and the tail has nowhere to go

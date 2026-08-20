@@ -71,7 +71,7 @@ const IDLE_POLL_MS = 5_000;
  * cookie precisely so that they never touch this store.
  *
  * Distinct from the preset store in realtime/presets.ts, which holds the
- * prompts you deliberately saved and is shared with the liveTrial page. This is
+ * prompts you deliberately saved and is shared with the studio page. This is
  * the scratch copy: the text in the box right now, whether or not it has a name.
  */
 const PREFS_KEY = 'vocotrial.prefs.v1';
@@ -139,7 +139,7 @@ export default function TutorBench() {
    * both models on the same instructions is the entire point of the bench, and
    * the Worker drops whatever the chosen model does not accept.
    *
-   * The page opens on the preset used last, here or on liveTrial. The scratch
+   * The page opens on the preset used last, here or on studio. The scratch
    * text from the previous visit comes back with it only if it was written
    * against that same preset — see Prefs.presetKey.
    */
@@ -393,7 +393,7 @@ export default function TutorBench() {
     setEdited(false);
     setInstructions(renderPreset(key, language));
     setPresetError(null);
-    // What makes it the one this page and liveTrial open on next time.
+    // What makes it the one this page and studio open on next time.
     rememberPreset(key);
   };
 
@@ -605,14 +605,19 @@ export default function TutorBench() {
       <div className="mx-auto flex min-h-screen max-w-2xl flex-col gap-6 px-6 py-10">
         <header className="flex items-center justify-between gap-3">
           <h1 className="text-2xl font-semibold tracking-tight">tutorBench</h1>
-          {/* A plain link, not a router push: main.tsx reads the path once at
+          {/* Plain links, not a router push: main.tsx reads the path once at
               startup, so crossing between the pages is a reload by design. */}
-          <a
-            href="/livetrial"
-            className="rounded-lg border border-slate-800 px-3 py-1.5 text-sm font-medium text-slate-400 transition hover:border-slate-700 hover:text-slate-200"
-          >
-            liveTrial →
-          </a>
+          <nav className="flex items-center gap-4">
+            <a href="/" className="text-xs text-slate-500 underline-offset-4 hover:underline">
+              start →
+            </a>
+            <a
+              href="/studio"
+              className="rounded-lg border border-slate-800 px-3 py-1.5 text-sm font-medium text-slate-400 transition hover:border-slate-700 hover:text-slate-200"
+            >
+              studio →
+            </a>
+          </nav>
         </header>
 
         <label className="flex items-center gap-3 rounded-lg border border-slate-800 px-4 py-2.5">

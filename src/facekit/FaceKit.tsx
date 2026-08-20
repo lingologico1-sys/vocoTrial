@@ -408,7 +408,7 @@ export default function FaceKit() {
    * can I edit" against "what can anyone else see". They are the same question
    * now. A kit reaches the bucket on its first save and is editable from any
    * browser signed in to the site, so a face this page can open and a face
-   * liveTrial can wear are one list with one entry each.
+   * studio can wear are one list with one entry each.
    */
   const [published, setPublished] = useState<PublishedFace[]>([]);
   const [saving, setSaving] = useState(false);
@@ -937,7 +937,7 @@ export default function FaceKit() {
   };
 
   /**
-   * Saves, and puts the face on in liveTrial.
+   * Saves, and puts the face on in studio.
    *
    * Only on a save that worked. Pointing the live page at a face the library
    * refused would leave it wearing an id nothing can serve, which is the one
@@ -1030,11 +1030,11 @@ export default function FaceKit() {
             </p>
           </div>
           <nav className="flex gap-4 text-xs text-slate-500">
-            <a href="/livetrial" className="underline-offset-4 hover:underline">
-              liveTrial →
+            <a href="/studio" className="underline-offset-4 hover:underline">
+              studio →
             </a>
             <a href="/" className="underline-offset-4 hover:underline">
-              tutorBench →
+              start →
             </a>
           </nav>
         </header>
@@ -1538,7 +1538,7 @@ export default function FaceKit() {
                 disabled={saving}
                 className="rounded-lg bg-sky-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-sky-500 disabled:opacity-40"
               >
-                Save and wear in liveTrial
+                Save and wear in studio
               </button>
               <button
                 type="button"
@@ -1556,7 +1556,7 @@ export default function FaceKit() {
                 a class, and it goes up with the save rather than separately.
               */}
               <label
-                title="Ticked, this face is offered in liveTrial's picker. Unticked it is a draft — saved and editable from any browser, but not put in front of anyone."
+                title="Ticked, this face is offered in studio's picker. Unticked it is a draft — saved and editable from any browser, but not put in front of anyone."
                 className="flex items-center gap-1.5 text-sm text-slate-400"
               >
                 <input
@@ -1565,7 +1565,7 @@ export default function FaceKit() {
                   onChange={(event) => setReadyFlag(event.target.checked)}
                   className="h-3.5 w-3.5 rounded border-slate-700 bg-slate-900"
                 />
-                Show in liveTrial
+                Show in studio
               </label>
               <button
                 type="button"
@@ -1603,7 +1603,7 @@ export default function FaceKit() {
               Every face there is, readable from any browser signed in to this site. Tap one
               to open it for editing — the artwork comes back from the library, so it works
               on a laptop that never authored it. A face stays a draft, and out of
-              liveTrial&apos;s picker, until you show it.
+              studio&apos;s picker, until you show it.
             </p>
             <ul className="flex flex-wrap gap-3">
               {published.map((face) => {
@@ -1660,7 +1660,7 @@ export default function FaceKit() {
                       }
                       title={
                         draft
-                          ? 'Shows this face in liveTrial’s picker'
+                          ? 'Shows this face in the studio’s picker'
                           : 'Hides it again. It stays saved, and editable from any browser.'
                       }
                       className={`text-[10px] underline-offset-4 hover:underline ${

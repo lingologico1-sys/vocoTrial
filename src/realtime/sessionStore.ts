@@ -5,7 +5,7 @@
  * and shared with functions/, and this file talks to the network, so nothing
  * server-side may import it.
  *
- * Both ends of the journey live here — liveTrial publishes through
+ * Both ends of the journey live here — studio publishes through
  * `publishSession`, /eleve reads through `fetchSession` — because they are two
  * halves of one contract and a change to either is a change to both.
  */

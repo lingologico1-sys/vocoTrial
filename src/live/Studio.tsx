@@ -226,7 +226,7 @@ const STATUS_LABEL: Record<SessionStatus, string> = {
   error: 'Error',
 };
 
-export default function LiveTrial() {
+export default function Studio() {
   const [prefs] = useState(loadPrefs);
   const [language, setLanguage] = useState(prefs.language ?? defaultLanguageCode());
   /**
@@ -747,7 +747,7 @@ export default function LiveTrial() {
     // this page knows there are two.
     if (tooLong) {
       call.fail(
-        `That prompt, this persona and these questions come to ${composed.length} characters together, and a session takes ${MAX_INSTRUCTIONS}. Shorten the prompt (${presetChars}), cut questions on /consignes (${sheetChars}), shorten the background on faceKit, or switch the persona off.`,
+        `That prompt, this persona and these questions come to ${composed.length} characters together, and a session takes ${MAX_INSTRUCTIONS}. Shorten the prompt (${presetChars}), cut questions on /lessons (${sheetChars}), shorten the background on faceKit, or switch the persona off.`,
       );
       return;
     }
@@ -766,7 +766,7 @@ export default function LiveTrial() {
       <div className="mx-auto flex min-h-screen max-w-3xl flex-col gap-5 px-5 py-8">
         <header className="flex items-baseline justify-between gap-3">
           <div>
-            <h1 className="text-xl font-semibold tracking-tight">liveTrial</h1>
+            <h1 className="text-xl font-semibold tracking-tight">studio</h1>
             <p className="text-xs text-slate-500">{model?.label ?? MODEL_KEY}</p>
           </div>
           <nav className="flex gap-4 text-xs text-slate-500">
@@ -774,7 +774,7 @@ export default function LiveTrial() {
               {kit ? `faceKit · ${kit.name}` : 'faceKit'} →
             </a>
             <a href="/" className="underline-offset-4 hover:underline">
-              tutorBench →
+              start →
             </a>
           </nav>
         </header>
@@ -870,7 +870,7 @@ export default function LiveTrial() {
           {offered.length === 0 && (
             <p className="pb-1 text-[11px] text-slate-500">
               No faces on offer from the shared library. Save one from faceKit with
-              &ldquo;Show in liveTrial&rdquo; ticked, and it appears here on every browser
+              &ldquo;Show in studio&rdquo; ticked, and it appears here on every browser
               signed in to this site.
             </p>
           )}
@@ -1634,7 +1634,7 @@ export default function LiveTrial() {
                 and the questions <span className="tabular-nums">{sheetChars}</span>
               </>
             )}
-            . Shorten it on tutorBench{sheet ? ', cut questions on /consignes' : ''}, shorten the
+            . Shorten it on tutorBench{sheet ? ', cut questions on /lessons' : ''}, shorten the
             background on faceKit, or switch the persona off above.
           </p>
         )}
@@ -1701,7 +1701,7 @@ export default function LiveTrial() {
 
           {/*
             The lesson. A pick rather than an authoring surface, exactly like
-            the scale above it — sheets are written on /consignes, and this page
+            the scale above it — sheets are written on /lessons, and this page
             is where one is chosen and handed out.
 
             Unlike the scale, "none" is a first-class option rather than a
@@ -1730,7 +1730,7 @@ export default function LiveTrial() {
               ))}
             </select>
             <a
-              href="/consignes"
+              href="/lessons"
               className="shrink-0 text-[11px] text-slate-500 underline-offset-4 hover:underline"
             >
               edit →

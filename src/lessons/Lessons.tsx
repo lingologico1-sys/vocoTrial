@@ -26,7 +26,7 @@ import { deleteSheet, listSheets, saveSheet } from '../realtime/sheetStore';
  * sheet's text into the session — see session.ts — so nothing on this page can
  * reach a lesson already handed out. That is deliberate and it cuts both ways:
  * fixing a typo here does not fix it in a published session either, and the fix
- * is to publish again from liveTrial.
+ * is to publish again from studio.
  *
  * THREE BOXES RATHER THAN ONE PARSED BLOB, which is where this departs from
  * EvaluatorPanel. A scale is nested — bands with structures under them — so it
@@ -41,7 +41,7 @@ function empty(): QuestionSheet {
   return { id: '', name: '', note: '', brief: '', targets: [], questions: [] };
 }
 
-export default function Sheets() {
+export default function Lessons() {
   const [sheets, setSheets] = useState<QuestionSheet[]>([]);
   const [chosenId, setChosenId] = useState<string>('');
   const [loading, setLoading] = useState(true);
@@ -151,7 +151,7 @@ export default function Sheets() {
       <div className="mx-auto flex min-h-screen max-w-3xl flex-col gap-5 px-5 py-8">
         <header className="flex items-baseline justify-between gap-3">
           <div>
-            <h1 className="text-xl font-semibold tracking-tight">consignes</h1>
+            <h1 className="text-xl font-semibold tracking-tight">lessons</h1>
             <p className="text-xs text-slate-500">
               The questions a lesson is built on, and what the student is told to do with them.
             </p>
@@ -159,11 +159,11 @@ export default function Sheets() {
           {/* Plain links, not a router push: main.tsx reads the path once at
               startup, so crossing between pages is a reload by design. */}
           <nav className="flex gap-4 text-xs text-slate-500">
-            <a href="/livetrial" className="underline-offset-4 hover:underline">
-              liveTrial →
+            <a href="/studio" className="underline-offset-4 hover:underline">
+              studio →
             </a>
             <a href="/" className="underline-offset-4 hover:underline">
-              tutorBench →
+              start →
             </a>
           </nav>
         </header>
@@ -332,7 +332,7 @@ export default function Sheets() {
         </div>
 
         <p className="-mt-4 pb-8 text-[11px] leading-relaxed text-slate-600">
-          A sheet reaches a student by being chosen on liveTrial and published. Publishing copies
+          A sheet reaches a student by being chosen on studio and published. Publishing copies
           its text into the session, so editing a sheet here never changes a lesson already handed
           out — and never fixes one either. Publish again to do that.
         </p>

@@ -37,7 +37,7 @@ export interface PublishedFace {
    * The library holds work in progress now — saving *is* publishing, since the
    * bucket is the only home a kit has — so "in the library" stopped meaning
    * "ready for a student". This is the flag that carries the difference, and it
-   * is the only thing liveTrial's picker filters on.
+   * is the only thing studio's picker filters on.
    *
    * Optional, and absent reads as ready. That is the migration: every face in
    * the index before this existed was put there by a deliberate publish of

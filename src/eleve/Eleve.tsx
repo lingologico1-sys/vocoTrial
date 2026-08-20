@@ -20,7 +20,7 @@ import type { VocabItem } from './vocab';
 /**
  * The student page.
  *
- * THE THIRD TIER. tutorBench, faceKit and liveTrial are the workshop — dark,
+ * THE THIRD TIER. tutorBench, faceKit and studio are the workshop — dark,
  * English, every knob exposed, and written for the one person who built the
  * thing. This page is for the person the thing was built for, and it inherits
  * everything and offers nothing: no model, no prompt, no face, no scale. The

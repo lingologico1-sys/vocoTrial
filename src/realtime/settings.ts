@@ -115,7 +115,7 @@ const isNativeAudio = (model: ModelChoice) => model.key === 'gemini-native-audio
  * half-cascade model, but these eight are the set both models share — and a
  * voice one model does not carry fails the setup rather than falling back.
  *
- * Exported because liveTrial offers the voice on its own, outside the settings
+ * Exported because studio offers the voice on its own, outside the settings
  * panel: that page spends its screen on the character rather than on the knobs,
  * and which voice the character has is part of the character.
  *

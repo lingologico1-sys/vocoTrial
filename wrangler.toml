@@ -72,7 +72,7 @@ bucket_name = "vocotrial-faces"
 binding = "EVALUATORS"
 bucket_name = "vocotrial-evaluators"
 
-# The published session library. liveTrial publishes one tutor setup here and
+# The published session library. studio publishes one tutor setup here and
 # the student page at /eleve reads it back — the only way the language, prompt,
 # voice, face and motion tuned on one laptop reach a student on another. Without
 # it a student meets the defaults, which is a different tutor wearing the same
@@ -93,7 +93,7 @@ bucket_name = "vocotrial-sessions"
 
 # The shared question-sheet library. A sheet is one lesson's questions, the
 # consigne the student reads, and the structures the teacher wants to hear.
-# Authored on /consignes, chosen at publish time on liveTrial, and copied into
+# Authored on /lessons, chosen at publish time on studio, and copied into
 # the published session as text — so this bucket is a teacher's filing cabinet
 # rather than part of what a student's browser reads. See functions/api/sheets/.
 #

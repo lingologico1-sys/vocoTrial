@@ -2,7 +2,7 @@
  * The published session: one tutor setup, as it travels from the workshop to a
  * student's browser.
  *
- * WHY THIS EXISTS AT ALL. liveTrial keeps its picks in localStorage, which
+ * WHY THIS EXISTS AT ALL. studio keeps its picks in localStorage, which
  * reaches exactly one browser. A student opening /eleve on their own laptop
  * would meet the defaults rather than the tutor that was tuned for them — a
  * different voice, a different face, a different prompt — and would have no way
@@ -138,7 +138,7 @@ export interface StudentSession {
   sheetId?: string;
   sheetName?: string;
 
-  // --- How the face performs. Verbatim from liveTrial's own prefs, because
+  // --- How the face performs. Verbatim from studio's own prefs, because
   // --- the whole point is that the student meets what was tuned rather than a
   // --- reasonable-looking approximation of it.
   driver: SessionMouthDriver;

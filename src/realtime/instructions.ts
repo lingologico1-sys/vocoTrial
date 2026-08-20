@@ -244,7 +244,7 @@ export function defaultPresetKey(): string {
  * byte-identical to what it would have been without a persona, and leaves
  * byte-identical, which is the property that keeps a run measurable: the
  * difference between a session with a biography and one without is exactly
- * these two blocks, so switching the persona off in liveTrial measures what
+ * these two blocks, so switching the persona off in studio measures what
  * they cost rather than comparing two prompts that drifted apart.
  *
  * THE ORDER IS THE DESIGN. Identity first, because it is background the model
