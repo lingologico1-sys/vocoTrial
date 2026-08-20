@@ -2,7 +2,7 @@ import type { FaceKit } from '../facekit/kit';
 import SpeakingFace from '../live/SpeakingFace';
 import type { TiltCue } from '../live/headMotion';
 import type { AudioTap } from '../realtime/types';
-import type { StudentSession } from '../realtime/session';
+import type { PublishedSetup } from '../realtime/session';
 import LearnerPill from './LearnerPill';
 import SpeechBubble from './SpeechBubble';
 import { FR } from './strings';
@@ -24,7 +24,7 @@ import { FR } from './strings';
  */
 
 interface TutorStageProps {
-  session: StudentSession;
+  session: PublishedSetup;
   kit: FaceKit | null;
   agentText: string;
   learnerText: string;

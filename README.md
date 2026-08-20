@@ -25,70 +25,115 @@ only route that is not a tool.
 | Tier | Pages | Look |
 | --- | --- | --- |
 | **Administrator** | `/tutorbench`, `/facekit`, `/studio` | Dark, English, every knob exposed |
-| **Teacher** | `/lessons` — but publishing is still done from `/studio` | Dark, English, one job |
-| **Student** | `/eleve` | Light, French, no settings at all |
+| **Teacher** | `/teach` | LingoLabo, English, one job |
+| **Student** | `/eleve` | LingoLabo, French, no settings at all |
 
-`/lessons` is the first page written for the middle tier, and it is only half
-of one: a teacher can write a lesson there, but handing it to a class still
-means opening the studio and pressing publish beside every knob in the workshop.
-That split is the next thing worth closing.
+`/teach` is the middle tier, and as of this pass it is a whole one. A teacher
+writes a Voco Session there and hands it to a class from the same page, under a
+code. Publishing used to live in the studio, which meant handing out a lesson
+required an administrator and a page covered in sliders; the studio now keeps
+only the two things a teacher genuinely cannot supply — see [The house](#the-house).
 
-`/eleve` is the only page a learner sees. It authors nothing — no model, no
-prompt, no face, no scale — and runs entirely on a setup published from
-the studio. It is the first light page here because it is the first page not
-aimed at the maintainer; it wears the LingoLabo look that ScriptoMondo and
-LingoLecto wear, so the three read as one product.
+**The tiers describe who a page is *for*, not who can reach it.** There is one
+shared password and no roles, so a teacher can open the studio and a student
+could open either. That is a known edge, listed below, and closing it is a user
+store rather than a tweak.
+
+`/teach` and `/eleve` both wear the LingoLabo look that ScriptoMondo and
+LingoLecto wear, so the family reads as one product. They share the brand bar
+itself — `src/lingo/BrandBar.tsx` — rather than two copies of the same eighty
+lines of measured lockup. The workshop stays dark: it is for whoever built the
+thing, and it is the only tier that is.
 
 The one control a student has is which language *they* already speak, which
 decides the language their word lookups and their end-of-call evaluation are
 written in. The page around them stays in the language they are learning.
 
-## The student session
+## The lesson code
 
-The studio's settings live in `localStorage`, which reaches exactly one browser.
-A student opening `/eleve` on their own laptop would otherwise meet the
-defaults — a different voice, a different face, a different prompt — with no way
-of telling. So a setup travels through R2, the road faces and evaluators
-already took.
+A student is handed six characters and types them at `/eleve`. That is the only
+way in — there is no "whichever was published last" behind it, which is what
+used to let one class walk into another's conversation.
+
+**The format is not ours to choose.** LingoLecto has been minting these since
+before this app had a student page, and the intent is that one day a student
+types one code and reaches whichever kind of LingoMondo lesson it names —
+scribo, lecto or voco. So vocoTrial matches it exactly:
 
 ```
-studio ──publish──► R2 ──get──► /eleve
+code    K7MPQR   six chars of ABCDEFGHJKLMNPQRSTUVWXYZ23456789
+url     /eleve?token=K7MPQR
+lookup  case-insensitive, uniqueness checked against R2 on mint
+```
+
+No `I`, `O`, `0` or `1` — the characters that get misread off a whiteboard. No
+app prefix, which is the deliberate cost: nothing in `K7MPQR` says which app it
+belongs to, and two apps minting independently can collide. The shared resolver
+that fixes that does not exist yet and probably belongs in `mondo-monorepo`.
+
+The contract, and what each app owes it, is written down in
+[docs/lesson-codes.md](docs/lesson-codes.md). vocoTrial's half is
+[src/realtime/lessonCodes.ts](src/realtime/lessonCodes.ts). The old `VOCO-XXXX`
+codes and the old `?c=` parameter are gone and not aliased; neither was ever
+shown to a student.
+
+## The published setup
+
+A teacher's picks live on their own laptop. A student opening `/eleve` elsewhere
+would otherwise meet the defaults — a different voice, a different face, a
+different prompt — with no way of telling. So a setup travels through R2, the
+road faces and evaluators already took.
+
+```
+/teach ──publish──► R2 ──get by code──► /eleve
                         sessions/<CODE>.json   one published setup
-                        current.json           { "code": "VOCO-7K2M" }
 ```
 
-`/eleve` resolves `?c=<CODE>` first, then the pointer, then shows a card saying
-no tutor is ready. **Join codes are not a feature yet** — nothing mints one for
-a student and there is no card to type one into — but the storage is keyed for
-them from the start, so adding them is a form rather than a migration.
+**What goes out is not what comes back.** A publish sends ids and the lesson as
+the teacher typed it; the route composes the prompt, flattens the house profile
+in and mints the code. All of that needs buckets a teacher's browser has no
+business reading.
 
-Two things worth knowing about what is published:
+```
+tutor style  ─┐
+face persona ─┼─► instructions  (composed in the publish route)
+lesson block ─┘
+```
 
-- **The prompt travels as rendered text, not as a preset key.** Presets live in
-  `localStorage`; a key would name a prompt the student's browser has never
-  heard of. It also means editing a prompt after publishing cannot change a
-  conversation that was already handed out.
+Three things worth knowing about what is published:
+
+- **The prompt travels as rendered text, not as ids.** A style lives in the
+  house library and the persona is megabytes away in the face bucket. Composing
+  at publish also means editing either afterwards cannot change a conversation
+  already handed out.
 - **Publishing is a snapshot.** The student gets the setup as it stood when the
-  button was pressed.
-- **The lesson travels by value too**, for the same reason and one more. A
-  question sheet is read by the student's own browser mid-conversation, so a
-  reference would let a teacher editing next week's questions rewrite the screen
-  of somebody who is talking right now.
+  button was pressed. Publishing again mints a *new* code; the old one keeps
+  working, because changing what a code resolves to after it has been read off a
+  board is the one thing publishing must never do.
+- **The lesson travels by value too**, for the same reason and one more. It is
+  read by the student's own browser mid-conversation, so a reference would let a
+  teacher editing next week's questions rewrite the screen of somebody who is
+  talking right now.
 
 See [src/realtime/session.ts](src/realtime/session.ts) and
 [functions/api/sessions/](functions/api/sessions/).
 
-## Question sheets
+## Voco Sessions
 
-A sheet is one lesson: a few questions on a theme, the consigne the student is
-handed, and the structures the teacher wants to hear. Written on `/lessons`,
-chosen in the studio at publish, and copied into the session as text.
+A Voco Session is one prepared lesson: a few questions on a theme, the consigne
+the student is handed, the structures the teacher wants to hear, and the tutor
+that asks them — a language, a manner, a face, a voice and a scale. Written on
+`/teach`, and copied into a published setup as text.
+
+It used to be called a *sheet* and held only the lesson half; the tutor half was
+picked separately in the studio at publish time and never saved, so reopening
+last week's material meant re-choosing the face and the voice from memory.
 
 ```
-/lessons ──save──► R2 sheets.json
-                       │
-                       └──chosen at publish──► session ──► /eleve   (questions, consigne)
-                                                        └──► report  (targets)
+/teach ──save──► R2 sheets.json
+                     │
+                     └──publish──► setup ──► /eleve   (questions, consigne)
+                                          └──► report  (targets)
 ```
 
 **The prose and the targets go to different readers**, which is the one thing
@@ -107,10 +152,12 @@ are the machine-readable half of the same intent, which is what lets the report
 return a verdict per target instead of a paragraph of judgement about a
 paragraph of prose.
 
-**There is no built-in sheet**, unlike the evaluator. A report with no scale
-cannot be written at all, so a scale ships in the code; a conversation with no
-questions is just a conversation, which is what every session before this
-feature was. "No questions" stays a supported thing to publish.
+**There is no built-in Voco Session**, unlike the evaluator. A report with no
+scale cannot be written at all, so a scale ships in the code; a conversation
+with no questions is just a conversation, which is what every session before
+this feature was. "No lesson" stays a supported thing for a published setup to
+carry — what is refused is *saving* one with no questions, which is a filing
+cabinet entry about nothing.
 
 On `/eleve` the first tab carries the consigne under the name **Consignes**,
 keeps it up *during* the call — a learner three questions in wants to check what
@@ -122,13 +169,48 @@ consigne back with no machinery of its own.
 The report gains a **second axis, not a second scale**: `task` says whether the
 lesson's targets were met, `bands` says where the learner stands, and neither
 feeds the other. A secure A2 can miss the target and a shaky B1 can hit it. The
-targets are resolved server-side from the published session rather than taken
+targets are resolved server-side from the published setup rather than taken
 from the caller, for the reason the evaluator already is — they land in a system
-prompt.
+prompt. A report with no code gets no targets, rather than falling back to
+somebody else's lesson.
 
-See [src/realtime/sheets.ts](src/realtime/sheets.ts),
-[functions/api/sheets/](functions/api/sheets/) and
-[src/lessons/Lessons.tsx](src/lessons/Lessons.tsx).
+See [src/realtime/vocoSessions.ts](src/realtime/vocoSessions.ts),
+[functions/api/voco-sessions/](functions/api/voco-sessions/) and
+[src/teach/Teach.tsx](src/teach/Teach.tsx).
+
+## The house
+
+Publishing needs a system prompt and twenty-odd knobs describing how a face
+moves. A teacher has neither and should not be asked to acquire them, so an
+administrator publishes both from the studio and `/teach` spends them without
+ever seeing them.
+
+| | What it is | Where it is set |
+| --- | --- | --- |
+| **Tutor styles** | Named manners a teacher picks between, as rendered prompts | studio → *Publish as a tutor style* |
+| **Performance profile** | One profile every published lesson carries | studio → *Save this tuning as the house default* |
+
+A style is a *rendered* prompt, not a preset key — presets live in
+`localStorage`, so a key would name a prompt the teacher's browser has never
+heard of. The persona is deliberately not baked in: which face is worn is
+decided per lesson on `/teach`, so the wrap is applied at publish.
+
+There is a library of styles and exactly one profile, and the asymmetry is the
+point. A manner is a pedagogical choice a teacher should make per lesson. How
+high a brow lifts is not — it is a property of how this deployment's faces are
+drawn, and offering a teacher a menu of it would be offering a choice they have
+no grounds to make.
+
+**A save reaches the next publish, not the next call.** Setups already handed
+out carry a flattened copy of whatever these were at the time, so retuning
+cannot reach a class mid-lesson.
+
+With an empty house bucket, `FALLBACK_PERFORMANCE` publishes exactly the face
+the code ships with — but publishing refuses outright with no style, because a
+tutor with no instructions is not a tutor.
+
+See [src/realtime/house.ts](src/realtime/house.ts) and
+[functions/api/house/](functions/api/house/).
 
 ## How it fits together
 
@@ -189,7 +271,7 @@ the key private at the cost of a latency leg and some billed Worker time.
 | --- | --- |
 | [src/start/Start.tsx](src/start/Start.tsx) | **start**, at `/` — names and explains every page; the only route that is not a tool |
 | [src/tutor/TutorBench.tsx](src/tutor/TutorBench.tsx) | **tutorBench**, at `/tutorbench` — every model, every knob, the prompt you write, and what the call cost |
-| [src/live/Studio.tsx](src/live/Studio.tsx) | **studio**, at `/studio` — dresses one tutor in a face, a voice and a lesson, and publishes it to the students |
+| [src/live/Studio.tsx](src/live/Studio.tsx) | **studio**, at `/studio` — dresses one tutor in a face and a voice, tunes how it moves, and publishes the house styles and profile |
 | [src/facekit/FaceKit.tsx](src/facekit/FaceKit.tsx) | **faceKit**, at `/facekit` — authors a face, and saves it to the shared library |
 | [functions/api/_middleware.ts](functions/api/_middleware.ts) | Same-origin **and** session-cookie gate in front of every `/api/*` route; POST-only except WebSocket upgrades |
 | [functions/api/auth/](functions/api/auth/) | Trades the site password for a signed session cookie |
@@ -210,9 +292,13 @@ the key private at the cost of a latency leg and some billed Worker time.
 | [functions/api/faces/](functions/api/faces/) | The shared face library on R2 — list, get, original, source, publish, ready, delete |
 | [src/facekit/published.ts](src/facekit/published.ts) | What that library holds and where, read by the Worker and the browser alike |
 | [src/facekit/store.ts](src/facekit/store.ts) | IndexedDB: a cache of the faces this browser has fetched, and which one is worn |
-| [src/lessons/Lessons.tsx](src/lessons/Lessons.tsx) | **lessons**, at `/lessons` — writes one lesson: the questions, the consigne, the targets |
-| [src/realtime/sheets.ts](src/realtime/sheets.ts) | What a sheet is, and the block the tutor is told. Pure, shared with the Worker |
-| [functions/api/sheets/](functions/api/sheets/) | The shared sheet library on R2 — list, save, delete |
+| [src/teach/Teach.tsx](src/teach/Teach.tsx) | **teach**, at `/teach` — writes a Voco Session and hands it out under a code |
+| [src/realtime/vocoSessions.ts](src/realtime/vocoSessions.ts) | What a Voco Session is, and the block the tutor is told. Pure, shared with the Worker |
+| [functions/api/voco-sessions/](functions/api/voco-sessions/) | The shared Voco Session library on R2 — list, save, delete |
+| [src/realtime/lessonCodes.ts](src/realtime/lessonCodes.ts) | The six-character code, shared with LingoLecto. See [docs/lesson-codes.md](docs/lesson-codes.md) |
+| [src/realtime/house.ts](src/realtime/house.ts) | Tutor styles and the performance profile an administrator sets for every teacher |
+| [functions/api/house/](functions/api/house/) | The house library on R2 — get, style-save, style-delete, performance-save |
+| [src/lingo/BrandBar.tsx](src/lingo/BrandBar.tsx) | The LingoMondo lockup, worn by both `/teach` and `/eleve` |
 | [src/eleve/ConsignePanel.tsx](src/eleve/ConsignePanel.tsx) | The consigne and questions as the student reads them, up during the call |
 
 ## What a call can be configured with
@@ -283,7 +369,7 @@ bucket, and every other browser signed in to this site reads it back. There is
 one list of faces, not a private one and a shared one.
 
 ```
-faceKit ──save────► R2 ──list────► studio's picker (ready faces only)
+faceKit ──save────► R2 ──list────► /teach's face grid (ready faces only)
  (any browser)        │  └─get────► the face it wears
      ▲                │
      └──get+original──┘  the same face, opened for editing
@@ -315,8 +401,9 @@ Five things worth knowing:
 - **`ready` is what separates saved from fit to wear.** A face reaches the
   library on its first save, half its mouths undrawn, because the library is the
   only place it can go — so "in the library" stopped answering "fit to put in
-  front of somebody". The studio's picker offers ready faces only, plus whichever
-  is currently worn so that a draft being tested does not vanish from under the
+  front of somebody". `/teach` offers ready faces only — a teacher picking a
+  half-drawn face publishes it to a class — while the studio also keeps whichever
+  is currently worn, so that a draft being tested does not vanish from under the
   person testing it. faceKit shows everything, dims the drafts, and flips the
   flag through `ready.ts` — one small index write, no artwork.
 - **The portrait goes up once.** `original` is kept so neutralising stays
@@ -417,7 +504,7 @@ gates the build.
 
    They have to go in the dashboard: because `wrangler.toml` exists, Pages takes
    plain-text vars from that file and the dashboard will only accept Secrets.
-4. **Create the four buckets**, once, and do it *before the deploy that adds
+4. **Create the five buckets**, once, and do it *before the deploy that adds
    the binding* rather than before the first save:
 
    ```bash
@@ -425,7 +512,12 @@ gates the build.
    npx wrangler r2 bucket create vocotrial-evaluators
    npx wrangler r2 bucket create vocotrial-sessions
    npx wrangler r2 bucket create vocotrial-sheets
+   npx wrangler r2 bucket create vocotrial-house
    ```
+
+   `vocotrial-sheets` holds Voco Sessions; the bucket name predates the rename
+   and is not worth a migration to fix, so the binding is `VOCO_SESSIONS` and
+   the bucket is not. See [wrangler.toml](wrangler.toml).
 
    The bindings are already in [wrangler.toml](wrangler.toml) — a binding name
    is not a credential, so unlike the keys they belong in the file. **Pages
@@ -435,12 +527,17 @@ gates the build.
    is to create it and redeploy, and nothing needs reverting.
 
    Each is independently survivable if you skip it. Without `vocotrial-faces`,
-   faceKit's save and the studio's picker say no library is configured. Without
+   faceKit's save and the face grid say no library is configured. Without
    `vocotrial-evaluators`, the built-in scale still works — it ships in the code
-   and is merged in by the browser. Without `vocotrial-sessions`, the studio
-   cannot publish and `/eleve` says no tutor is ready. Without
-   `vocotrial-sheets`, `/lessons` cannot save and the studio's lesson picker
-   offers only "no questions" — which is a working session, not a broken one.
+   and is merged in by the browser. Without `vocotrial-sessions`, `/teach`
+   cannot publish. Without `vocotrial-sheets`, `/teach` cannot save a lesson.
+   Without `vocotrial-house`, no tutor style can be published — and publishing a
+   lesson refuses until one is, because a tutor with no instructions is not a
+   tutor.
+
+   **After the first deploy, open `/studio` and press *Publish as a tutor
+   style* once.** Nothing else works until there is one; that is the only
+   required setup step beyond the buckets.
 5. Push to `main`. Every push deploys; every PR gets a preview URL.
 
 Set `SITE_PASSWORD` **before** the first deploy that includes the gate. It fails
@@ -483,7 +580,11 @@ npm run lint
 | `/api/live/models` | probes candidate ids with `generateContent`, the only call this key may make |
 | `/api/live/regions` | **run 2026-08-16** — all twelve hosts take the key; Pro is global-endpoint-only, Flash is in seven regions |
 | `/api/image/generate` | **working on Vertex** — returned an image in ~16s on Flash |
-| `/api/faces/*`, the shared library | **untested** — typechecks, lints and builds; the save → list → wear round trip, the save → get + original → edit → save one, and the `ready` flag reaching the studio's picker, all need a browser and a created bucket |
+| `/api/faces/*`, the shared library | **untested** — typechecks, lints and builds; the save → list → wear round trip, the save → get + original → edit → save one, and the `ready` flag reaching the face grid, all need a browser and a created bucket |
+| `/api/house/*`, tutor styles and the profile | **untested** — typechecks, lints and builds; needs a browser and `vocotrial-house` |
+| `/api/voco-sessions/*` | **untested since the rename** — the read side accepts both the old `sheets` field and the new `sessions` one, and the first save rewrites the object under the new one |
+| `/api/sessions/publish`, composing the prompt server-side | **untested** — the three-layer composition (style → persona → lesson), the code mint-and-retry, and the house profile merge all need a browser and the buckets |
+| `/eleve` code entry | **untested** — the `?token=` path and the typed path share one function, but neither has been run |
 | Gemini handshake | **working** — 2.5 native audio on Vertex, 3.1 Flash Live on AI Studio |
 | Gemini audio in a browser | untested; needs a mic |
 | Saved prompt presets | typechecks and builds; the create/update/delete round trip is **untested in a browser** |
@@ -671,18 +772,31 @@ page may hold, and if one exists it will be a Vertex one.
   the reading below a breakpoint; this does not yet. The consigne panel makes
   this worse, not better: the questions a learner most wants to glance at
   mid-call are in the column that has nowhere to go on a phone.
-- **Publishing a lesson still means opening the studio.** `/lessons` writes a
-  sheet, but handing it to a class means going to the workshop page and pressing
-  publish beside every knob in it. The teacher tier is half a page short.
-- **A sheet is written in one language and cannot follow the picker.** Same
-  limitation as a saved preset, and the same reason: the text is captured once,
-  so rewriting somebody's own questions on a dropdown change would lose work.
-  Switching the target language leaves the sheet saying what it said.
-- **Nothing checks that the questions and the target language agree.** A French
-  sheet published on an Italian session produces a tutor working down French
-  questions in Italian, and no part of the app objects.
-- **Students will reach every page.** The site is one shared password, so
-  anyone who can practise can also open faceKit and spend the image keys, and
+- **A lesson code says nothing about which app it belongs to.** Six bare
+  characters is LingoLecto's format and now ours, so nothing in `K7MPQR`
+  distinguishes a reading from a conversation, and two apps minting
+  independently can collide. Deliberate — an app prefix would defeat the shared
+  resolver the format exists for — but the resolver does not exist yet. See
+  [docs/lesson-codes.md](docs/lesson-codes.md).
+- **A code is the student's whole credential, over a billion-wide keyspace.**
+  Enough to stop a typo landing in another class's lesson; not enough to defend
+  anything against somebody grinding it. Nothing should go behind a code that
+  you would mind a stranger reaching.
+- **Every teacher can see every teacher's codes.** `/api/sessions/list` is
+  behind the site password like everything else, which today means one list for
+  the whole deployment. The first thing to gate when roles arrive.
+- **A Voco Session is written in one language and cannot follow the picker.**
+  Same limitation as a saved preset, and the same reason: the text is captured
+  once, so rewriting somebody's own questions on a dropdown change would lose
+  work. Switching the target language leaves the questions saying what they said.
+- **Nothing checks that the questions, the tutor style and the target language
+  agree.** A French lesson published on an Italian setting, with a style
+  rendered for German, produces a tutor working down French questions in
+  Italian, and no part of the app objects.
+- **Students and teachers will reach every page.** The site is one shared
+  password and there are no roles, so the three tiers describe who a page is
+  *for* and not who can open it: a teacher can open the studio, and a student
+  can open faceKit and spend the image keys. Deferred deliberately for now, and
   every metered call is anonymous — there is nothing to attribute a bill to or
   to rate-limit per person. A deliberate choice while the audience is nobody
   yet; the alternative is a real user store, and that is worth building once

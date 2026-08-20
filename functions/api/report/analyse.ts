@@ -11,7 +11,7 @@ import {
 import { type GateEnv, json } from '../_middleware';
 import { VERTEX_KEY_NAMES, vertexGenerateContentUrl, vertexKey } from '../_vertex';
 import { type LibraryEnv, readLibrary } from '../evaluators/_library';
-import { type SessionEnv, readCurrent, readSession } from '../sessions/_library';
+import { type SessionEnv, readSetup } from '../sessions/_library';
 
 /**
  * The key that pays for the call, the bucket of scales, and the bucket of
@@ -186,21 +186,23 @@ export async function onRequestPost(
    * The lesson's targets, read from the setup the student was actually handed.
    *
    * Every failure here is silent and yields no targets, which is the right
-   * shape: the section is optional by design — a session with no sheet has none
-   * — so an unreachable bucket or a code naming a setup that has since been
-   * republished costs the task section rather than the whole report. A learner
+   * shape: the section is optional by design — a lesson with no targets has
+   * none — so an unreachable bucket or a code naming a setup since deleted
+   * costs the task section rather than the whole report. A learner
    * who waited two minutes for a reading should not be told to try again
    * because the half of it that is a bonus could not be assembled.
    *
-   * The pointer is followed when no code is given, matching sessions/get.ts, so
-   * a student page that has not been handed a code still reports against the
-   * lesson it is running.
+   * A CODE IS REQUIRED, where a missing one used to fall through to whichever
+   * setup was published last. That pointer is gone — see sessions/_library.ts —
+   * and following it here would have been worse than useless once there is more
+   * than one live lesson: it would report a student against another class's
+   * targets and give no sign it had done so. No code now means no targets,
+   * which is the same outcome tutorBench already gets.
    */
   let targets: string[] | undefined;
-  if (typeof body?.sessionCode === 'string' && env.SESSIONS) {
+  if (env.SESSIONS) {
     try {
-      const code = body.sessionCode.trim().toUpperCase() || (await readCurrent(env.SESSIONS));
-      const published = code ? await readSession(env.SESSIONS, code) : null;
+      const published = await readSetup(env.SESSIONS, String(body?.sessionCode ?? ''));
       if (published?.targets?.length) targets = published.targets;
     } catch {
       // See above: no targets is a survivable answer, a failed report is not.

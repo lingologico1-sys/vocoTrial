@@ -1,23 +1,27 @@
 import { json } from '../_middleware';
-import { SESSION_CODE } from '../../../src/realtime/session';
-import { readCurrent, readSession, type SessionEnv } from './_library';
+import { normaliseLessonCode } from '../../../src/realtime/lessonCodes';
+import { readSetup, type SessionEnv } from './_library';
 
 /**
- * The setup a student page should run.
+ * The setup a student page should run, by code.
  *
- * Two ways in, and the second one is not a feature yet. A caller may name a
- * code, which is what a join link will do; with no code this follows the
- * pointer, which is what /eleve does today. Both land in the same read.
+ * A CODE IS NOW REQUIRED. This route used to answer a codeless request by
+ * following a pointer at whichever setup was published last, because /eleve had
+ * no way to ask for one. That is gone: the pointer made the second teacher to
+ * publish silently replace the first for every student in the deployment, and
+ * codes exist now. A request with no code is a student who has not typed one
+ * yet, which the page handles by asking.
  *
- * NOT FINDING ONE IS NOT AN ERROR. A deployment where nobody has published yet
- * is an ordinary state — the first thing a new install is in — and answering
- * 404 would have the page render a failure where it should render an
- * invitation. `{ session: null }` with a 200 is the honest shape: the request
- * worked, and the answer is that there is nothing set up.
+ * NOT FINDING ONE IS NOT AN ERROR. A code that resolves to nothing is an
+ * ordinary state — a typo, or a lesson deleted since — and answering 404 would
+ * have the page render a failure where it should render "check that code".
+ * `{ setup: null }` with a 200 is the honest shape: the request worked, and the
+ * answer is that there is nothing under that code.
  *
- * The one genuine 400 is a code that is not a code, which cannot be a typo the
- * page should paper over — it means a link was mangled, and saying so is more
- * use than pretending nothing was published.
+ * The one genuine 400 is a code that is not a code, which is a different thing
+ * to say: not "no lesson here" but "that is not the right number of characters
+ * to be a code at all", which tells a student to look at what they typed rather
+ * than to ask their teacher.
  */
 
 interface GetBody {
@@ -33,17 +37,10 @@ export async function onRequestPost(
   }
 
   const body = (await request.json().catch(() => null)) as GetBody | null;
-  const asked = body?.code;
-
-  if (asked !== undefined && asked !== null && asked !== '') {
-    if (typeof asked !== 'string' || !SESSION_CODE.test(asked)) {
-      return json({ error: 'That is not a session code', code: 'bad_code' }, 400);
-    }
-    return json({ session: await readSession(env.SESSIONS, asked) });
+  const code = normaliseLessonCode(body?.code);
+  if (!code) {
+    return json({ error: 'That is not a lesson code', code: 'bad_code' }, 400);
   }
 
-  const current = await readCurrent(env.SESSIONS);
-  if (!current) return json({ session: null });
-
-  return json({ session: await readSession(env.SESSIONS, current) });
+  return json({ setup: await readSetup(env.SESSIONS, code) });
 }

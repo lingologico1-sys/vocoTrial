@@ -62,9 +62,23 @@ export const FR = {
   idleEnded: 'La conversation s’est arrêtée : personne ne parlait plus.',
 
   // --- No session published
-  noTutorTitle: 'Aucun tuteur n’est prêt',
-  noTutorBody:
-    'Ton professeur n’a pas encore préparé de conversation. Reviens quand il te l’aura dit.',
+  /*
+   * THE CODE SCREEN. A student arrives with six characters read off a board and
+   * types them in; there is no other way in, which is what stops one class
+   * seeing another's lesson. The wording says "ton professeur" rather than
+   * naming a page or a link, because the code comes from a person.
+   */
+  codeTitle: 'Ton code',
+  codeBody: 'Entre les six caractères que ton professeur t’a donnés.',
+  codeAction: 'Ouvrir la conversation',
+  /*
+   * Two misses, said differently on purpose. One is "that is not a code at
+   * all", which sends the student back to what they typed; the other is "that
+   * code is not one of ours", which sends them back to their teacher. Reading
+   * the same sentence for both would hide which of the two it was.
+   */
+  codeMalformed: 'Un code, c’est six lettres et chiffres. Vérifie ce que tu as tapé.',
+  codeUnknown: 'Aucune conversation sous ce code. Redemande-le à ton professeur.',
   loadFailedTitle: 'Impossible de charger ton tuteur',
   loadFailedBody: 'Vérifie ta connexion, puis recharge la page.',
   retry: 'Réessayer',

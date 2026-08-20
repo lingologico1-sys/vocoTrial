@@ -278,7 +278,30 @@ const SPREAD_ABOVE = 1150;
  */
 export type RoundnessMode = 'auto' | 'both' | 'centroid';
 
-export const DEFAULT_ROUNDNESS: RoundnessMode = 'auto';
+export const DEFAULT_ROUNDNESS = 'auto' satisfies RoundnessMode;
+
+/**
+ * How far ahead of the sound the mouth is read, in milliseconds.
+ *
+ * Here rather than in Studio.tsx, where both of these used to be private
+ * constants. A page is a place knobs are turned, not a place a vocabulary
+ * lives, and these two are now read by houseStore.ts as well — a published
+ * setup carries a lookahead, so the default it falls back to has to be visible
+ * from somewhere other than the page that happens to have a slider for it.
+ *
+ * Enough to lead the sound, once the drawing has been paid for. About 50ms of
+ * it buys back the mouth's own lag — the shape eases toward its target with a
+ * 35ms time constant, the level attacks over 15ms, and a frame lands whenever
+ * it lands. Spend only that and the mouth is merely on time. The remaining 30ms
+ * is the anticipation: roughly the frame of lead an animator would draw in by
+ * hand, and far inside the margin where a mouth ahead of its voice goes
+ * unnoticed. Being early is cheap and being late is not — video leading audio
+ * survives past 100ms, lagging is caught around 45ms.
+ */
+export const DEFAULT_LOOKAHEAD_MS = 80;
+
+/** Where animators traditionally place a mouth shape: a frame or two early. */
+export const MAX_LOOKAHEAD_MS = 150;
 
 export const ROUNDNESS_MODES: Array<{ id: RoundnessMode; label: string; hint: string }> = [
   {

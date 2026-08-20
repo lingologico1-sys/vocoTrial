@@ -72,11 +72,11 @@ bucket_name = "vocotrial-faces"
 binding = "EVALUATORS"
 bucket_name = "vocotrial-evaluators"
 
-# The published session library. studio publishes one tutor setup here and
-# the student page at /eleve reads it back — the only way the language, prompt,
-# voice, face and motion tuned on one laptop reach a student on another. Without
-# it a student meets the defaults, which is a different tutor wearing the same
-# name.
+# The published setup library. /teach publishes one lesson here under a code and
+# the student page at /eleve reads it back by that code — the only way the
+# language, prompt, voice, face and motion assembled on one laptop reach a
+# student on another. Without it a student meets the defaults, which is a
+# different tutor wearing the same name.
 #
 # CREATE THE BUCKET BEFORE PUSHING A BINDING FOR IT, for the reason spelled out
 # above on EVALUATORS — Pages validates bindings at build time, so a block
@@ -91,21 +91,37 @@ bucket_name = "vocotrial-evaluators"
 binding = "SESSIONS"
 bucket_name = "vocotrial-sessions"
 
-# The shared question-sheet library. A sheet is one lesson's questions, the
-# consigne the student reads, and the structures the teacher wants to hear.
-# Authored on /lessons, chosen at publish time on studio, and copied into
-# the published session as text — so this bucket is a teacher's filing cabinet
-# rather than part of what a student's browser reads. See functions/api/sheets/.
+# The shared Voco Session library. A Voco Session is one prepared lesson — its
+# questions, the consigne the student reads, the structures the teacher wants to
+# hear, and the tutor that asks them. Authored on /teach and copied into a
+# published setup as text, so this bucket is a teacher's filing cabinet rather
+# than part of what a student's browser reads. See functions/api/voco-sessions/.
+#
+# THE BUCKET NAME PREDATES THE RENAME and is deliberately not being changed. It
+# was created as `vocotrial-sheets` when the object was called a sheet; renaming
+# a bucket means creating a second one and copying every object into it, to fix
+# a string nobody reads except when editing this file. The binding is the name
+# that appears throughout the code, and that one is current. The object key
+# inside is likewise still `sheets.json` — see functions/api/voco-sessions/_library.ts,
+# which reads both field names and writes only the new one.
+[[r2_buckets]]
+binding = "VOCO_SESSIONS"
+bucket_name = "vocotrial-sheets"
+
+# What an administrator decides once, for every teacher: the tutor styles a
+# teacher picks between, and the one performance profile every published lesson
+# carries. Written from studio, read by /teach, spent by the publish route —
+# never read by a student's browser. See functions/api/house/ and house.ts.
 #
 # CREATE THE BUCKET BEFORE PUSHING A BINDING FOR IT, for the reason spelled out
 # above on EVALUATORS — Pages validates bindings at build time, so a block
 # naming a bucket that does not exist fails the whole deployment:
 #
-#   npx wrangler r2 bucket create vocotrial-sheets
+#   npx wrangler r2 bucket create vocotrial-house
 #
-# Its own bucket rather than a prefix inside EVALUATORS, on the same reasoning
-# as SESSIONS: a binding named for one thing holding another is a lie the next
-# reader has to unpick, and buckets cost nothing to create.
+# Its own bucket rather than a prefix inside SESSIONS, on the same reasoning as
+# every block above: a binding named for one thing holding another is a lie the
+# next reader has to unpick, and buckets cost nothing to create.
 [[r2_buckets]]
-binding = "SHEETS"
-bucket_name = "vocotrial-sheets"
+binding = "HOUSE"
+bucket_name = "vocotrial-house"

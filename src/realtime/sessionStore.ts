@@ -1,21 +1,29 @@
 /**
- * The browser's half of the published session library.
+ * The browser's half of the published setup library.
  *
  * Same split as evaluatorStore.ts and for the same reason: session.ts is pure
  * and shared with functions/, and this file talks to the network, so nothing
  * server-side may import it.
  *
- * Both ends of the journey live here — studio publishes through
- * `publishSession`, /eleve reads through `fetchSession` — because they are two
- * halves of one contract and a change to either is a change to both.
+ * Both ends of the journey live here — /teach publishes through
+ * `publishVocoSession`, /eleve reads through `fetchSetup` — because they are
+ * two halves of one contract and a change to either is a change to both.
+ *
+ * WHAT GOES OUT IS NOT WHAT COMES BACK, which is new and worth the sentence. A
+ * publish sends a Voco Session: ids, and the lesson as the teacher typed it. A
+ * `PublishedSetup` comes back, with the prompt composed, the house profile
+ * flattened in and a code minted. All of that happens in the route, because all
+ * of it needs buckets a teacher's browser has no business reading. See
+ * functions/api/sessions/publish.ts.
  */
 
 import type { MouthDriver, RoundnessMode } from '../live/visemes';
 import type {
+  PublishedSetup,
   SessionMouthDriver,
   SessionRoundness,
-  StudentSession,
 } from './session';
+import type { VocoSession } from './vocoSessions';
 
 /**
  * The compile-time half of a promise session.ts makes in prose.
@@ -38,6 +46,14 @@ type AssertTrue<T extends true> = T;
 export type DriverSpellingMatches = AssertTrue<Exact<MouthDriver, SessionMouthDriver>>;
 export type RoundnessSpellingMatches = AssertTrue<Exact<RoundnessMode, SessionRoundness>>;
 
+/** One row of the teacher's list of what has gone out. */
+export interface PublishedRow {
+  code: string;
+  label: string;
+  lesson: string;
+  updatedAt: number;
+}
+
 async function post<T>(path: string, body: unknown): Promise<T> {
   const response = await fetch(path, {
     method: 'POST',
@@ -52,41 +68,67 @@ async function post<T>(path: string, body: unknown): Promise<T> {
   return answer;
 }
 
-/** Writes a setup and points the student page at it. Throws with the reason. */
-export async function publishSession(session: StudentSession): Promise<StudentSession> {
-  const answer = await post<{ session: StudentSession }>('/api/sessions/publish', { session });
-  return answer.session;
+/**
+ * Hands a Voco Session out, and gets back the code to read to a class.
+ *
+ * Throws with the reason, which /teach shows verbatim — the route's messages
+ * are written for the teacher rather than for a log, and the two that matter
+ * (no style published, prompt too long) both name what to do about it.
+ */
+export async function publishVocoSession(
+  session: VocoSession,
+  label?: string,
+): Promise<PublishedSetup> {
+  const answer = await post<{ setup: PublishedSetup }>('/api/sessions/publish', {
+    session,
+    label,
+  });
+  return answer.setup;
 }
 
 /**
- * The setup to run, by code or by pointer.
+ * The setup behind a code.
  *
- * Null is a real answer rather than a failure — nothing has been published yet
- * — and the page renders an invitation for it. A thrown error is the other
- * case: the library could not be reached at all, which is worth saying out loud
- * because retrying might fix it and publishing again will not.
+ * Null is a real answer rather than a failure — the code was typed wrong, or
+ * names a lesson deleted since — and the page renders "check that code" for it.
+ * A thrown error is the other case: the library could not be reached at all,
+ * which is worth saying out loud because retrying might fix it and retyping the
+ * code will not.
  */
-export async function fetchSession(code?: string | null): Promise<StudentSession | null> {
-  const answer = await post<{ session: StudentSession | null }>('/api/sessions/get', {
-    code: code || undefined,
-  });
-  return answer.session ?? null;
+export async function fetchSetup(code: string): Promise<PublishedSetup | null> {
+  const answer = await post<{ setup: PublishedSetup | null }>('/api/sessions/get', { code });
+  return answer.setup ?? null;
+}
+
+/** What this deployment has published, newest first. Teacher-facing. */
+export async function listPublishedSetups(): Promise<{ setups: PublishedRow[]; error?: string }> {
+  try {
+    return await post<{ setups: PublishedRow[] }>('/api/sessions/list', {});
+  } catch (error) {
+    return {
+      setups: [],
+      error: error instanceof Error ? error.message : 'Could not read what has been published',
+    };
+  }
 }
 
 /**
  * The code in the address bar, if there is one.
  *
- * Read but not advertised. Join codes are a later pass — there is no card to
- * type one into and no page that hands one out — but the resolution order is
- * wired now, so that pass is a form rather than a migration. Upper-cased
- * because a code is read off a board and typed back in whatever case the
- * keyboard was in.
+ * `token`, not `c`. The parameter is LingoLecto's, already in circulation on
+ * links handed to real students, and a second spelling would mean every future
+ * shared link had to know which app it was pointing at — see
+ * docs/lesson-codes.md. The old `?c=` is not accepted: it was never shown to a
+ * student, so no link carrying it exists outside a developer's history.
+ *
+ * Not validated here. A student who mistypes should meet the page's own words,
+ * not a silent null that looks like having typed nothing at all.
  */
-export function codeFromUrl(): string | null {
+export function codeFromUrl(): string {
   try {
-    const code = new URL(window.location.href).searchParams.get('c');
-    return code ? code.trim().toUpperCase() : null;
+    const code = new URL(window.location.href).searchParams.get('token');
+    return code ? code.trim().toUpperCase() : '';
   } catch {
-    return null;
+    return '';
   }
 }

@@ -1,30 +1,32 @@
-import { GraduationCap, Layers, ListChecks, Smile, SlidersHorizontal } from 'lucide-react';
+import { ClipboardPen, GraduationCap, Layers, Smile, SlidersHorizontal } from 'lucide-react';
 
 /**
  * The front door.
  *
- * WHY THIS EXISTS. Four workshop pages reachable only by typing their paths,
- * two of which — liveTrial and tutorBench, as they were called — read as
- * synonyms to anyone who had not used them. The renaming fixed half of that;
- * this page is the other half, because a name can only carry so much and a
- * sentence underneath carries the rest.
+ * WHY THIS EXISTS. Workshop pages reachable only by typing their paths, two of
+ * which — liveTrial and tutorBench, as they were called — read as synonyms to
+ * anyone who had not used them. The renaming fixed half of that; this page is
+ * the other half, because a name can only carry so much and a sentence
+ * underneath carries the rest.
  *
- * ORDERED AS THE WORK IS DONE, not alphabetically and not by importance. A
- * face, then a lesson, then the studio that puts them together and publishes —
- * so reading the page top to bottom is being told how the thing is used. The
- * bench sits after them because it answers a different question (which model,
- * which prompt) and is not on the path to a published session at all.
+ * THREE GROUPS, IN TIERS, which is now the organising idea rather than the
+ * order the work happens in. The workshop is an administrator's: draw a face,
+ * tune how it moves, publish the manners and the house profile that every
+ * lesson is built from. /teach is a teacher's, and it is the only page that
+ * hands anything to a student. /eleve is what a student gets. Reading top to
+ * bottom is being told who each page is for, which is the question somebody
+ * arriving here actually has.
  *
- * THE STUDENT PAGE IS SET APART, below a rule, described rather than sold. It
- * is not a fifth tool: it is what the other four produce, and listing it as a
- * peer would say the opposite. It is here at all because checking your own work
- * means opening it, and hiding it would only mean typing the path.
+ * THE TEACHER'S PAGE IS LISTED FIRST DESPITE BEING SECOND IN THE TIERS,
+ * because it is the one somebody opens weekly and the workshop is where they go
+ * once a term. The tools are set below it rather than above.
  *
- * A NOTE ON WHO CAN SEE THIS. The site is one shared password, so a student who
- * lands on `/` now finds every workshop page named and explained where before
- * they had to guess a URL. That is a door that was already unlocked — the
- * README lists it under Known edges — but this page holds it open. The honest
- * fix is a real user store, which is worth building when there are users.
+ * A NOTE ON WHO CAN SEE THIS. The site is one shared password, so a teacher who
+ * lands on `/` finds every workshop page named and explained, and a student
+ * would too. That is a door that was already unlocked — the README lists it
+ * under Known edges — but this page holds it open. The tiers below are a
+ * description of who each page is *for*, not an access control; the honest fix
+ * is a real user store, which is worth building when there are users.
  */
 
 interface Place {
@@ -44,17 +46,10 @@ const WORKSHOP: Place[] = [
     Icon: Smile,
   },
   {
-    href: '/lessons',
-    name: 'lessons',
-    blurb:
-      'One lesson: the questions to work through, the consigne the student reads, and the structures you want to hear them use.',
-    Icon: ListChecks,
-  },
-  {
     href: '/studio',
     name: 'studio',
     blurb:
-      'Where it all comes together. Dress the tutor in a face and a voice, tune how it moves, pick a lesson and a scale — then publish it to the students.',
+      'Dress the tutor in a face, tune how it moves and how it takes turns, then save that as the house default and publish the manners teachers pick between.',
     Icon: Layers,
   },
   {
@@ -98,15 +93,50 @@ export default function Start() {
           </p>
         </header>
 
-        <div className="flex flex-col gap-2.5">
-          {WORKSHOP.map((place) => (
-            <Card key={place.href} {...place} />
-          ))}
+        {/*
+          First, and on its own, because it is the page somebody opens weekly.
+          The workshop below is where they go once a term.
+        */}
+        <div>
+          <p className="mb-2.5 text-xs uppercase tracking-wide text-slate-600">
+            For teachers
+          </p>
+          <a
+            href="/teach"
+            className="group flex gap-4 rounded-xl border border-slate-700 bg-slate-900/40 px-5 py-4 transition-colors hover:border-slate-600 hover:bg-slate-900/70"
+          >
+            <ClipboardPen
+              size={20}
+              className="mt-0.5 shrink-0 text-slate-500 transition-colors group-hover:text-slate-300"
+            />
+            <div className="min-w-0">
+              <div className="flex items-baseline gap-2">
+                <h2 className="text-base font-semibold tracking-tight text-slate-100">teach</h2>
+                <span className="font-mono text-[11px] text-slate-600">/teach</span>
+              </div>
+              <p className="mt-1 text-sm leading-relaxed text-slate-500">
+                Write a Voco Session — the questions, the consigne, the structures to listen for —
+                dress the tutor in a face and a voice, then publish it and read the code out. The
+                only page that hands anything to a student.
+              </p>
+            </div>
+          </a>
+        </div>
+
+        <div>
+          <p className="mb-2.5 text-xs uppercase tracking-wide text-slate-600">
+            For administrators
+          </p>
+          <div className="flex flex-col gap-2.5">
+            {WORKSHOP.map((place) => (
+              <Card key={place.href} {...place} />
+            ))}
+          </div>
         </div>
 
         {/*
-          Set apart rather than listed. See the header: this is what the four
-          above produce, and a fifth identical card would call it a fifth tool.
+          Set apart rather than listed. See the header: this is what everything
+          above produces, and an identical card would call it another tool.
         */}
         <div className="mt-2 border-t border-slate-800 pt-6">
           <p className="mb-2.5 text-xs uppercase tracking-wide text-slate-600">
@@ -127,19 +157,20 @@ export default function Start() {
               </div>
               <p className="mt-1 text-sm leading-relaxed text-slate-500">
                 The student&rsquo;s own page, and the only one they are meant to see. It authors
-                nothing and offers no settings — it runs whatever was last published from the
-                studio, and it is in French throughout.
+                nothing and offers no settings — a code gets them in, and it runs whatever was
+                published under that code. In French throughout.
               </p>
             </div>
           </a>
         </div>
 
         <p className="mt-auto pt-6 text-[11px] leading-relaxed text-slate-600">
-          Everything here is behind one shared password, including the student page. Old links to{' '}
-          <span className="font-mono">/livetrial</span> and{' '}
-          <span className="font-mono">/consignes</span> land back here — those pages are now{' '}
-          <span className="font-mono">/studio</span> and{' '}
-          <span className="font-mono">/lessons</span>.
+          Everything here is behind one shared password, including the student page — the tiers
+          above say who each page is <em>for</em>, not who can reach it. Old links to{' '}
+          <span className="font-mono">/livetrial</span>,{' '}
+          <span className="font-mono">/consignes</span> and{' '}
+          <span className="font-mono">/lessons</span> land back here — that last one is now{' '}
+          <span className="font-mono">/teach</span>, and it publishes.
         </p>
       </div>
     </div>

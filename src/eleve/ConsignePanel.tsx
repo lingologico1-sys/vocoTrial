@@ -1,4 +1,4 @@
-import type { StudentSession } from '../realtime/session';
+import type { PublishedSetup } from '../realtime/session';
 import { FR } from './strings';
 
 /**
@@ -21,7 +21,7 @@ import { FR } from './strings';
  * teacher's own words — "utilise le passé composé" — and repeating them as a
  * checklist would turn the panel into a scoreboard the student watches instead
  * of talking. They come back at the end, in the report, which is where a
- * verdict belongs. See sheets.ts on who reads what.
+ * verdict belongs. See vocoSessions.ts on who reads what.
  *
  * IN FRENCH BECAUSE IT IS THE TEACHER'S FRENCH, not because strings.ts says so.
  * The brief and the questions are authored text published verbatim; only the
@@ -29,7 +29,7 @@ import { FR } from './strings';
  */
 
 interface ConsignePanelProps {
-  session: StudentSession;
+  session: PublishedSetup;
 }
 
 export default function ConsignePanel({ session }: ConsignePanelProps) {

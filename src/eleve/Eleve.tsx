@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Mic } from 'lucide-react';
+import BrandBar from '../lingo/BrandBar';
 import type { FaceKit } from '../facekit/kit';
 import { loadBundledKit } from '../facekit/bundled';
 import { publishedKit } from '../facekit/store';
 import { L1_CHOICES, resolveL1 } from '../realtime/l1';
 import type { SessionReport } from '../realtime/report';
-import { hasLesson, type StudentSession } from '../realtime/session';
-import { codeFromUrl, fetchSession } from '../realtime/sessionStore';
+import { LESSON_CODE_LENGTH, normaliseLessonCode } from '../realtime/lessonCodes';
+import { hasLesson, type PublishedSetup } from '../realtime/session';
+import { codeFromUrl, fetchSetup } from '../realtime/sessionStore';
 import { useVoiceCall } from '../live/useVoiceCall';
 import ConsignePanel from './ConsignePanel';
 import DictionaryPanel, { type LookupRequest } from './DictionaryPanel';
@@ -49,9 +50,21 @@ function loadL1(): string {
 }
 
 export default function Eleve() {
-  const [session, setSession] = useState<StudentSession | null>(null);
+  const [session, setSession] = useState<PublishedSetup | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadFailed, setLoadFailed] = useState(false);
+
+  /*
+   * The code, and what came of trying it.
+   *
+   * `typed` is the box; `codeError` is the answer to the last attempt. They are
+   * separate so that a student correcting one character does not have the
+   * complaint vanish and reappear on every keystroke — it clears on submit,
+   * which is when it stops being true.
+   */
+  const [typed, setTyped] = useState(codeFromUrl);
+  const [codeError, setCodeError] = useState('');
+  const [checking, setChecking] = useState(false);
   const [kit, setKit] = useState<FaceKit | null>(null);
 
   const [l1, setL1] = useState(loadL1);
@@ -113,36 +126,57 @@ export default function Eleve() {
     }, [session]),
   });
 
-  // --- The published setup, and the face it names.
-  useEffect(() => {
-    let alive = true;
+  /**
+   * Opens a code, and fetches the face it names.
+   *
+   * ONE PATH IN, whether the code came from the address bar or from the box.
+   * A link with `?token=` and a student typing the same six characters have to
+   * land in exactly the same state, and two code paths to one state is how they
+   * stop doing that.
+   */
+  const open = useCallback(async (raw: string) => {
+    const code = normaliseLessonCode(raw);
+    if (!code) {
+      setCodeError(FR.codeMalformed);
+      return;
+    }
 
-    fetchSession(codeFromUrl())
-      .then(async (found) => {
-        if (!alive) return;
-        setSession(found);
-        setLoading(false);
-        if (!found) return;
+    setChecking(true);
+    setCodeError('');
+    try {
+      const found = await fetchSetup(code);
+      if (!found) {
+        setCodeError(FR.codeUnknown);
+        return;
+      }
+      setSession(found);
 
-        // The artwork is fetched after the setup rather than with it: a kit is
-        // megabytes and the page has something to show without it.
-        try {
-          const worn = found.faceId ? await publishedKit(found.faceId) : await loadBundledKit();
-          if (alive) setKit(worn);
-        } catch {
-          // The drawn placeholder is a smaller page, not a broken one.
-        }
-      })
-      .catch(() => {
-        if (!alive) return;
-        setLoading(false);
-        setLoadFailed(true);
-      });
-
-    return () => {
-      alive = false;
-    };
+      // The artwork is fetched after the setup rather than with it: a kit is
+      // megabytes and the page has something to show without it.
+      try {
+        const worn = found.faceId ? await publishedKit(found.faceId) : await loadBundledKit();
+        setKit(worn);
+      } catch {
+        // The drawn placeholder is a smaller page, not a broken one.
+      }
+    } catch {
+      setLoadFailed(true);
+    } finally {
+      setChecking(false);
+    }
   }, []);
+
+  // --- The published setup, if the address bar already names one.
+  useEffect(() => {
+    const fromUrl = codeFromUrl();
+    if (!fromUrl) {
+      // No code is not a failure — it is a student who has not typed one yet,
+      // which is the ordinary way to arrive. Straight to the box.
+      setLoading(false);
+      return;
+    }
+    void open(fromUrl).finally(() => setLoading(false));
+  }, [open]);
 
   useEffect(() => setWords(vocab.load()), []);
 
@@ -291,124 +325,51 @@ export default function Eleve() {
 
   return (
     <div className="lingo-light flex h-screen flex-col overflow-hidden bg-lingo-mat font-lingo text-lingo-ink">
-      {/*
-        The bar is full bleed, its contents are not — LingoLecto's
-        `.header-inner`, at its own numbers.
-
-        The lockup and the language picker are cut to the same 1152px column
-        the two cards below are cut to, with the same 16px gutter, so the
-        wordmark starts where the left card starts and the picker ends where
-        the right card ends. Without it the lockup hangs off the far corner of
-        a wide monitor while everything it belongs to sits in the middle. The
-        gutter lives on this inner row rather than on the bar for the reason
-        LingoLecto found: on the bar it lands outside the cap, which insets the
-        lockup from the column while the cards are inset from the mat instead,
-        and the two insets are not the same 16px.
-      */}
-      <header className="flex h-14 shrink-0 items-center border-b-4 border-lingo-rule bg-lingo-bar">
-        <div className="mx-auto flex w-full max-w-6xl items-center justify-between px-4">
-          {/*
-            No `gap` on this row: every piece of the lockup carries its own
-            margin, copied one for one from LingoLecto, and a gap here would add
-            itself to each of them — which is how the wordmark came to sit 14px
-            from `Voco` where LingoLecto puts it at 9.
-          */}
-          <div className="flex items-center">
-            {/*
-              Chock A Block draws the tile box as part of each glyph, so the
-              wordmark is text with a stroke rather than text on a fill — a CSS
-              background would cover the whole inline box and turn the blocks'
-              transparent interiors opaque. Cream on this blue is about 1.3:1, so
-              the stroke is doing the real work.
-
-              The sizes are LingoLecto's `.brand-lock--inline`, not a fresh guess:
-              30px wordmark, 26px badge around a 15px glyph, 22px sub-name, 22px
-              divider. That variant exists because its reading view is a 100vh
-              flex column where a pixel of header is a pixel of passage, so the
-              lockup is grown inside a fixed 56px bar rather than by growing the
-              bar — the wordmark plus its stroke is ~32px of the 56, and that is
-              the ceiling here, not the font size. This page is the same shape and
-              the same bar, so it takes the same numbers; anything smaller and the
-              two apps read as different headers, which is what they did.
-            */}
-            <div
-              className="flex gap-0.5 font-lingo-block text-[30px] leading-none"
-              role="img"
-              aria-label="LingoMondo"
-            >
-              {'LINGO'.split('').map((letter, index) => (
-                <span
-                  key={`lingo-${index}`}
-                  aria-hidden="true"
-                  className="text-lingo-paper"
-                  style={{ WebkitTextStroke: '0.03em #311706' }}
-                >
-                  {letter}
-                </span>
-              ))}
-              {'MONDO'.split('').map((letter, index) => (
-                <span
-                  key={`mondo-${index}`}
-                  aria-hidden="true"
-                  className="text-lingo-gold"
-                  style={{ WebkitTextStroke: '0.03em #311706' }}
-                >
-                  {letter}
-                </span>
-              ))}
-            </div>
-
-            <div className="ml-[9px] flex items-center gap-1.5">
-              <span className="flex h-[26px] w-[26px] items-center justify-center rounded-md border-2 border-lingo-stroke bg-lingo-accent shadow-lingo-pop-sm">
-                <Mic size={15} className="text-lingo-paper" strokeWidth={2.5} />
-              </span>
-              <span
-                className="font-lingo-brand text-[22px] leading-none text-lingo-accent"
-                style={{ WebkitTextStroke: '0.07em #311706', paintOrder: 'stroke fill' }}
-              >
-                Voco
-              </span>
-            </div>
-
-            <span className="mx-3 h-[22px] w-px bg-lingo-paper/30" />
-            <span className="font-lingo-hand text-sm leading-none text-lingo-paper/75">
-              {FR.tagline}
-            </span>
-          </div>
-
-          <label className="flex items-center gap-2">
-            <span className="text-[11px] uppercase tracking-wide text-lingo-paper/70">
-              {FR.l1Label}
-            </span>
-            <select
-              value={l1}
-              onChange={(event) => setL1(event.target.value)}
-              className="rounded-lg border-2 border-white/20 bg-white/10 px-2.5 py-1 text-[13px] text-lingo-paper outline-none transition-colors hover:border-lingo-accent-light focus:border-lingo-accent-light"
-            >
-              {L1_CHOICES.map((choice) => (
-                <option key={choice.code} value={choice.code} className="bg-lingo-bar">
-                  {choice.name}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-      </header>
+      <BrandBar tagline={FR.tagline}>
+        <label className="flex items-center gap-2">
+          <span className="text-[11px] uppercase tracking-wide text-lingo-paper/70">
+            {FR.l1Label}
+          </span>
+          <select
+            value={l1}
+            onChange={(event) => setL1(event.target.value)}
+            className="rounded-lg border-2 border-white/20 bg-white/10 px-2.5 py-1 text-[13px] text-lingo-paper outline-none transition-colors hover:border-lingo-accent-light focus:border-lingo-accent-light"
+          >
+            {L1_CHOICES.map((choice) => (
+              <option key={choice.code} value={choice.code} className="bg-lingo-bar">
+                {choice.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      </BrandBar>
 
       {loading ? (
         <div className="flex flex-1 items-center justify-center">
           <p className="text-sm text-lingo-muted">…</p>
         </div>
       ) : !session ? (
+        /*
+          The door, and it is the only one.
+
+          A student reaches a lesson by typing the code their teacher read out —
+          there is no "whichever was published last" behind this any more, which
+          is what used to let one class walk into another's conversation. The
+          box is LingoLecto's, deliberately: same six characters, same
+          upper-casing as you type, same monospace at a size meant for copying
+          off a board across a room. A student who uses both apps types their
+          code into the same box twice.
+        */
         <div className="flex flex-1 items-center justify-center px-6">
           <div className="w-full max-w-md rounded-2xl border-2 border-lingo-border-strong bg-lingo-surface px-9 py-10 text-center shadow-lingo-pop">
             <h1 className="font-lingo-display text-2xl font-semibold">
-              {loadFailed ? FR.loadFailedTitle : FR.noTutorTitle}
+              {loadFailed ? FR.loadFailedTitle : FR.codeTitle}
             </h1>
             <p className="mt-2.5 text-sm leading-relaxed text-lingo-muted">
-              {loadFailed ? FR.loadFailedBody : FR.noTutorBody}
+              {loadFailed ? FR.loadFailedBody : FR.codeBody}
             </p>
-            {loadFailed && (
+
+            {loadFailed ? (
               <button
                 type="button"
                 onClick={() => window.location.reload()}
@@ -416,6 +377,36 @@ export default function Eleve() {
               >
                 {FR.retry}
               </button>
+            ) : (
+              <form
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  if (!checking) void open(typed);
+                }}
+                className="mt-6 flex flex-col gap-3"
+              >
+                <input
+                  value={typed}
+                  onChange={(event) => setTyped(event.target.value.toUpperCase())}
+                  maxLength={LESSON_CODE_LENGTH}
+                  autoFocus
+                  autoComplete="off"
+                  spellCheck={false}
+                  placeholder="ABC123"
+                  aria-label={FR.codeTitle}
+                  className="w-full rounded-xl border-2 border-lingo-border-strong bg-lingo-cream px-4 py-3 text-center font-lingo-mono text-[22px] font-bold uppercase tracking-[0.18em] text-lingo-ink outline-none transition-colors placeholder:text-lingo-muted/40 focus:border-lingo-accent"
+                />
+                <button
+                  type="submit"
+                  disabled={checking || !typed.trim()}
+                  className="w-full rounded-xl bg-lingo-accent px-6 py-3 text-[15px] font-semibold text-white shadow-lingo-pop-sm transition-colors hover:bg-lingo-accent-deep disabled:opacity-40"
+                >
+                  {checking ? FR.starting : FR.codeAction}
+                </button>
+                {codeError && (
+                  <p className="text-sm leading-relaxed text-lingo-error">{codeError}</p>
+                )}
+              </form>
             )}
           </div>
         </div>

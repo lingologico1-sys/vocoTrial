@@ -4,7 +4,7 @@ import Start from './start/Start';
 import TutorBench from './tutor/TutorBench';
 import Studio from './live/Studio';
 import FaceKit from './facekit/FaceKit';
-import Lessons from './lessons/Lessons';
+import Teach from './teach/Teach';
 import Eleve from './eleve/Eleve';
 import PasswordGate from './PasswordGate';
 import './index.css';
@@ -24,24 +24,27 @@ import './index.css';
  * that address, here is everything" instead of "here is the busiest page in the
  * app, good luck".
  *
- * TWO NAMES CHANGED AND ARE NOT ALIASED. `/livetrial` became `/studio` and
- * `/consignes` became `/lessons`. Keeping the old paths working would keep two
- * names alive for one page, which is the confusion the rename existed to
- * remove; an old bookmark lands on the start page instead, where the new name
- * is listed with a sentence saying what it does. That is self-correcting in a
- * way a silent redirect is not.
+ * NAMES CHANGE HERE AND ARE NOT ALIASED. `/livetrial` became `/studio`,
+ * `/consignes` became `/lessons`, and `/lessons` has now become `/teach` —
+ * which is a bigger change than a rename, since the page absorbed publishing
+ * on the way. Keeping an old path working would keep two names alive for one
+ * page, which is the confusion each rename existed to remove; an old bookmark
+ * lands on the start page instead, where the new name is listed with a
+ * sentence saying what it does. That is self-correcting in a way a silent
+ * redirect is not.
  */
 const PAGES: Record<string, () => JSX.Element> = {
   '/': Start,
   // Models and prompts. Off the path to a published session — see Start.tsx.
   '/tutorbench': TutorBench,
   '/facekit': FaceKit,
-  // One lesson: questions, consigne, targets. Its own page rather than a panel
-  // on tutorBench because a lesson is written every week rather than chosen
-  // once a term, and because it has no business sharing a page with a live
-  // socket. The stored object is still a `QuestionSheet` — see sheets.ts.
-  '/lessons': Lessons,
-  // Where a face, a lesson and a voice become one published session.
+  // The teacher's page. One Voco Session — questions, consigne, targets, and
+  // the tutor that asks them — written here and handed out from here under a
+  // code. It is not a workshop page and does not look like one; see Teach.tsx.
+  '/teach': Teach,
+  // Tuning, and the two things an administrator publishes for every teacher:
+  // a tutor style and the house performance profile. It no longer publishes to
+  // students — that moved to /teach, where the person handing out a lesson is.
   '/studio': Studio,
   // The one page here that is not the workshop. See src/eleve/Eleve.tsx.
   '/eleve': Eleve,

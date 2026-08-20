@@ -5,12 +5,9 @@ import { LANGUAGES, defaultLanguageCode, findLanguage } from '../realtime/langua
 import { lastUsedKey, listPresets, rememberPreset, renderPreset } from '../realtime/presets';
 import { MAX_INSTRUCTIONS, withPersona } from '../realtime/instructions';
 import { VOICES } from '../realtime/settings';
-import { BUILTIN_EVALUATOR_ID, type Evaluator } from '../realtime/evaluators';
-import { lastEvaluatorId, listEvaluators } from '../realtime/evaluatorStore';
-import { sheetBlock, type QuestionSheet } from '../realtime/sheets';
-import { NO_SHEET, lastSheetId, listSheets, rememberSheet } from '../realtime/sheetStore';
-import { newSessionCode, type StudentSession } from '../realtime/session';
-import { publishSession } from '../realtime/sessionStore';
+import { MAX_STYLE_NAME, newStyleId, type TutorStyle } from '../realtime/house';
+import { deleteStyle, fetchHouse, savePerformance, saveStyle } from '../realtime/houseStore';
+import type { PerformanceProfile } from '../realtime/session';
 import type { SessionStatus } from '../realtime/types';
 import type { FaceKit } from '../facekit/kit';
 import { hasPersona } from '../facekit/persona';
@@ -55,7 +52,9 @@ import {
   type TiltTrigger,
 } from './headMotion';
 import {
+  DEFAULT_LOOKAHEAD_MS,
   DEFAULT_ROUNDNESS,
+  MAX_LOOKAHEAD_MS,
   ROUNDNESS_MODES,
   type MouthDriver,
   type RoundnessMode,
@@ -191,22 +190,6 @@ const DRIVERS: Array<{ id: MouthDriver; label: string; hint: string }> = [
     hint: 'The audio is measured before it plays and read back on the clock. Costs nothing in latency and removes some, because a reading can be centred on the instant it describes — or taken from ahead of it.',
   },
 ];
-
-/** Where animators traditionally place a mouth shape: a frame or two early. */
-const MAX_LOOKAHEAD_MS = 150;
-
-/**
- * Enough to lead the sound, once the drawing has been paid for.
- *
- * About 50ms of it buys back the mouth's own lag — the shape eases toward its
- * target with a 35ms time constant, the level attacks over 15ms, and a frame
- * lands whenever it lands. Spend only that and the mouth is merely on time.
- * The remaining 30ms is the anticipation: roughly the frame of lead an animator
- * would draw in by hand, and far inside the margin where a mouth ahead of its
- * voice goes unnoticed. Being early is cheap and being late is not — video
- * leading audio survives past 100ms, lagging is caught around 45ms.
- */
-const DEFAULT_LOOKAHEAD_MS = 80;
 
 function loadPrefs(): Partial<Prefs> {
   try {
@@ -533,38 +516,6 @@ export default function Studio() {
   ]);
 
   /**
-   * The lesson, if there is one.
-   *
-   * Declared up here rather than beside the evaluator picker below because
-   * `composed` reads it, and a useMemo's dependency array is evaluated where it
-   * is written — a sheet declared after it would be read in its own temporal
-   * dead zone. The picker that sets it still lives in the publish fieldset,
-   * which is the only place it means anything.
-   *
-   * NO_SHEET is a real, chosen state rather than a loading artefact: a session
-   * published with no sheet is a plain conversation, which is what every
-   * session before this feature was. See sheets.ts.
-   */
-  const [sheets, setSheets] = useState<QuestionSheet[]>([]);
-  const [sheetId, setSheetId] = useState<string>(NO_SHEET);
-  const sheet = useMemo(
-    () => sheets.find((entry) => entry.id === sheetId) ?? null,
-    [sheets, sheetId],
-  );
-
-  useEffect(() => {
-    let alive = true;
-    void listSheets().then(({ sheets: found }) => {
-      if (!alive) return;
-      setSheets(found);
-      setSheetId(lastSheetId(found));
-    });
-    return () => {
-      alive = false;
-    };
-  }, []);
-
-  /**
    * What this page would actually send, kept where it can be looked at.
    *
    * Composed here rather than inside `connect` so the length can be checked
@@ -575,18 +526,20 @@ export default function Studio() {
    * three things chosen on three different pages. Adding up in the browser is
    * what lets the message name all of them.
    *
-   * The sheet goes last, after the persona wrap rather than inside it. That is
-   * where instructions.ts says a constraint held across a whole call survives
-   * longest, and a question list is exactly such a constraint — see the note on
-   * `sheetBlock`.
+   * NO LESSON IS COMPOSED IN HERE ANY MORE. A question list used to be picked
+   * on this page and appended, because this page published. It does not, and a
+   * lesson belongs to the teacher who wrote it — so what a call on this page
+   * runs is the manner and the face, which is exactly what this page is for
+   * tuning. The publish route does the same composition with the lesson added;
+   * see `lessonBlock`.
    */
   const composed = useMemo(
     () =>
       withPersona(
         renderPreset(presetKey, findLanguage(language) ?? LANGUAGES[0]),
         persona ? kit?.persona : undefined,
-      ) + (sheet ? sheetBlock(sheet) : ''),
-    [presetKey, language, persona, kit, sheet],
+      ),
+    [presetKey, language, persona, kit],
   );
 
   /**
@@ -602,8 +555,6 @@ export default function Studio() {
     () => renderPreset(presetKey, findLanguage(language) ?? LANGUAGES[0]).length,
     [presetKey, language],
   );
-  /** Measured the same way and for the same reason as `presetChars`. */
-  const sheetChars = useMemo(() => (sheet ? sheetBlock(sheet).length : 0), [sheet]);
   const tooLong = composed.length > MAX_INSTRUCTIONS;
 
   /**
@@ -644,97 +595,115 @@ export default function Studio() {
   const { hangUp, toggleMute } = call;
 
   /**
-   * Publishing, and the picker this page never needed until now.
+   * What this page publishes now, which is not a lesson.
    *
-   * The evaluator lives on tutorBench, because that is where scales are
-   * authored. It has to be chosen here too, and only here, because it is part
-   * of what a student is handed — a published setup with no scale is a page
-   * whose Évalue-moi button has nothing to measure against. A compact select
-   * rather than tutorBench's whole EvaluatorPanel: this is a pick, not an
-   * authoring surface.
+   * PUBLISHING TO STUDENTS MOVED TO /teach. What stays here are the two things
+   * a teacher cannot supply and this page is the only one that can: the manner
+   * a tutor talks in, rendered out of a preset that lives in this browser's
+   * localStorage, and the performance profile that is simply what the sliders
+   * on this page are currently set to. Both go to R2 as the house library, and
+   * the publish route spends them. See house.ts.
+   *
+   * THE EVALUATOR PICKER WENT WITH IT. A scale is part of what a student is
+   * handed, and what a student is handed is now assembled on /teach — so this
+   * page no longer needs to know which scale exists.
    */
-  const [evaluators, setEvaluators] = useState<Evaluator[]>([]);
-  const [evaluatorId, setEvaluatorId] = useState<string>(BUILTIN_EVALUATOR_ID);
-  const [publishing, setPublishing] = useState(false);
-  const [published, setPublished] = useState<StudentSession | null>(null);
-  const [publishError, setPublishError] = useState<string | null>(null);
+  /** The language the preset renders against — the page's own picker. */
+  const styleLanguage = findLanguage(language) ?? LANGUAGES[0];
 
-  useEffect(() => {
-    let alive = true;
-    void listEvaluators().then(({ evaluators: found }) => {
-      if (!alive) return;
-      setEvaluators(found);
-      setEvaluatorId(lastEvaluatorId(found));
+  const [houseStyles, setHouseStyles] = useState<TutorStyle[]>([]);
+  const [housePerformance, setHousePerformance] = useState(false);
+  const [styleName, setStyleName] = useState('');
+  const [housing, setHousing] = useState(false);
+  const [houseNote, setHouseNote] = useState('');
+  const [houseError, setHouseError] = useState('');
+
+  const loadHouse = () => {
+    void fetchHouse().then((house) => {
+      setHouseStyles(house.styles);
+      setHousePerformance(house.performance !== null);
+      if (house.error) setHouseError(house.error);
     });
-    return () => {
-      alive = false;
-    };
-  }, []);
+  };
 
-  const publish = async () => {
-    setPublishing(true);
-    setPublishError(null);
+  useEffect(loadHouse, []);
+
+  /**
+   * The sliders on this page, as a profile.
+   *
+   * Gathered at the press rather than held in state, for the reason `composed`
+   * above is composed at the call: a copy kept in step by hand is a copy that
+   * eventually is not, and every one of these already has a piece of state
+   * driving a control.
+   */
+  const currentPerformance = (): PerformanceProfile => ({
+    driver,
+    lookaheadMs,
+    roundness,
+    motion,
+    cadence,
+    browBlink,
+    press,
+    browLift,
+    tilt,
+    tiltRoll,
+    tiltSettle,
+    tiltChance,
+    listenNod,
+    nodDepth,
+    nodChance,
+    browFlashChance,
+  });
+
+  const saveHousePerformance = async () => {
+    setHousing(true);
+    setHouseNote('');
+    setHouseError('');
     try {
-      /*
-       * The code is minted fresh on every publish, which is deliberate while
-       * there are no join codes: each publish is "this is the tutor now", and
-       * reusing one key would make the history unrecoverable the moment codes
-       * do arrive. The pointer is what /eleve follows, so the churn is
-       * invisible until then.
-       */
-      const setup: StudentSession = {
-        code: published?.code ?? newSessionCode(),
-        updatedAt: Date.now(),
-        language,
-        // The rendered text, not the preset key. A key names a prompt that
-        // lives in this browser's localStorage and nowhere else.
-        instructions: composed,
-        voice,
-        faceId: chosen,
-        evaluatorId,
-        /*
-         * The lesson, copied rather than referenced — see session.ts. The
-         * questions are already inside `instructions` above; these are the same
-         * text again, structurally, so the student page can render a list
-         * instead of a wall of prompt. A few hundred duplicated bytes against
-         * MAX_SESSION's 30,000, bought deliberately.
-         *
-         * Absent rather than empty when there is no sheet, which is the posture
-         * the turn-taking block below already takes: "no lesson" and "a lesson
-         * with nothing in it" are different things, and only one of them should
-         * make the student page draw a consigne panel.
-         */
-        ...(sheet
-          ? {
-              brief: sheet.brief,
-              targets: sheet.targets,
-              questions: sheet.questions,
-              sheetId: sheet.id,
-              sheetName: sheet.name,
-            }
-          : {}),
-        driver,
-        lookaheadMs,
-        roundness,
-        motion,
-        cadence,
-        browBlink,
-        press,
-        browLift,
-        tilt,
-        tiltRoll,
-        tiltSettle,
-        tiltChance,
-        listenNod,
-        nodDepth,
-        nodChance,
-        browFlashChance,
-      };
-      setPublished(await publishSession(setup));
+      await savePerformance(currentPerformance());
+      setHousePerformance(true);
+      setHouseNote('Saved. The next lesson published carries this tuning.');
     } catch (error) {
-      setPublishError(error instanceof Error ? error.message : 'Could not publish');
+      setHouseError(error instanceof Error ? error.message : 'Could not save that');
     } finally {
-      setPublishing(false);
+      setHousing(false);
+    }
+  };
+
+  const publishStyle = async () => {
+    setHousing(true);
+    setHouseNote('');
+    setHouseError('');
+    try {
+      const written = await saveStyle({
+        id: newStyleId(),
+        name: styleName.trim(),
+        note: '',
+        // Rendered, not the key. See the note beside the button.
+        text: renderPreset(presetKey, styleLanguage),
+        language: styleLanguage.code,
+      });
+      setStyleName('');
+      setHouseNote(`Published “${written.name}”. Teachers can pick it on /teach.`);
+      loadHouse();
+    } catch (error) {
+      setHouseError(error instanceof Error ? error.message : 'Could not publish that');
+    } finally {
+      setHousing(false);
+    }
+  };
+
+  const removeStyle = async (id: string) => {
+    setHousing(true);
+    setHouseNote('');
+    setHouseError('');
+    try {
+      await deleteStyle(id);
+      loadHouse();
+    } catch (error) {
+      setHouseError(error instanceof Error ? error.message : 'Could not delete that');
+    } finally {
+      setHousing(false);
     }
   };
 
@@ -747,7 +716,7 @@ export default function Studio() {
     // this page knows there are two.
     if (tooLong) {
       call.fail(
-        `That prompt, this persona and these questions come to ${composed.length} characters together, and a session takes ${MAX_INSTRUCTIONS}. Shorten the prompt (${presetChars}), cut questions on /lessons (${sheetChars}), shorten the background on faceKit, or switch the persona off.`,
+        `That prompt and this persona come to ${composed.length} characters together, and a session takes ${MAX_INSTRUCTIONS}. Shorten the prompt (${presetChars}), shorten the background on faceKit, or switch the persona off.`,
       );
       return;
     }
@@ -1619,23 +1588,18 @@ export default function Studio() {
           Said before the button is pressed as well as after, because the two
           answer different questions: the disabled button asks why it will not
           dial, and `connect` still refuses in case it is reached another way.
-          Both name the same two numbers — this is the only screen either half
-          of the sum is visible on.
+          Both name the same numbers — this is the only screen the sum is
+          visible on.
         */}
         {tooLong && !live && (
           <p className="rounded-lg border border-amber-700/70 bg-amber-950/20 px-3 py-2 text-xs text-amber-300">
-            This prompt, this persona{sheet ? ' and these questions' : ''} come to{' '}
+            This prompt and this persona come to{' '}
             <span className="tabular-nums">{composed.length}</span> characters together, and a
             session takes {MAX_INSTRUCTIONS}. The prompt is{' '}
-            <span className="tabular-nums">{presetChars}</span> of it
-            {sheet && (
-              <>
-                {' '}
-                and the questions <span className="tabular-nums">{sheetChars}</span>
-              </>
-            )}
-            . Shorten it on tutorBench{sheet ? ', cut questions on /lessons' : ''}, shorten the
-            background on faceKit, or switch the persona off above.
+            <span className="tabular-nums">{presetChars}</span> of it. Shorten it on tutorBench,
+            shorten the background on faceKit, or switch the persona off above. A published
+            lesson adds its questions on top of this, so a prompt near the ceiling here leaves a
+            teacher no room.
           </p>
         )}
 
@@ -1668,112 +1632,107 @@ export default function Studio() {
         </div>
 
         {/*
-          The handover to the student page.
+          What this page gives every teacher.
 
-          Here rather than on a page of its own because there is no teacher tier
-          yet — publishing is a maintainer's act, done from the page where the
-          tuning happened, and moving it later is moving one fieldset. What it
-          sends is a snapshot: the student gets the setup as it stood when this
-          was pressed, not as it stands now, so editing a prompt afterwards
-          cannot change a conversation that was already handed out.
+          PUBLISHING TO STUDENTS USED TO LIVE HERE, and it moved to /teach. The
+          reason was never that this was the wrong place to press a button — it
+          was that publishing needs a lesson, and writing a lesson is a
+          teacher's weekly job on a page with no live socket on it. What is left
+          behind is the half a teacher genuinely cannot supply: the manner the
+          tutor talks in, and the tuning that makes a face look like a person.
+          Both go to R2 and are spent server-side at publish. See house.ts.
+
+          A SAVE HERE REACHES THE NEXT PUBLISH, NOT THE NEXT CALL. Setups
+          already handed out carry a flattened copy of whatever these were at
+          the time — session.ts's rule, that what was handed out stays handed
+          out — so retuning cannot reach a class mid-lesson.
         */}
         <fieldset className="rounded-lg border border-slate-800 px-3 pb-3 pt-1">
           <legend className="px-1 text-[11px] uppercase tracking-wide text-slate-500">
-            Student page
+            The house
           </legend>
 
-          <label className="mt-1 flex items-center gap-3">
-            <span className="text-xs uppercase tracking-wide text-slate-500">Scale</span>
-            <select
-              value={evaluatorId}
-              onChange={(event) => setEvaluatorId(event.target.value)}
-              disabled={publishing}
-              className="flex-1 bg-transparent text-sm text-slate-200 outline-none disabled:opacity-40"
-            >
-              {evaluators.map((entry) => (
-                <option key={entry.id} value={entry.id} className="bg-slate-900">
-                  {entry.name}
-                  {entry.id === BUILTIN_EVALUATOR_ID ? ' (built in)' : ''}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          {/*
-            The lesson. A pick rather than an authoring surface, exactly like
-            the scale above it — sheets are written on /lessons, and this page
-            is where one is chosen and handed out.
-
-            Unlike the scale, "none" is a first-class option rather than a
-            missing state: a session with no sheet is a plain conversation. The
-            picker says so in as many words rather than showing an empty select,
-            because an empty select reads as a page that failed to load.
-          */}
-          <label className="mt-2 flex items-center gap-3">
-            <span className="text-xs uppercase tracking-wide text-slate-500">Lesson</span>
-            <select
-              value={sheetId}
-              onChange={(event) => {
-                setSheetId(event.target.value);
-                rememberSheet(event.target.value);
-              }}
-              disabled={publishing}
-              className="flex-1 bg-transparent text-sm text-slate-200 outline-none disabled:opacity-40"
-            >
-              <option value={NO_SHEET} className="bg-slate-900">
-                No questions — just a conversation
-              </option>
-              {sheets.map((entry) => (
-                <option key={entry.id} value={entry.id} className="bg-slate-900">
-                  {entry.name}
-                </option>
-              ))}
-            </select>
-            <a
-              href="/lessons"
-              className="shrink-0 text-[11px] text-slate-500 underline-offset-4 hover:underline"
-            >
-              edit →
-            </a>
-          </label>
-          {sheet && (
-            <p className="mt-1 text-[11px] leading-relaxed text-slate-600">
-              {sheet.questions.length} question{sheet.questions.length === 1 ? '' : 's'}
-              {sheet.targets.length > 0 && <> · {sheet.targets.join(', ')}</>} ·{' '}
-              <span className="tabular-nums">{sheetChars}</span> characters of prompt
-              {!sheet.brief && <> · no consigne written, so the student sees only the questions</>}
-            </p>
-          )}
-
-          <div className="mt-3 flex items-center gap-3">
+          <div className="mt-1 flex flex-wrap items-center gap-3">
             <button
               type="button"
-              onClick={() => void publish()}
-              disabled={publishing || tooLong || !evaluatorId}
+              onClick={() => void saveHousePerformance()}
+              disabled={housing}
               className="rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-200 hover:bg-slate-900 disabled:opacity-40"
             >
-              {publishing ? 'Publishing…' : 'Publish to /eleve'}
+              Save this tuning as the house default
             </button>
-            <a href="/eleve" className="text-xs text-slate-500 underline-offset-4 hover:underline">
-              Open /eleve →
-            </a>
+            <span className="text-[11px] text-slate-500">
+              {housePerformance
+                ? 'Replaces the profile every published lesson carries.'
+                : 'Nothing saved yet, so lessons publish with the built-in defaults.'}
+            </span>
           </div>
 
-          {published && (
-            <p className="mt-2 text-[11px] text-slate-500">
-              Published as <span className="font-mono text-slate-400">{published.code}</span> at{' '}
-              {new Date(published.updatedAt).toLocaleTimeString()}. A student opening /eleve now
-              gets this language, prompt, voice, face, motion
-              {published.questions?.length ? ' and questions' : ' — and no questions'}.
-            </p>
-          )}
-          {publishError && <p className="mt-2 text-xs text-rose-400">{publishError}</p>}
-          {!published && !publishError && (
-            <p className="mt-2 text-[11px] leading-relaxed text-slate-500">
-              Sends everything on this page to the student page, which has no settings of its
-              own. Until this is pressed, /eleve says no tutor is ready.
-            </p>
-          )}
+          <div className="mt-3 flex flex-wrap items-center gap-3">
+            <input
+              value={styleName}
+              onChange={(event) => setStyleName(event.target.value)}
+              maxLength={MAX_STYLE_NAME}
+              placeholder="Name this manner — Patient beginner tutor"
+              disabled={housing}
+              className="min-w-[16rem] flex-1 rounded border border-slate-800 bg-transparent px-2.5 py-1.5 text-sm text-slate-200 outline-none placeholder:text-slate-700 focus:border-slate-700 disabled:opacity-40"
+            />
+            <button
+              type="button"
+              onClick={() => void publishStyle()}
+              disabled={housing || !styleName.trim()}
+              className="rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-200 hover:bg-slate-900 disabled:opacity-40"
+            >
+              Publish as a tutor style
+            </button>
+          </div>
+          {/*
+            The rendered preset, not the preset key — a key names a prompt in
+            this browser's localStorage and nowhere else. The persona is
+            deliberately absent: which face is worn is decided per lesson on
+            /teach, so the wrap is applied at publish rather than baked in here.
+          */}
+          <p className="mt-1.5 text-[11px] leading-relaxed text-slate-500">
+            Saves {renderPreset(presetKey, styleLanguage).length.toLocaleString()} characters of
+            prompt as it stands, rendered for {styleLanguage.label}. The face&rsquo;s persona is
+            not included — that is applied when a teacher picks a face.
+          </p>
+
+          <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1.5">
+            {houseStyles.map((entry) => (
+              <span
+                key={entry.id}
+                className="flex items-center gap-1.5 rounded border border-slate-800 px-2 py-1 text-[11px] text-slate-400"
+              >
+                {entry.name}
+                <button
+                  type="button"
+                  onClick={() => void removeStyle(entry.id)}
+                  disabled={housing}
+                  title="Delete this style"
+                  className="text-slate-600 hover:text-rose-400 disabled:opacity-40"
+                >
+                  ×
+                </button>
+              </span>
+            ))}
+            {!houseStyles.length && (
+              <span className="text-[11px] text-slate-500">
+                No styles published. A teacher cannot hand out a lesson until there is one.
+              </span>
+            )}
+          </div>
+
+          {houseNote && <p className="mt-2 text-xs text-emerald-400">{houseNote}</p>}
+          {houseError && <p className="mt-2 text-xs text-rose-400">{houseError}</p>}
+
+          <p className="mt-3 border-t border-slate-800 pt-2.5 text-[11px] leading-relaxed text-slate-500">
+            Handing a lesson to a class happens on{' '}
+            <a href="/teach" className="text-slate-400 underline-offset-4 hover:underline">
+              /teach
+            </a>
+            , where the questions are written.
+          </p>
         </fieldset>
       </div>
     </div>
