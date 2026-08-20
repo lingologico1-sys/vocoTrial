@@ -19,6 +19,41 @@
  */
 
 import type { SessionSettings } from '../../../src/realtime/settings';
+import { ANSWERED_TOOL } from '../../../src/realtime/vocoSessions';
+
+/**
+ * The one tool a tutor has, and the only structured channel into a live call.
+ *
+ * WHY A TOOL AND NOT THE TRANSCRIPT. The student page shows how many questions
+ * are left, and nothing else could tell it. The transcript is untyped text, so
+ * counting from it means guessing; a spoken marker is a marker the tutor
+ * eventually says out loud. A function call is the only thing the model can
+ * emit that is addressed to the program rather than to the learner.
+ *
+ * DECLARED ON EVERY CALL, including the ones with no lesson. The alternative is
+ * plumbing a question count from the browser through _resolve.ts to here, to
+ * save a few dozen tokens on the minority of calls that are the workshop trying
+ * a voice. A tutor with no question list has nothing to report and never calls
+ * it.
+ *
+ * INTEGER, NOT STRING, and required. A model handed an optional argument omits
+ * it, and a model handed a string sends "the second one".
+ */
+const ANSWERED_DECLARATION = {
+  name: ANSWERED_TOOL,
+  description:
+    'Record that one of the numbered questions in the system instructions has been answered by the learner and discussed. Bookkeeping only: it is never spoken about and produces no reply to read out.',
+  parameters: {
+    type: 'OBJECT',
+    properties: {
+      number: {
+        type: 'INTEGER',
+        description: "The question's position in the list, counting from 1.",
+      },
+    },
+    required: ['number'],
+  },
+};
 
 /** Drops undefined entries so an object literal can be built conditionally. */
 function compact<T extends Record<string, unknown>>(object: T): Partial<T> {
@@ -69,6 +104,7 @@ export function geminiSetup(
       speechConfig,
     }),
     systemInstruction: { parts: [{ text: instructions }] },
+    tools: [{ functionDeclarations: [ANSWERED_DECLARATION] }],
     inputAudioTranscription: {},
     outputAudioTranscription: {},
     ...compact({

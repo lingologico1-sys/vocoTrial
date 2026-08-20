@@ -2,6 +2,7 @@ import { MicCapture, PcmPlayer, decodeBase64, encodeBase64 } from './audio';
 import { addUsage, emptyUsage, totalTokens, type UsageTotals } from './cost';
 import { UnauthorizedError, checkSession, reportExpired } from './auth';
 import type { SessionConfig, SessionHandlers, VoiceSession } from './types';
+import { ANSWERED_TOOL } from './vocoSessions';
 
 /**
  * Gemini Live, through our own Worker.
@@ -48,9 +49,25 @@ interface UsageMetadata {
   candidatesTokensDetails?: ModalityTokenCount[];
 }
 
+/** One function call from the model, as Live sends it. */
+interface LiveFunctionCall {
+  id?: string;
+  name?: string;
+  args?: Record<string, unknown>;
+}
+
 interface LiveMessage {
   setupComplete?: Record<string, never>;
   usageMetadata?: UsageMetadata;
+  /**
+   * The model calling a tool. See _setup.ts for the one it is given.
+   *
+   * Every call must be answered, even when the answer is nothing: an
+   * unanswered call leaves the model waiting for a result it will never get,
+   * and it stops talking. That is why the handling below responds before it
+   * does anything with the arguments.
+   */
+  toolCall?: { functionCalls?: LiveFunctionCall[] };
   serverContent?: {
     modelTurn?: { parts?: Array<{ inlineData?: { data?: string; mimeType?: string } }> };
     inputTranscription?: { text?: string };
@@ -236,6 +253,42 @@ export async function startGeminiSession(
         return;
       }
 
+      /*
+       * Tool calls, answered first and interpreted second.
+       *
+       * The response goes back whatever happens — an unknown tool name, a
+       * missing argument, a handler that throws — because the model is blocked
+       * until it arrives. A tutor silently going quiet mid-lesson is a far
+       * worse failure than a miscounted question, and this is the ordering that
+       * makes the second one impossible to cause.
+       */
+      if (message.toolCall?.functionCalls?.length) {
+        const calls = message.toolCall.functionCalls;
+        if (socket.readyState === WebSocket.OPEN) {
+          socket.send(
+            JSON.stringify({
+              toolResponse: {
+                functionResponses: calls.map((call) => ({
+                  id: call.id,
+                  name: call.name,
+                  // Acknowledged, with nothing to say. The tutor is told in the
+                  // prompt that this produces no reply to read out; an object
+                  // with prose in it is prose a model will sometimes speak.
+                  response: { ok: true },
+                })),
+              },
+            }),
+          );
+        }
+
+        for (const call of calls) {
+          if (call.name !== ANSWERED_TOOL) continue;
+          const number = Number(call.args?.number);
+          if (Number.isFinite(number)) handlers.onQuestionAnswered?.(Math.trunc(number));
+        }
+        return;
+      }
+
       const content = message.serverContent;
       if (!content) return;
 
@@ -327,6 +380,23 @@ export async function startGeminiSession(
   return {
     // Non-null by here: resume() built the context before anything was awaited.
     tap: player.tap(),
+    /*
+     * `turnComplete: true`, so the model answers rather than waiting for more.
+     * Sent as a user turn because that is the only role Live accepts from a
+     * client; the learner never sees it, since what they see is built from the
+     * microphone's own transcription.
+     */
+    say: (text: string) => {
+      if (socket.readyState !== WebSocket.OPEN) return;
+      socket.send(
+        JSON.stringify({
+          clientContent: {
+            turns: [{ role: 'user', parts: [{ text }] }],
+            turnComplete: true,
+          },
+        }),
+      );
+    },
     setMuted: (muted) => mic.setMuted(muted),
     stop: () => {
       cleanup();

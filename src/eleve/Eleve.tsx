@@ -7,6 +7,7 @@ import { L1_CHOICES, resolveL1 } from '../realtime/l1';
 import type { SessionReport } from '../realtime/report';
 import { LESSON_CODE_LENGTH, normaliseLessonCode } from '../realtime/lessonCodes';
 import { hasLesson, type PublishedSetup } from '../realtime/session';
+import { TIME_UP_SIGNAL, minutesOf } from '../realtime/vocoSessions';
 import { codeFromUrl, fetchSetup } from '../realtime/sessionStore';
 import { useVoiceCall } from '../live/useVoiceCall';
 import ConsignePanel from './ConsignePanel';
@@ -35,6 +36,20 @@ import type { VocabItem } from './vocab';
 
 /** Below this a conversation has not produced enough to read. Two minutes. */
 const MIN_EVAL_MS = 120_000;
+
+/**
+ * How long the tutor gets to close before the page hangs up on it.
+ *
+ * The lesson's minutes are the conversation's length, not the call's: at the
+ * limit the tutor is told to close, and closing is a turn or two of speech that
+ * has to finish. Forty-five seconds is long enough for a warm goodbye and short
+ * enough that a tutor which ignores the note — or never hears it, because the
+ * socket dropped — does not leave the call running on the meter.
+ *
+ * The call can still end sooner than this. A learner who has heard goodbye
+ * presses the microphone, and the idle timer is still watching underneath.
+ */
+const CLOSING_GRACE_MS = 45_000;
 
 /** Where the learner's own language is remembered. Nothing here is a secret. */
 const L1_KEY = 'vocotrial.eleve.l1';
@@ -281,6 +296,44 @@ export default function Eleve() {
   };
 
   const elapsedMs = call.connectedAt === null ? null : now - call.connectedAt;
+
+  /**
+   * The lesson's clock, and the close it triggers.
+   *
+   * THE PAGE OWNS THE CLOCK because nothing else can. A model cannot see one —
+   * it is told its budget in prose so it can pace itself and told explicitly
+   * never to guess the time — so the moment of closing has to be decided out
+   * here and said into the conversation. See TIME_UP_SIGNAL.
+   *
+   * TWO STEPS, NOT ONE. The note goes first and the hang-up follows a grace
+   * period later, so the conversation ends on a goodbye rather than mid-clause.
+   * Cutting the socket at the limit would also cost the end of the transcript,
+   * which is the part a report reads for how the learner handled a close.
+   *
+   * The ref is what stops it firing every second once past the limit: state
+   * would re-render before the note was sent and send it again on the next
+   * tick. It is cleared when a call ends, so a second conversation gets its own
+   * clock rather than closing the instant it connects.
+   */
+  const closedAt = useRef<number | null>(null);
+  const lengthMs = session ? minutesOf(session) * 60_000 : 0;
+
+  useEffect(() => {
+    if (!call.live) {
+      closedAt.current = null;
+      return;
+    }
+    if (!lengthMs || elapsedMs === null) return;
+
+    if (closedAt.current === null) {
+      if (elapsedMs < lengthMs) return;
+      closedAt.current = Date.now();
+      call.say(TIME_UP_SIGNAL);
+      return;
+    }
+
+    if (Date.now() - closedAt.current >= CLOSING_GRACE_MS) call.hangUp();
+  }, [call, call.live, elapsedMs, lengthMs]);
 
   /**
    * What the arrow in the pill points at when there is no call running.
@@ -548,7 +601,9 @@ export default function Eleve() {
                   <EvaluationPanel report={report} />
                 ) : (
                   <>
-                    {consigne && session && <ConsignePanel session={session} />}
+                    {consigne && session && (
+                      <ConsignePanel session={session} answered={call.answered} />
+                    )}
                     <EvaluationGate
                       live={call.live}
                       elapsedMs={elapsedMs}

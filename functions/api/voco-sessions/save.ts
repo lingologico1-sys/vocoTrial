@@ -4,6 +4,7 @@ import {
   MAX_QUESTIONS,
   MAX_TARGETS,
   MAX_VOCO_SESSION,
+  minutesOf,
   type VocoSession,
   looksLikeVocoSession,
 } from '../../../src/realtime/vocoSessions';
@@ -102,6 +103,10 @@ export async function onRequestPost(
     styleId: carried<string>(incoming.styleId, isText),
     faceId: incoming.faceId === null ? null : carried<string>(incoming.faceId, isText),
     evaluatorId: carried<string>(incoming.evaluatorId, isText),
+    // Clamped rather than carried, unlike the ids above it. Those name things
+    // in other libraries and are resolved where they are spent; this one is a
+    // number with a range, and the range is knowable here.
+    lengthMinutes: minutesOf(incoming),
     updatedAt: Date.now(),
   };
 

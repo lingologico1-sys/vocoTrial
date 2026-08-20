@@ -79,6 +79,20 @@ export interface SessionHandlers {
    * final figure, so the last push is the only record we get to keep.
    */
   onUsage?: (usage: UsageTotals) => void;
+  /**
+   * The tutor reported that one of its numbered questions is done.
+   *
+   * One-based, matching the list the tutor was given. The only structured thing
+   * a call ever says about its own progress — see _setup.ts on why it is a tool
+   * rather than something read out of the transcript.
+   *
+   * TREAT IT AS A FLOOR AND NOT A COUNT. A model under-reports far more often
+   * than it over-reports, and it may report out of order or twice. Whatever
+   * consumes this should move forward and never backward, and should not
+   * present the number as authoritative — the end-of-call report reads the
+   * whole transcript and is what actually knows.
+   */
+  onQuestionAnswered?: (number: number) => void;
 }
 
 /**
@@ -92,6 +106,21 @@ export interface SessionHandlers {
 export interface VoiceSession {
   setMuted: (muted: boolean) => void;
   stop: () => void;
+  /**
+   * Says something to the tutor as though the learner had said it, without it
+   * appearing in the transcript.
+   *
+   * The only way to steer a call already in progress. The clock lives in the
+   * page — a model cannot see one and invents elapsed time when asked to — so
+   * when the lesson's minutes are up, the page is what tells the tutor to
+   * close. See HOW THIS ENDS in `lessonBlock`.
+   *
+   * Not shown to the learner and not recorded: the transcript is built from
+   * `inputTranscription`, which is what the microphone heard, and this never
+   * goes near the microphone. So the report reads a conversation that ended
+   * naturally rather than one with a stage direction in the middle of it.
+   */
+  say: (text: string) => void;
   /** The agent's audio output, for anything that has to move in time with it. */
   readonly tap?: AudioTap | null;
 }

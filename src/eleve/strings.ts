@@ -43,6 +43,20 @@ export const FR = {
    * never opens on a bare numbered list with nothing saying what to do with it.
    */
   consigneNoBrief: 'Réponds à ces questions en parlant avec ton tuteur.',
+  /*
+   * THE COUNTDOWN COUNTS DOWN, not up. "Il te reste 3 questions" is a thing to
+   * finish; "3 sur 8 répondues" is a score, and a learner mid-conversation who
+   * reads a score reads it as a mark. Same number, and only one of them is
+   * about the lesson rather than about them.
+   */
+  questionsLeftOne: 'Il te reste 1 question',
+  questionsLeftMany: 'Il te reste {n} questions',
+  questionsAllDone: 'Tu as répondu à toutes les questions',
+  /*
+   * Said once the list is done, because the call does not end there and a
+   * learner who thinks it has will stop talking and wait.
+   */
+  questionsKeepTalking: 'Continue à parler avec ton tuteur jusqu’à la fin.',
 
   // --- The call
   starting: 'Connexion…',

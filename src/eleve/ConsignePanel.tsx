@@ -30,11 +30,25 @@ import { FR } from './strings';
 
 interface ConsignePanelProps {
   session: PublishedSetup;
+  /**
+   * How many questions the tutor says are done. See `answered` in useVoiceCall.
+   *
+   * A FLOOR AND NOT A SCORE, which decides how it is drawn. The tutor reports
+   * this through a tool and under-reports more readily than it over-reports, so
+   * the panel shows what is *left to do* rather than what has been achieved —
+   * a number that lags reads as "still to come", where a lagging score reads as
+   * a learner being marked down for work they have done.
+   */
+  answered?: number;
 }
 
-export default function ConsignePanel({ session }: ConsignePanelProps) {
+export default function ConsignePanel({ session, answered }: ConsignePanelProps) {
   const questions = session.questions ?? [];
   if (!questions.length) return null;
+
+  // Clamped, because the tutor reports a question's number and a model that
+  // miscounts its own list can name one past the end of it.
+  const left = Math.max(0, questions.length - Math.min(answered ?? 0, questions.length));
 
   const brief = session.brief?.trim();
 
@@ -57,6 +71,20 @@ export default function ConsignePanel({ session }: ConsignePanelProps) {
         keeps the text edge straight past nine.
       */}
       <ol className="space-y-2">
+        {/*
+          Only while there is something to count. Before a call it would be a
+          countdown at full, which says nothing, and the list underneath already
+          says how many there are.
+        */}
+        {typeof answered === 'number' && answered > 0 && (
+          <p className="mb-2 text-xs font-semibold text-lingo-accent-deep">
+            {left > 0
+              ? left === 1
+                ? FR.questionsLeftOne
+                : FR.questionsLeftMany.replace('{n}', String(left))
+              : `${FR.questionsAllDone} · ${FR.questionsKeepTalking}`}
+          </p>
+        )}
         {questions.map((question, index) => (
           <li key={index} className="flex gap-2.5 text-sm leading-relaxed text-lingo-ink">
             <span

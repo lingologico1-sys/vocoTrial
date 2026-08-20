@@ -134,9 +134,31 @@ export interface VoiceCall {
   connectedAt: number | null;
   /** How long the call that just ended ran, in ms. Null before the first one. */
   lastCallMs: number | null;
+  /**
+   * How many of the lesson's questions the tutor says are done.
+   *
+   * A FLOOR, NOT A COUNT, and the page showing it must treat it as one. It is
+   * whatever the tutor has reported through its tool, and a model under-reports
+   * far more readily than it over-reports — so this only ever goes up, resets
+   * between calls, and is never the thing that decides whether a lesson was
+   * completed. The end-of-call report reads the transcript and is what knows.
+   *
+   * Zero when there is no lesson, which is also zero when there is one and the
+   * tutor has not got anywhere yet. Nothing downstream needs to tell those
+   * apart: a page with no questions does not draw a counter.
+   */
+  answered: number;
   connect: () => Promise<void>;
   hangUp: (reason?: string) => void;
   toggleMute: () => void;
+  /**
+   * Say something to the tutor as the learner, invisibly.
+   *
+   * The page owns the clock — see `say` in types.ts — so this is how it tells
+   * the tutor the time is up. A no-op between calls rather than a throw: a
+   * timer that fires as the learner hangs up is an ordinary race, not a fault.
+   */
+  say: (text: string) => void;
   /**
    * Refuse before dialling, in the caller's own words.
    *
@@ -176,6 +198,7 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
   const [tap, setTap] = useState<AudioTap | null>(null);
   const [connectedAt, setConnectedAt] = useState<number | null>(null);
   const [lastCallMs, setLastCallMs] = useState<number | null>(null);
+  const [answered, setAnswered] = useState(0);
 
   /**
    * The last thing that happened worth leaning at.
@@ -401,10 +424,26 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
       // so showing those words would put sentences on screen that were cut off
       // mid-breath and never spoken.
       onInterrupted: () => queue.current.discard(),
+      /*
+       * Monotonic, and deliberately not a tally of calls received.
+       *
+       * The tutor reports a question's *number*, so the highest number seen is
+       * the honest reading of how far down the list it has got — a repeated
+       * call does not double-count, and one arriving out of order cannot make
+       * the counter go backwards under a learner who is watching it. A tutor
+       * that skips question three and reports four has, as far as anyone
+       * watching a countdown is concerned, dealt with four of them.
+       */
+      onQuestionAnswered: (number: number) => {
+        setAnswered((far) => Math.max(far, number));
+      },
     };
 
     try {
       lastActivity.current = Date.now();
+      // A new call is a new pass down the list. Reset here rather than on hang
+      // up, so the count stays readable on the summary of the call that ended.
+      setAnswered(0);
       const { modelKey, language: code, instructions, settings } = latest.current;
       const started = await startGeminiSession(handlers, modelKey, code, {
         instructions,
@@ -421,6 +460,10 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
       setDetail(error instanceof Error ? error.message : 'Could not start the session');
     }
   }, [append, cue, onTranscript]);
+
+  const say = useCallback((text: string) => {
+    session.current?.say(text);
+  }, []);
 
   // Read-then-set rather than a functional updater: the session call is a side
   // effect, and StrictMode double-invokes updaters in development, so putting
@@ -444,9 +487,11 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
     busy: status === 'connecting',
     connectedAt,
     lastCallMs,
+    answered,
     connect,
     hangUp,
     toggleMute,
+    say,
     fail,
   };
 }

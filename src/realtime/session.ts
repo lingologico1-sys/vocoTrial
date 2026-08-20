@@ -185,6 +185,21 @@ export interface PublishedSetup extends PerformanceProfile {
   /** Asked in this order. Also inside `instructions`. */
   questions?: string[];
   /**
+   * How long the conversation runs, in minutes.
+   *
+   * Carried as well as baked into `instructions`, and the duplication is the
+   * same bargain the questions strike directly above: the tutor is told the
+   * budget in prose so it can pace itself, and the student page needs the
+   * number to run a clock and to decide when to tell the tutor to close. Prose
+   * cannot be read by a timer.
+   *
+   * Optional, and absent means DEFAULT_MINUTES — the mechanism `tiltSettle`
+   * documents above. Setups published before there was a clock keep opening,
+   * and get the floor rather than zero, which would be a call that ends the
+   * instant it connects.
+   */
+  lengthMinutes?: number;
+  /**
    * Which Voco Session this came from, for the teacher's benefit only.
    *
    * Never resolved — nothing reads the library from a published setup, and the
@@ -248,6 +263,7 @@ export function looksLikeSetup(value: unknown): value is PublishedSetup {
     (setup.brief === undefined || isString(setup.brief)) &&
     (setup.targets === undefined || isStringArray(setup.targets)) &&
     (setup.questions === undefined || isStringArray(setup.questions)) &&
+    (setup.lengthMinutes === undefined || typeof setup.lengthMinutes === 'number') &&
     (setup.vocoSessionId === undefined || isString(setup.vocoSessionId)) &&
     (setup.vocoSessionName === undefined || isString(setup.vocoSessionName)) &&
     isString(setup.driver) &&

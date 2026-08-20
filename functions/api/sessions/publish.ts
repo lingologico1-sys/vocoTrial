@@ -12,6 +12,7 @@ import {
   MAX_QUESTIONS,
   MAX_TARGETS,
   lessonBlock,
+  minutesOf,
   type VocoSession,
 } from '../../../src/realtime/vocoSessions';
 import { kitKey } from '../../../src/facekit/published';
@@ -181,7 +182,20 @@ export async function onRequestPost(
   const faceId = typeof incoming.faceId === 'string' ? incoming.faceId : null;
   const persona = await personaFor(env.FACES, faceId);
 
-  const instructions = `${withPersona(style.text, persona)}${lessonBlock({ questions, targets })}`;
+  /*
+   * Clamped here rather than trusted, the rule every id on this route follows.
+   * A hand-written POST asking for a four-hour lesson gets ten minutes, and one
+   * asking for zero gets the floor — `minutesOf` is the single place that
+   * decides, so the prose the tutor reads and the clock the student page runs
+   * cannot disagree about how long this is.
+   */
+  const lengthMinutes = minutesOf(incoming);
+
+  const instructions = `${withPersona(style.text, persona)}${lessonBlock({
+    questions,
+    targets,
+    lengthMinutes,
+  })}`;
 
   /*
    * The same ceiling the live session enforces, checked here instead of there.
@@ -252,6 +266,7 @@ export async function onRequestPost(
     brief: typeof incoming.brief === 'string' ? incoming.brief : '',
     targets,
     questions,
+    lengthMinutes,
     vocoSessionId: typeof incoming.id === 'string' ? incoming.id : undefined,
     vocoSessionName: typeof incoming.name === 'string' ? incoming.name : undefined,
   };

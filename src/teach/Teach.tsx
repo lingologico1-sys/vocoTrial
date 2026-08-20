@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Check, Copy, Loader2 } from 'lucide-react';
+import { Check, Copy, Loader2, Plus, X } from 'lucide-react';
 import BrandBar from '../lingo/BrandBar';
 import { LANGUAGES, defaultLanguageCode } from '../realtime/languages';
 import { BUILTIN_EVALUATOR_ID, type Evaluator } from '../realtime/evaluators';
@@ -9,11 +9,16 @@ import type { TutorStyle } from '../realtime/house';
 import { listPublished } from '../facekit/library';
 import type { PublishedFace } from '../facekit/published';
 import {
+  DEFAULT_MINUTES,
+  DEFAULT_QUESTION_ROWS,
   MAX_BRIEF,
+  MAX_MINUTES,
   MAX_QUESTIONS,
   MAX_TARGETS,
   MAX_VOCO_SESSION_NAME,
+  MIN_MINUTES,
   joinLines,
+  minutesOf,
   newVocoSessionId,
   splitLines,
   type VocoSession,
@@ -73,12 +78,23 @@ import type { PublishedSetup } from '../realtime/session';
  * ways: fixing a typo here does not fix it under a code already read to a
  * class, and the fix is to publish again and hand out the new code.
  *
- * THREE BOXES RATHER THAN ONE PARSED BLOB for the lesson, which is where this
- * departs from EvaluatorPanel. A scale is nested — bands with structures under
- * them — so it is edited as one textarea in a format parseBands reads. A lesson
- * is three flat things that happen to sit together, and inventing a syntax to
- * hold them in one box would be a format to learn for no gain. One entry per
- * line is the whole of it, and splitLines strips a pasted list's own numbering.
+ * THE QUESTIONS ARE ONE INPUT EACH, and the targets are still a textarea. Both
+ * are lists, so the asymmetry needs saying: a question is the unit the whole
+ * app counts in. The tutor is handed them numbered, it reports progress by
+ * number, and the student watches a countdown of them — so the number beside
+ * each box on this page is the same number those three things mean, and a
+ * teacher editing question 4 can see that it is question 4. A textarea makes
+ * that a matter of counting newlines. Targets are counted by nobody.
+ *
+ * It also removes a quiet trap. The textarea sliced at MAX_QUESTIONS as you
+ * typed, so pasting sixteen questions silently dropped the last one and showed
+ * a full-looking box. Rows cannot do that: the Add button disappears at the
+ * ceiling, which is a thing you can see.
+ *
+ * A LESSON IS A LENGTH AS WELL AS A LIST. The clock is the teacher's, set here
+ * and spent in three places — the tutor is told its budget in prose so it can
+ * pace, the student page runs the countdown, and the page tells the tutor to
+ * close when it runs out. See lessonBlock and Eleve.tsx.
  */
 
 /** A blank session, so "New" has something to open. */
@@ -121,7 +137,16 @@ export default function Teach() {
   const [note, setNote] = useState('');
   const [brief, setBrief] = useState('');
   const [targetText, setTargetText] = useState('');
-  const [questionText, setQuestionText] = useState('');
+  /**
+   * One string per row, blanks included.
+   *
+   * Blanks are kept in state and dropped only on the way out — see `questions`
+   * below. An empty row that vanished the moment it was emptied would delete
+   * itself under a teacher clearing it to retype, which is the one thing a text
+   * box must never do.
+   */
+  const [rows, setRows] = useState<string[]>(() => Array(DEFAULT_QUESTION_ROWS).fill(''));
+  const [minutes, setMinutes] = useState(DEFAULT_MINUTES);
 
   // The tutor.
   const [language, setLanguage] = useState(defaultLanguageCode);
@@ -209,7 +234,16 @@ export default function Teach() {
     setNote(source.note);
     setBrief(source.brief);
     setTargetText(joinLines(source.targets));
-    setQuestionText(joinLines(source.questions));
+    // Padded up to the default so a short lesson still opens with somewhere to
+    // type, and never truncated: a saved lesson shows every question it has.
+    setRows(
+      source.questions.length
+        ? [...source.questions].concat(
+            Array(Math.max(0, DEFAULT_QUESTION_ROWS - source.questions.length)).fill(''),
+          )
+        : Array(DEFAULT_QUESTION_ROWS).fill(''),
+    );
+    setMinutes(minutesOf(source));
     setLanguage(source.language || defaultLanguageCode());
     setStyleId(source.styleId ?? '');
     setFaceId(source.faceId ?? null);
@@ -221,8 +255,25 @@ export default function Teach() {
     if (chosen) rememberVocoSession(chosen.id);
   }, [chosenId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const questions = splitLines(questionText, MAX_QUESTIONS);
+  // Blank rows dropped here rather than in state, and trimmed the way the save
+  // route trims them, so the count under the panel is the count that is saved.
+  const questions = rows.map((row) => row.trim()).filter(Boolean).slice(0, MAX_QUESTIONS);
   const targets = splitLines(targetText, MAX_TARGETS);
+
+  const setRow = (index: number, value: string) =>
+    setRows((current) => current.map((row, at) => (at === index ? value : row)));
+
+  /**
+   * Removing the last row empties it instead of deleting it.
+   *
+   * A lesson needs at least one question, and a panel with no boxes in it has
+   * nothing to type into and no obvious way back. Clearing is what the button
+   * means at that point, and it is the same gesture.
+   */
+  const dropRow = (index: number) =>
+    setRows((current) =>
+      current.length > 1 ? current.filter((_, at) => at !== index) : [''],
+    );
 
   /**
    * The style that will actually be used, which is not always the one named.
@@ -242,6 +293,7 @@ export default function Teach() {
     brief: brief.trim(),
     targets,
     questions,
+    lengthMinutes: minutes,
     language,
     styleId: style?.id ?? '',
     faceId,
@@ -404,24 +456,115 @@ export default function Teach() {
                 />
               </div>
 
-              <div className="flex flex-col gap-1.5">
+              <div className="flex flex-col gap-2">
                 <div className="flex items-baseline justify-between">
-                  <label className={label} htmlFor="voco-questions">
-                    Questions
-                  </label>
+                  <span className={label}>Questions</span>
+                  <span className="text-[11px] text-lingo-muted">Asked in this order</span>
+                </div>
+
+                {/*
+                  The number is the point of the row, not decoration. It is what
+                  the tutor is handed, what it reports progress by, and what the
+                  student's countdown counts down — so it is shown in the same
+                  monospace the code is, and it does not move when a row above
+                  is emptied, because blanks are only dropped on save.
+                */}
+                <ul className="flex flex-col gap-1.5">
+                  {rows.map((row, index) => (
+                    <li key={index} className="flex items-center gap-2">
+                      <span className="w-5 shrink-0 text-right font-lingo-mono text-xs text-lingo-muted">
+                        {index + 1}
+                      </span>
+                      <input
+                        value={row}
+                        onChange={(event) => setRow(index, event.target.value)}
+                        placeholder={
+                          index === 0 ? 'Qu’as-tu fait pendant les vacances ?' : 'Another question…'
+                        }
+                        disabled={busy}
+                        aria-label={`Question ${index + 1}`}
+                        className={`${field} flex-1`}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => dropRow(index)}
+                        disabled={busy}
+                        title={rows.length > 1 ? 'Remove this question' : 'Clear this question'}
+                        aria-label={`Remove question ${index + 1}`}
+                        className="shrink-0 rounded-lg border-2 border-transparent p-1.5 text-lingo-muted transition-colors hover:border-lingo-border-strong hover:text-lingo-error disabled:opacity-40"
+                      >
+                        <X size={15} />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+
+                <div className="flex items-center gap-3 pl-7">
+                  {/*
+                    Gone at the ceiling rather than disabled-and-explaining. The
+                    old textarea sliced silently at the limit; a button that is
+                    simply absent, next to a count that reads 15/15, says the
+                    same thing without a sentence.
+                  */}
+                  {rows.length < MAX_QUESTIONS ? (
+                    <button
+                      type="button"
+                      onClick={() => setRows((current) => [...current, ''])}
+                      disabled={busy}
+                      className="flex items-center gap-1.5 rounded-xl border-2 border-lingo-border-strong bg-lingo-surface px-3 py-1.5 text-sm text-lingo-muted transition-colors hover:border-lingo-accent hover:text-lingo-ink disabled:opacity-40"
+                    >
+                      <Plus size={14} />
+                      Add question
+                    </button>
+                  ) : (
+                    <span className="text-[11px] text-lingo-muted">
+                      That is the most a lesson can hold.
+                    </span>
+                  )}
                   <span className="text-[11px] text-lingo-muted">
-                    One per line, asked in order
+                    {questions.length} written
                   </span>
                 </div>
-                <textarea
-                  id="voco-questions"
-                  value={questionText}
-                  onChange={(event) => setQuestionText(event.target.value)}
-                  rows={6}
-                  placeholder={'Qu’as-tu fait pendant les vacances ?\nOù es-tu allé ?'}
-                  disabled={busy}
-                  className={`${field} resize-y font-lingo leading-relaxed`}
-                />
+              </div>
+
+              {/*
+                The clock. Beside the questions rather than in the tutor panel,
+                because the number a teacher reasons about is "how long, for how
+                many questions" — the two belong on one screen, and the line
+                underneath does that arithmetic out loud so nobody has to.
+              */}
+              <div className="flex flex-col gap-1.5">
+                <div className="flex items-baseline justify-between">
+                  <label className={label} htmlFor="voco-minutes">
+                    How long
+                  </label>
+                  <span className="text-[11px] text-lingo-muted">
+                    {MIN_MINUTES}–{MAX_MINUTES} minutes
+                  </span>
+                </div>
+                <div className="flex items-center gap-3">
+                  <input
+                    id="voco-minutes"
+                    type="range"
+                    min={MIN_MINUTES}
+                    max={MAX_MINUTES}
+                    step={1}
+                    value={minutes}
+                    onChange={(event) => setMinutes(Number(event.target.value))}
+                    disabled={busy}
+                    className="h-1.5 flex-1 cursor-pointer appearance-none rounded-full bg-lingo-border-strong accent-lingo-accent disabled:opacity-40"
+                  />
+                  <span className="w-16 shrink-0 font-lingo-mono text-sm font-bold tabular-nums">
+                    {minutes} min
+                  </span>
+                </div>
+                <p className="text-[11px] leading-relaxed text-lingo-muted">
+                  {questions.length
+                    ? `About ${Math.max(1, Math.round((minutes / questions.length) * 2) / 2)} minutes a question. `
+                    : ''}
+                  The tutor keeps the conversation going until the time is up — inventing its own
+                  questions once yours run out — and closes when it arrives.
+                </p>
               </div>
 
               <div className="flex flex-col gap-1.5">

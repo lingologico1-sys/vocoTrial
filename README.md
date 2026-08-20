@@ -143,9 +143,27 @@ field drains the next time the lesson is saved.
 ```
 /teach ──save──► R2 sheets.json
                      │
-                     └──publish──► setup ──► /eleve   (questions, consigne)
+                     └──publish──► setup ──► /eleve   (questions, consigne, clock)
                                           └──► report  (targets)
 ```
+
+**Questions are one input each**, up to 15, starting at 5 empty rows. They were
+one textarea until the app started counting in questions: the tutor is handed
+them numbered, reports progress by number, and the student watches a countdown
+of them, so the number beside each box is the number all three of those mean.
+The textarea also sliced silently at the ceiling; rows cannot, because the Add
+button disappears instead.
+
+**A lesson is a length as well as a list.** The teacher sets 5–10 minutes, and
+that one number is both floor and ceiling — the tutor keeps the conversation
+alive until it is reached, inventing questions of its own once the list runs
+out, and closes when it arrives.
+
+Five minutes rather than three, because what a level judgement needs is
+*learner* speech: in a conversation where the tutor discusses each answer, the
+learner's share is 35–50% of the clock, so three minutes elapsed is about 90
+seconds of talking. Five buys nearer two and a half. For scale, DELF A2's
+speaking test runs 6–8 minutes.
 
 **The prose and the targets go to different readers**, which is the one thing
 worth reading twice:
@@ -176,6 +194,40 @@ the fourth one is — and turns over to **Évaluation** once a conversation has
 ended. When the report arrives, consigne and button both go and the reading has
 the panel to itself. Starting another call clears the report, which brings the
 consigne back with no machinery of its own.
+
+### How the tutor is steered, and what it reports back
+
+Four instructions in `lessonBlock` are worth knowing about, because three of
+them reverse or constrain what a model would do left alone:
+
+- **Every turn ends on a question.** Keeping the conversation alive is the
+  tutor's job, not the learner's — a tutor that trails off leaves a beginner
+  holding a silence they have no language to fill, and the silence reads to
+  them as their own failure. The closing turn is the one written exemption.
+- **Running out of questions is not the end.** This used to say "keep talking
+  about the same subjects instead of inventing new ones", written when a
+  conversation ended whenever the learner stopped it. There is a clock now, so
+  it is reversed: keep asking, preferring subjects already raised.
+- **The time is a budget, not a clock.** The tutor is told how long it has and
+  roughly what that buys per question, and told never to guess elapsed time.
+  The page owns the clock and says when to close, through `TIME_UP_SIGNAL` —
+  marked as a system note, because `clientContent`'s only role is `user` and an
+  unmarked note reads as the learner saying "the time is up" in English.
+- **Progress comes back through a tool.** `questionAnswered(n)` is the only
+  structured channel this app has into a live call, declared in the setup frame
+  the relay composes. Nothing else could carry it: the transcript is untyped
+  text, and a spoken marker is one the tutor eventually says out loud.
+
+**The countdown is a floor, not a count.** A model under-reports far more
+readily than it over-reports, so `answered` only ever moves forward, the
+student page shows what is *left* rather than a score, and the end-of-call
+report — which reads the whole transcript — is the authority on what was really
+covered.
+
+At the limit the tutor is told to close and the page hangs up
+`CLOSING_GRACE_MS` later, so the conversation ends on a goodbye rather than
+mid-clause, and the transcript keeps the part a report reads for how a learner
+handles a close.
 
 The report gains a **second axis, not a second scale**: `task` says whether the
 lesson's targets were met, `bands` says where the learner stands, and neither
@@ -598,6 +650,8 @@ npm run lint
 | `/api/voco-sessions/*` | **untested since the rename** — the read side accepts both the old `sheets` field and the new `sessions` one, and the first save rewrites the object under the new one |
 | `/api/sessions/publish`, composing the prompt server-side | **untested** — the three-layer composition (style → persona → lesson), the code mint-and-retry, and the house profile merge all need a browser and the buckets |
 | `/eleve` code entry | **untested** — the `?token=` path and the typed path share one function, but neither has been run |
+| `questionAnswered` tool calls | **untested, and the least certain thing here** — the declaration, the `toolResponse` handshake and the countdown all typecheck and build, but whether the model calls it reliably mid-conversation can only be found out on a real call. Under-reporting is designed around; silence is not |
+| The lesson clock and the close | **untested** — `minutesOf` clamping is verified (`99 → 10`, `NaN → 5`, `3 → 5`) and the prompt renders correctly, but the `TIME_UP_SIGNAL` round trip needs a real call |
 | Gemini handshake | **working** — 2.5 native audio on Vertex, 3.1 Flash Live on AI Studio |
 | Gemini audio in a browser | untested; needs a mic |
 | Saved prompt presets | typechecks and builds; the create/update/delete round trip is **untested in a browser** |
