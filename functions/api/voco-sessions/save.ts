@@ -9,6 +9,7 @@ import {
   looksLikeVocoSession,
 } from '../../../src/realtime/vocoSessions';
 import { PATIENCE } from '../../../src/realtime/settings';
+import { findModel } from '../../../src/realtime/models';
 import type { Patience } from '../../../src/realtime/settings';
 import { type VocoSessionEnv, readVocoSessions, writeVocoSessions } from './_library';
 
@@ -101,6 +102,14 @@ export async function onRequestPost(
    * patience is spent as 'standard' — see patienceSettings.
    */
   const isPatience = (value: unknown) => PATIENCE.some((entry) => entry.key === value);
+  /*
+   * Checked against the allowlist for patience's reason and one of its own: a
+   * model key is the field that decides which meter a lesson spends. Carrying
+   * an arbitrary string would put that decision in the request body, which is
+   * the hole models.ts opens by explaining. An unrecognised key is dropped and
+   * reads as the default at publish.
+   */
+  const isModelKey = (value: unknown) => typeof value === 'string' && !!findModel(value);
 
   const session: VocoSession = {
     id: incoming.id,
@@ -114,6 +123,7 @@ export async function onRequestPost(
     faceId: incoming.faceId === null ? null : carried<string>(incoming.faceId, isText),
     evaluatorId: carried<string>(incoming.evaluatorId, isText),
     patience: carried<Patience>(incoming.patience, isPatience),
+    modelKey: carried<string>(incoming.modelKey, isModelKey),
     // Clamped rather than carried, unlike the ids above it. Those name things
     // in other libraries and are resolved where they are spent; this one is a
     // number with a range, and the range is knowable here.

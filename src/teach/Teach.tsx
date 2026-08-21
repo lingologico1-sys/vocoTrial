@@ -34,6 +34,7 @@ import {
 } from '../realtime/vocoSessionStore';
 import { listPublishedSetups, publishVocoSession, type PublishedRow } from '../realtime/sessionStore';
 import { PATIENCE, type Patience } from '../realtime/settings';
+import { defaultModelKey, teachableModels } from '../realtime/models';
 import type { PublishedSetup } from '../realtime/session';
 
 /**
@@ -54,13 +55,24 @@ import type { PublishedSetup } from '../realtime/session';
  * is: /eleve is French because a learner should be immersed, and that argument
  * says nothing about the person writing the questions.
  *
- * WHAT A TEACHER IS NOT ASKED. No prompt, no model, no motion knobs, no
- * turn-taking, and no voice. Those are an administrator's, and they reach a
+ * WHAT A TEACHER IS NOT ASKED. No prompt, no motion knobs, no turn-taking
+ * beyond patience, and no voice. Those are an administrator's, and they reach a
  * student anyway — a tutor style, a house performance profile and the voice
  * written on the chosen face, all authored in the workshop and all spent
  * server-side at publish. See house.ts. What is left here is what a teacher
  * actually decides: the questions, the consigne, the language, the manner, the
- * face and the scale.
+ * face, the scale, and the two below.
+ *
+ * THE MODEL IS ASKED FOR NOW, and it did not use to be. That line read "no
+ * prompt, no model" and meant it: the student page held the choice in a
+ * constant, and changing it for one class meant changing it for every class and
+ * deploying. The two models do not differ the way two knobs differ — one counts
+ * the questions and writes down what it heard, the other hears tone and is
+ * unreliable at both — so which one a class should meet is a teaching decision
+ * and it was being made by whoever last edited Eleve.tsx.
+ *
+ * It is asked in teacher language and not by name. See `teach` in models.ts,
+ * which is where the sentences live; this page prints them and stores a key.
  *
  * THE VOICE WENT WITH THE FACE, which is worth saying because there was a
  * dropdown for it here and somebody will look for it. It sat beside the face
@@ -114,6 +126,9 @@ function empty(): VocoSession {
     // of learners actually wants. An existing one shows whatever it was saved
     // with, and absent means 'standard' — see `patience` on VocoSession.
     patience: 'patient',
+    // The counting, transcribing one. A new lesson gets the model the whole
+    // app defaults to rather than the last one anybody happened to try.
+    modelKey: defaultModelKey(),
     styleId: '',
     faceId: null,
     evaluatorId: BUILTIN_EVALUATOR_ID,
@@ -155,6 +170,7 @@ export default function Teach() {
   const [rows, setRows] = useState<string[]>(() => Array(DEFAULT_QUESTION_ROWS).fill(''));
   const [capMinutes, setCapMinutes] = useState(DEFAULT_CAP_MINUTES);
   const [patience, setPatience] = useState<Patience>('patient');
+  const [modelKey, setModelKey] = useState<string>(defaultModelKey);
 
   // The tutor.
   const [language, setLanguage] = useState(defaultLanguageCode);
@@ -256,6 +272,11 @@ export default function Teach() {
     // a lesson saved before this control existed sent nothing, and opening it
     // must not quietly change how it behaves.
     setPatience(source.patience ?? 'standard');
+    // Absent reads as the default here rather than as some third thing, and
+    // unlike patience that is not a compromise: a lesson saved before this
+    // control existed ran on the default model, so opening it shows what it
+    // has been doing all along. See `modelKey` on VocoSession.
+    setModelKey(source.modelKey ?? defaultModelKey());
     setLanguage(source.language || defaultLanguageCode());
     setStyleId(source.styleId ?? '');
     setFaceId(source.faceId ?? null);
@@ -310,6 +331,7 @@ export default function Teach() {
     questions,
     capMinutes,
     patience,
+    modelKey,
     language,
     styleId: style?.id ?? '',
     faceId,
@@ -661,6 +683,76 @@ export default function Teach() {
                   {PATIENCE.find((entry) => entry.key === patience)?.hint}
                 </p>
               </div>
+
+              {/*
+                THE MODEL, ASKED FOR BY WHAT IT DOES.
+
+                Radios rather than the select the two controls above it use, and
+                that is not decoration. A select shows one option and hides the
+                rest behind a click, which is right when the options differ by a
+                degree — standard, patient, very patient — and wrong when they
+                differ in kind. Both of these cost something the other does not,
+                and a teacher choosing between them has to be able to read both
+                costs at once, without discovering the second by opening a menu.
+
+                The model id sits under each in mono and small. A teacher does
+                not need it and should not have to parse it, but the person they
+                ring when a lesson misbehaves does, and "the warm one" is not
+                something you can grep for.
+              */}
+              <fieldset className="flex flex-col gap-1.5 border-0 p-0">
+                <legend className={`${label} mb-1.5 p-0`}>How the tutor listens</legend>
+                <div className="flex flex-col gap-2">
+                  {teachableModels().map((model) => {
+                    const chosenModel = model.key === modelKey;
+                    return (
+                      <label
+                        key={model.key}
+                        className={`flex cursor-pointer gap-2.5 rounded-xl border-2 px-3.5 py-3 transition-colors ${
+                          chosenModel
+                            ? 'border-lingo-accent bg-lingo-surface shadow-lingo-pop-sm'
+                            : 'border-lingo-border-light bg-lingo-surface hover:border-lingo-accent-light'
+                        } ${busy ? 'cursor-not-allowed opacity-60' : ''}`}
+                      >
+                        <input
+                          type="radio"
+                          name="voco-model"
+                          value={model.key}
+                          checked={chosenModel}
+                          onChange={() => setModelKey(model.key)}
+                          disabled={busy}
+                          className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer accent-lingo-accent"
+                        />
+                        <span className="flex flex-col gap-1">
+                          <span className="text-sm font-bold leading-snug">
+                            {model.teach!.label}
+                          </span>
+                          <span className="text-[11px] leading-relaxed text-lingo-muted">
+                            {model.teach!.blurb}
+                          </span>
+                          {/*
+                            Printed only where there is one, so the model with
+                            nothing to warn about does not carry a blank line
+                            shaped like a warning. The colour is the one the
+                            tight-cap note uses, which is this page's single
+                            existing way of saying "this is a choice with a
+                            consequence" — a second colour for a second kind of
+                            caution would be a vocabulary nobody taught anyone.
+                          */}
+                          {model.teach!.caution && (
+                            <span className="text-[11px] leading-relaxed text-lingo-accent-deep">
+                              {model.teach!.caution}
+                            </span>
+                          )}
+                          <span className="font-lingo-mono text-[10px] leading-relaxed text-lingo-muted opacity-70">
+                            {model.id}
+                          </span>
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </fieldset>
 
               <div className="flex flex-col gap-1.5">
                 <div className="flex items-baseline justify-between">

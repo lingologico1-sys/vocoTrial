@@ -492,11 +492,11 @@ surface is a property of each model in
 
 | model | surface | why |
 | --- | --- | --- |
-| `gemini-3.1-flash-live-preview` | AI Studio | **no Vertex build in any region.** The default, and what every student lesson dials |
-| `gemini-live-2.5-flash-native-audio` | Vertex (GCP billing) | GA there; the native-audio dialect. Kept for comparison in studio |
+| `gemini-3.1-flash-live-preview` | AI Studio | **no Vertex build in any region.** The default, and what a lesson dials unless a teacher says otherwise |
+| `gemini-live-2.5-flash-native-audio` | Vertex (GCP billing) | GA there; the native-audio dialect. Offered on `/teach` and pinned in studio |
 | `gemini-3-pro-image` (face kit) | Vertex | confirmed generating; on the **global** endpoint only |
 
-**The student page dials 3.1, and that is two properties of the surface rather
+**A lesson defaults to 3.1, and that is two properties of the surface rather
 than a preference.** A lesson counts its progress from tool calls made while it
 runs, which is only survivable where `NON_BLOCKING` is honoured. And `/eleve`
 shows the learner their own words, feeds them to a vocabulary list and marks
@@ -505,6 +505,19 @@ through a real ASR stage which can be told the language; native audio
 transcribes its own input with no such stage, and wrote Arabic script into a
 French lesson where the learner had said *"oui"*. What 3.1 gives up is affective
 dialog and proactivity, which `settings.ts` already refuses it.
+
+**A teacher can override it per lesson**, and the model rides on the published
+code — `modelKey` on `PublishedSetup`, written at publish and read by `/eleve`.
+A code handed out before that field existed has no `modelKey` and resolves to
+`defaultModelKey()`, which is the model it has been running on all along.
+`/teach` names the two by what they do rather than by id and prints the cost of
+the warmer one; the sentences live on `teach` in
+[src/realtime/models.ts](src/realtime/models.ts). **The page guards nothing** —
+a lesson published on native audio still sends the progress tool, still counts
+and still reads the transcript it is given, so both failures above are live
+choices a teacher is shown and can make. Picking it also switches on
+`affectiveDialog` and `proactiveAudio` from the house profile, which the
+sanitizer drops on 3.1.
 
 Vertex runs in **express mode**, which is what makes it usable from a Worker at
 all: it takes an API key and infers the project, with no OAuth exchange to sign.

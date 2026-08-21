@@ -5,6 +5,7 @@ import { composeTutorPrompt } from '../../../src/realtime/tutorPrompt';
 import { patienceSettings } from '../../../src/realtime/settings';
 import { FALLBACK_PERFORMANCE } from '../../../src/realtime/house';
 import { newLessonCode } from '../../../src/realtime/lessonCodes';
+import { defaultModelKey, findModel } from '../../../src/realtime/models';
 import {
   MAX_SESSION,
   MAX_SESSION_LABEL,
@@ -284,6 +285,19 @@ export async function onRequestPost(
    */
   const patience = patienceSettings(incoming.patience);
 
+  /*
+   * The model this lesson runs on, resolved here rather than carried.
+   *
+   * Resolved for the reason every id on this route is resolved: what a student
+   * dials has to be a thing this deployment can serve, and the only place that
+   * is knowable is the allowlist. A key that names nothing — a hand-written
+   * POST, or a lesson saved against a model since retired — becomes the default
+   * rather than a 400, which is the same call `patienceSettings` makes on an
+   * unknown word. A published code that opens onto the default model is a
+   * lesson; one that opens onto nothing is a class standing about.
+   */
+  const modelKey = findModel(incoming.modelKey ?? '')?.key ?? defaultModelKey();
+
   const setup: PublishedSetup = {
     ...performance,
     ...patience,
@@ -291,6 +305,7 @@ export async function onRequestPost(
     label: label || undefined,
     updatedAt: Date.now(),
     language: language.code,
+    modelKey,
     // The halves of a prompt that are a teacher's and an administrator's, stored
     // as they were at this moment. What is not stored is the protocol the tutor
     // is told to follow — the tool it calls and the notes it will be sent —

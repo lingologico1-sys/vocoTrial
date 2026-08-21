@@ -159,6 +159,26 @@ export interface PublishedSetup extends PerformanceProfile {
   /** The target language, ISO-639-1, resolved against languages.ts. */
   language: string;
   /**
+   * Which live model the student page dials for this lesson.
+   *
+   * A key from models.ts, resolved at publish so that what is stored is a key
+   * this build knew about at the moment a teacher chose it — the same copying
+   * that `style` and `persona` get, and for the same reason.
+   *
+   * ALWAYS PRESENT ON A SETUP PUBLISHED SINCE THIS FIELD EXISTED, and absent on
+   * every code handed out before. Absent reads as `defaultModelKey()`, which is
+   * the model those lessons have been running on all along, so nothing already
+   * in a classroom changed when the choice became a teacher's. Eleve.tsx does
+   * that resolution; it is the one reader.
+   *
+   * NOT A SETTING, WHICH IS WHY IT IS NOT ON PerformanceProfile. Everything
+   * there is a knob sent inside a setup frame and dropped by the sanitizer when
+   * the model will not take it. This decides which model receives that frame at
+   * all — and therefore which of those knobs survive it, which meter is spent,
+   * and whether the page can count questions. See `teach` in models.ts.
+   */
+  modelKey?: string;
+  /**
    * The tutor style, as the house library had it at the moment of publishing.
    *
    * Prose, not an id — see the header. What sort of tutor this is: the manner,

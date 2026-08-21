@@ -17,6 +17,7 @@ import {
 import { defaultInstructions } from '../realtime/instructions';
 import { findLanguage, defaultLanguageCode } from '../realtime/languages';
 import { codeFromUrl, fetchSetup } from '../realtime/sessionStore';
+import { defaultModelKey, findModel } from '../realtime/models';
 import type { SessionSettings } from '../realtime/settings';
 import { useVoiceCall } from '../live/useVoiceCall';
 import ConsignePanel from './ConsignePanel';
@@ -131,26 +132,42 @@ const CLOSING_SETTLE_MS = 12_000;
 const L1_KEY = 'vocotrial.eleve.l1';
 
 /**
- * The one model a student ever meets, and it is not the one studio defaults to
- * for the sake of comparison — it is the one a lesson needs.
+ * Which model this lesson dials, and it is the teacher's answer now.
  *
- * TWO PROPERTIES OF THE SURFACE, NOT PREFERENCES. This page counts a lesson's
- * progress from tool calls the tutor makes as it goes, and per-question
- * reporting is only survivable where `behavior: 'NON_BLOCKING'` is honoured:
- * Vertex ignores the field, and answering a blocking call restarts the model
- * into a turn spoken on top of the last one, so the learner hears every
- * question twice. And this page shows the learner their own words, feeds them
- * to a vocabulary list and marks them in a report — all from a transcript that
- * a half-cascade model produces through a real ASR stage, told which language
- * it is listening to. Native audio transcribes its own input with no such stage
- * and wrote Arabic script into a French lesson.
+ * IT WAS A CONSTANT HERE, and what the constant was defending is still true —
+ * it just stopped being this file's decision to make. Both halves are
+ * properties of the surface rather than preferences:
  *
- * A constant rather than a literal in the `useVoiceCall` call because two
- * readers need it: the call that dials it, and the diagnostic that reports what
- * was dialled. A diagnostic naming a different model from the one in use is
- * worse than one naming none.
+ *  - THIS PAGE COUNTS QUESTIONS from tool calls the tutor makes as it goes, and
+ *    per-question reporting is only survivable where `behavior: 'NON_BLOCKING'`
+ *    is honoured. Vertex ignores the field, and answering a blocking call
+ *    restarts the model into a turn spoken on top of the last one, so the
+ *    learner hears a question twice. That ended a five-question lesson at
+ *    question three.
+ *  - THIS PAGE SHOWS THE LEARNER THEIR OWN WORDS, feeds them to a vocabulary
+ *    list and marks them in a report — all from a transcript. A half-cascade
+ *    model writes one through a real ASR stage told which language it is
+ *    listening to; native audio transcribes its own input with no such stage,
+ *    and wrote Arabic script into a French lesson where the learner said "oui".
+ *
+ * NEITHER IS GUARDED AGAINST HERE, deliberately. A teacher who picks the warmer
+ * model is shown both costs in the sentences models.ts writes for them, and the
+ * page then does exactly what it does on any other lesson: sends the progress
+ * tool, counts, runs the countdown, and reads the transcript it is given. A
+ * page that quietly withdrew features according to a dropdown two tiers away
+ * would be a page nobody could explain to the teacher on the phone.
+ *
+ * ABSENT MEANS THE DEFAULT, and so does a key this build does not recognise.
+ * Every code handed out before the choice existed has no `modelKey`, and every
+ * one of them has been running on `defaultModelKey()` all along — so those
+ * lessons carry on unchanged. Note that this ties them to whatever sits first
+ * in MODELS: reordering that list moves every legacy lesson with it, which is
+ * the correct behaviour for "the model we run by default" and worth knowing
+ * before reordering.
  */
-const MODEL_KEY = 'gemini-flash-31';
+function lessonModelKey(setup: PublishedSetup | null): string {
+  return findModel(setup?.modelKey ?? '')?.key ?? defaultModelKey();
+}
 
 type Tab = 'evaluation' | 'dictionary' | 'vocab';
 
@@ -279,8 +296,15 @@ export default function Eleve() {
     });
   }, [session]);
 
+  /*
+   * Resolved once for the two readers that need it: the call that dials it, and
+   * the diagnostic that reports what was dialled. A diagnostic naming a
+   * different model from the one in use is worse than one naming none.
+   */
+  const modelKey = lessonModelKey(session);
+
   const call = useVoiceCall({
-    modelKey: MODEL_KEY,
+    modelKey,
     language: session?.language ?? 'fr',
     instructions,
     /*
@@ -952,7 +976,7 @@ export default function Eleve() {
             setup: session,
             typedCode: typed,
             codeError,
-            modelKey: MODEL_KEY,
+            modelKey,
             settings,
             l1,
             status: call.status,

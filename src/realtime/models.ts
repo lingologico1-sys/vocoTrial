@@ -45,6 +45,27 @@ export interface ModelChoice {
   /** Allowed by the server but kept out of the picker (verification probes). */
   hidden?: boolean;
   /**
+   * How a teacher meets this model on /teach. Absent means not offered there.
+   *
+   * TEACHER LANGUAGE, NOT MODEL LANGUAGE, and that is the whole reason it is a
+   * separate field from `label`. Everywhere else a model is named by its id and
+   * its surface, because everywhere else is the workshop. /teach asks for
+   * patience and a manner rather than milliseconds and prompts, and "Gemini 2.5
+   * Flash Native Audio" tells the person choosing it nothing about the lesson
+   * they are about to hand out.
+   *
+   * `caution` is the half a teacher could not find out any other way: what this
+   * model costs them. Prose rather than a flag because the page prints it
+   * verbatim, and because what goes wrong differs per model — see Eleve.tsx for
+   * what the student page does with each. A model with nothing to warn about
+   * leaves it off rather than saying so.
+   */
+  teach?: {
+    label: string;
+    blurb: string;
+    caution?: string;
+  };
+  /**
    * Set when the id has NOT been confirmed against the provider. Shown in the
    * picker so nobody mistakes a guess for a checked fact.
    */
@@ -81,6 +102,11 @@ export const MODELS: ModelChoice[] = [
     label: 'Gemini 3.1 Flash Live',
     id: 'gemini-3.1-flash-live-preview',
     surface: 'aistudio',
+    teach: {
+      label: 'Reliable progress tracking',
+      blurb:
+        'Counts each question as it is answered, and writes down what the learner said in the language of the lesson.',
+    },
     // AI Studio only, and not for want of looking: sixteen spellings across
     // four Vertex regions all closed 1008, and Google's own answer is that this
     // model has no Vertex build in any region. So it is here on the surface
@@ -94,6 +120,12 @@ export const MODELS: ModelChoice[] = [
     label: 'Gemini 2.5 Flash Native Audio',
     id: 'gemini-live-2.5-flash-native-audio',
     surface: 'vertex',
+    teach: {
+      label: 'Warmer, more expressive',
+      blurb: 'Hears the tone the learner speaks in and answers in kind.',
+      caution:
+        'Progress through the questions is counted unreliably, and the tutor may repeat a question it has already asked. What the learner said is written down by the model itself, sometimes in the wrong script — the vocabulary list and the end-of-lesson report both read that text.',
+    },
     // The GA id, not the dated preview. Both work — this and
     // gemini-live-2.5-flash-preview-native-audio-09-2025 each reach
     // setupComplete — but a dated preview retires 45 days after its replacement
@@ -147,6 +179,20 @@ export function findModel(key: string): ModelChoice | undefined {
 /** What the picker offers, in order. */
 export function visibleModels(): ModelChoice[] {
   return MODELS.filter((m) => !m.hidden);
+}
+
+/**
+ * What /teach offers, in order. A subset of the picker, not the same list.
+ *
+ * Two filters rather than one because they answer different questions. `hidden`
+ * is "may this be dialled at all" — a probe id is allowlisted by the server and
+ * kept out of every picker. `teach` is "has anybody written what this means to
+ * a teacher", and a model that nobody has is not one to put in front of a
+ * teacher with its id showing. Adding a model to the workshop is a line in
+ * MODELS; adding it to /teach is that line plus the sentences.
+ */
+export function teachableModels(): ModelChoice[] {
+  return visibleModels().filter((m) => m.teach);
 }
 
 export function defaultModelKey(): string {

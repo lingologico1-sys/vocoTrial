@@ -169,6 +169,29 @@ export interface VocoSession {
    */
   patience?: Patience;
 
+  /**
+   * Which live model runs the lesson. A key from models.ts, never an id.
+   *
+   * THE SECOND PROVIDER SETTING A TEACHER GETS, and it arrived for a different
+   * reason from the first. `patience` is a knob that belongs to the class in
+   * front of you. This is a choice between two models that behave differently
+   * enough that the lesson is a different lesson: one counts questions and
+   * transcribes what it heard, the other hears tone. See `teach` in models.ts
+   * for the sentences a teacher actually reads, and Eleve.tsx for what the
+   * student page does with each.
+   *
+   * A key rather than an id, for the reason models.ts opens with: an id here
+   * would be a model string arriving from a client, and the allowlist exists so
+   * that the thing which decides what gets metered is not the browser.
+   *
+   * Absent means `defaultModelKey()`, which is what every lesson written before
+   * this field existed ran on and still runs on. Unknown means the same — a key
+   * that no longer names a model is dropped at save and resolved at publish, so
+   * retiring a model turns its lessons back into default ones rather than
+   * breaking them.
+   */
+  modelKey?: string;
+
   /** Last written. Sorts the picker, so the ones in progress stay near. */
   updatedAt?: number;
 }

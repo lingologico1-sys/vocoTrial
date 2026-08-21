@@ -40,6 +40,13 @@ interface ConsignePanelProps {
    * countdown was costing the learner a repeated question apiece. It came back
    * with the move to a surface that implements non-blocking calls, and it is
    * the half of this panel a learner who has lost their place actually reads.
+   *
+   * WHICH SURFACE THAT IS, IS THE TEACHER'S ANSWER NOW. The default model
+   * honours non-blocking calls and this counts cleanly; the other does not, and
+   * a lesson published on it can repeat a question exactly as before. That is a
+   * cost /teach states in the sentences models.ts writes, chosen with open
+   * eyes, and not something to detect and hide here — see the header of
+   * Eleve.tsx on why the page does not withdraw features by model.
    */
   answered?: number[];
 }
