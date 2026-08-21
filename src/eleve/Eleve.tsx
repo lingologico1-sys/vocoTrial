@@ -59,6 +59,29 @@ import type { VocabItem } from './vocab';
  */
 const CLOSING_GRACE_MS = 45_000;
 
+/**
+ * How long the closing note will wait for a gap before going anyway.
+ *
+ * The note is sent as `clientContent`, and clientContent arriving while the
+ * tutor is mid-sentence interrupts it — the learner hears the answer to their
+ * last question stop dead, and then a goodbye. The completion note is the one
+ * most exposed to this, because what makes the lesson complete is the tutor
+ * reporting the final question, which it does *while* talking about the answer
+ * it has just been given. Sent on that tick it cuts off the sentence that
+ * earned it.
+ *
+ * So the note waits for the tutor to stop speaking. This is the ceiling on that
+ * wait, and it exists because `speaking` is a claim about an audio queue: a
+ * dropped socket or a stalled player leaves it true with nothing coming, and a
+ * lesson that has finished must still be allowed to end. Twelve seconds is
+ * longer than the turns this tutor takes — the diagnostic's were three to six —
+ * and short enough that waiting through a stuck flag is not a hang.
+ *
+ * Only the completion note waits. The cap is a cost bound, and a call held past
+ * it by a tutor that will not stop talking is the thing the cap is for.
+ */
+const CLOSING_SETTLE_MS = 12_000;
+
 /** Where the learner's own language is remembered. Nothing here is a secret. */
 const L1_KEY = 'vocotrial.eleve.l1';
 
@@ -397,11 +420,14 @@ export default function Eleve() {
    * its own clock rather than closing the instant it connects.
    */
   const closedAt = useRef<number | null>(null);
+  /** When the list was first seen complete, so the wait for a gap is bounded. */
+  const doneSince = useRef<number | null>(null);
   const capMs = session ? capMinutesOf(session) * 60_000 : 0;
 
   useEffect(() => {
     if (!call.live) {
       closedAt.current = null;
+      doneSince.current = null;
       return;
     }
     if (elapsedMs === null) return;
@@ -410,6 +436,15 @@ export default function Eleve() {
       // Completion first: a lesson that finishes on the very tick the cap
       // lands should still be told it finished.
       if (lessonDone) {
+        if (doneSince.current === null) doneSince.current = Date.now();
+        /*
+         * Held until the tutor stops talking, because the note interrupts.
+         * The tutor reports the last question in the middle of discussing the
+         * answer to it, so this moment is almost always mid-sentence — and the
+         * sentence being cut off is one the learner is owed. See
+         * CLOSING_SETTLE_MS for why the wait has a ceiling at all.
+         */
+        if (call.speaking && Date.now() - doneSince.current < CLOSING_SETTLE_MS) return;
         closedAt.current = Date.now();
         // Labelled, because the two closes are indistinguishable in a log
         // otherwise — both notes open on the same sixty characters of marker,
@@ -425,7 +460,7 @@ export default function Eleve() {
     }
 
     if (Date.now() - closedAt.current >= CLOSING_GRACE_MS) call.hangUp();
-  }, [call, call.live, elapsedMs, capMs, lessonDone]);
+  }, [call, call.live, call.speaking, elapsedMs, capMs, lessonDone]);
 
   /**
    * Whether the conversation that just ended is worth reading.

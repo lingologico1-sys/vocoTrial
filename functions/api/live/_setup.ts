@@ -38,9 +38,24 @@ import { ANSWERED_TOOL } from '../../../src/realtime/vocoSessions';
  *
  * INTEGER, NOT STRING, and required. A model handed an optional argument omits
  * it, and a model handed a string sends "the second one".
+ *
+ * NON_BLOCKING, AND THAT IS THE WHOLE POINT OF IT. A tool declared the default
+ * way is blocking: the model stops generating when it calls one and waits for
+ * the result, and the result arriving is what starts it up again. For a tool
+ * whose result is genuinely wanted that is the correct trade. This one's result
+ * is `{ ok: true }` — the model has nothing to learn from it, and the restart it
+ * buys is a fresh turn generated on top of a turn already spoken. That is what
+ * made the tutor ask the same question twice: it said "qu'est-ce qui te met de
+ * si bonne humeur ?", reported the question done, and was handed a reason to
+ * speak again, so it said it a second time and ran on into the next question.
+ * Non-blocking means the call never pauses generation, so nothing has to be
+ * restarted and there is no second turn to collide with the first. See the
+ * matching `scheduling: 'SILENT'` on the response in src/realtime/gemini.ts —
+ * the two halves only work together, and either one alone still doubles.
  */
 const ANSWERED_DECLARATION = {
   name: ANSWERED_TOOL,
+  behavior: 'NON_BLOCKING',
   description:
     'Record that one of the numbered questions in the system instructions has been answered by the learner and discussed. Bookkeeping only: it is never spoken about and produces no reply to read out.',
   parameters: {

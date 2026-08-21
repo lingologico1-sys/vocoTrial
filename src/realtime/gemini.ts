@@ -257,10 +257,11 @@ export async function startGeminiSession(
        * Tool calls, answered first and interpreted second.
        *
        * The response goes back whatever happens — an unknown tool name, a
-       * missing argument, a handler that throws — because the model is blocked
-       * until it arrives. A tutor silently going quiet mid-lesson is a far
-       * worse failure than a miscounted question, and this is the ordering that
-       * makes the second one impossible to cause.
+       * missing argument, a handler that throws — because a blocking call
+       * leaves the model waiting until it arrives. The one tool we declare is
+       * non-blocking and so is not waiting on anything, but the ordering is
+       * kept: it costs nothing, and it is what would save a future blocking
+       * tool from a tutor that goes quiet mid-lesson.
        */
       if (message.toolCall?.functionCalls?.length) {
         const calls = message.toolCall.functionCalls;
@@ -271,10 +272,24 @@ export async function startGeminiSession(
                 functionResponses: calls.map((call) => ({
                   id: call.id,
                   name: call.name,
-                  // Acknowledged, with nothing to say. The tutor is told in the
-                  // prompt that this produces no reply to read out; an object
-                  // with prose in it is prose a model will sometimes speak.
-                  response: { ok: true },
+                  /*
+                   * Acknowledged, with nothing to say and no invitation to say
+                   * it. The tutor is told in the prompt that this produces no
+                   * reply to read out; an object with prose in it is prose a
+                   * model will sometimes speak.
+                   *
+                   * `scheduling` rides inside `response` rather than beside it
+                   * — Google's own samples put it there, and placed as a
+                   * sibling it is simply ignored, which fails silently as a
+                   * tutor that still repeats itself. SILENT is the value that
+                   * means "fold this into the context and generate nothing for
+                   * it": the alternatives are WHEN_IDLE, which speaks once the
+                   * current turn ends, and INTERRUPT, which speaks over it.
+                   * Both of those are the bug. It only applies to a tool
+                   * declared NON_BLOCKING — see ANSWERED_DECLARATION in
+                   * functions/api/live/_setup.ts, which is the other half.
+                   */
+                  response: { ok: true, scheduling: 'SILENT' },
                 })),
               },
             }),
