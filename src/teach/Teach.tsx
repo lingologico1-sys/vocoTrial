@@ -146,6 +146,16 @@ const field =
 
 const label = 'text-[11px] font-semibold uppercase tracking-wide text-lingo-muted';
 
+/*
+  Joins the reasons Publish is refusing into one sentence. There are three at
+  most and usually one, so this is a comma list with an "and" on the end rather
+  than a stack of bullets under the button.
+*/
+function listClauses(clauses: string[]): string {
+  if (clauses.length < 2) return clauses.join('');
+  return `${clauses.slice(0, -1).join(', ')} and ${clauses[clauses.length - 1]}`;
+}
+
 export default function Teach() {
   const [sessions, setSessions] = useState<VocoSession[]>([]);
   const [chosenId, setChosenId] = useState<string>('');
@@ -295,6 +305,20 @@ export default function Teach() {
   /* Whether the cap will land mid-list. The one warning this page owes a teacher. */
   const tightCap = capLooksTight(questions.length, capMinutes);
   const targets = splitLines(targetText, MAX_TARGETS);
+
+  /*
+    Why Publish is greyed out, said next to the greyed button. Each of these
+    used to disable it in silence, and the two that a teacher can act on are
+    both settled in the other panel — an unpicked face reads as nothing wrong
+    from down here, where the sentence that says so is a scroll away. The
+    button reads the same list, so what it refuses and what this explains
+    cannot drift apart.
+  */
+  const publishBlockers = [
+    !questions.length && 'write a question',
+    !styles.length && 'wait for an administrator to publish a manner',
+    faces.length > 0 && !faceId && 'pick a face',
+  ].filter((blocker): blocker is string => typeof blocker === 'string');
 
   const setRow = (index: number, value: string) =>
     setRows((current) => current.map((row, at) => (at === index ? value : row)));
@@ -1020,12 +1044,7 @@ export default function Teach() {
               <button
                 type="button"
                 onClick={() => void publish()}
-                disabled={
-                  publishing ||
-                  !questions.length ||
-                  !styles.length ||
-                  (faces.length > 0 && !faceId)
-                }
+                disabled={publishing || publishBlockers.length > 0}
                 className="flex items-center gap-2 rounded-3xl bg-lingo-accent px-7 py-3 font-lingo-brand text-lg text-lingo-paper shadow-lingo-pop transition-colors hover:bg-lingo-accent-deep active:translate-y-px disabled:opacity-40"
               >
                 {publishing && <Loader2 size={18} className="animate-spin" />}
@@ -1035,13 +1054,22 @@ export default function Teach() {
               {/*
                 Saving happens on the way out, so the button says so. A teacher
                 who has typed a question and reaches straight for Publish should
-                not lose it to a validation they did not know about.
+                not lose it to a validation they did not know about. When there
+                is a validation anyway, it takes this slot: a disabled button
+                does not save first, and the reason it is disabled is the only
+                thing worth reading here.
               */}
-              <p className="text-xs leading-relaxed text-lingo-muted">
-                Saves first, then mints a new code.
-                <br />
-                Publishing again gives a different code; the old one keeps working.
-              </p>
+              {publishBlockers.length > 0 ? (
+                <p className="text-xs leading-relaxed text-lingo-error">
+                  Not ready to hand out — {listClauses(publishBlockers)}.
+                </p>
+              ) : (
+                <p className="text-xs leading-relaxed text-lingo-muted">
+                  Saves first, then mints a new code.
+                  <br />
+                  Publishing again gives a different code; the old one keeps working.
+                </p>
+              )}
             </div>
 
             {publishError && (
