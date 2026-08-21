@@ -174,6 +174,23 @@ export interface PublishedSetup extends PerformanceProfile {
    */
   style?: string;
   /**
+   * How the tutor works its list, as the house library had it at publish.
+   *
+   * The other half of the lesson block, and the administrator’s in the same way
+   * `style` is: prose, by value, frozen at this moment. It becomes the
+   * paragraphs under the question list — how long to stay on an answer, how
+   * many questions a turn may carry — and it is deliberately not the whole of
+   * that section. What sits under it describes the tool this call declares and
+   * the notes the page sends, which belong to the build and are composed fresh.
+   * See DEFAULT_LESSON_RULES in tutorPrompt.ts, which is what an absent or
+   * blank one composes.
+   *
+   * Optional, and absent means this build’s own text. That is not a degraded
+   * lesson: every code published before this field existed ran on exactly that
+   * text, so nothing already handed out changed when the block became editable.
+   */
+  lessonRules?: string;
+  /**
    * The worn face's persona, copied out of its kit at publish time.
    *
    * By value for `style`'s reason, and read at publish rather than at dial for
@@ -338,6 +355,7 @@ export function looksLikeSetup(value: unknown): value is PublishedSetup {
     // reverse. Neither is a reason to refuse a lesson — see the fields.
     (setup.instructions === undefined || isString(setup.instructions)) &&
     (setup.style === undefined || isString(setup.style)) &&
+    (setup.lessonRules === undefined || isString(setup.lessonRules)) &&
     (setup.persona === undefined || (!!setup.persona && typeof setup.persona === 'object')) &&
     // Absent is the common case and a legal one — every setup published before
     // the stamp existed. It must never be the reason a lesson stops opening:

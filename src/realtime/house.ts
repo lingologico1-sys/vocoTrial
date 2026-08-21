@@ -13,6 +13,7 @@
  * seeing them:
  *
  *   tutor styles   named manners a teacher picks between
+ *   lesson rules   one block on how a lesson is worked through
  *   performance    one profile every publish carries
  *
  * A TUTOR STYLE IS A RENDERED PROMPT, NOT A PRESET KEY, for sessionStore's
@@ -66,6 +67,30 @@ export const MAX_STYLE_TEXT = 12_000;
 
 /** Long enough to describe a manner, short enough to fit the picker. */
 export const MAX_STYLE_NAME = 60;
+
+/**
+ * A ceiling on the lesson rules, in characters.
+ *
+ * Smaller than a style’s on purpose. A style is a whole tutor — manner,
+ * register, what to do about mistakes — and can reasonably run long. This block
+ * says how to work a list of questions, and a version of it that needs three
+ * thousand characters is one the model will not hold to the end of a call.
+ * The number is roughly twice what this build ships with, which leaves room to
+ * rewrite it without leaving room to write an essay.
+ */
+export const MAX_LESSON_RULES = 2_000;
+
+/**
+ * Structural only, matching `looksLikeStyle`’s posture.
+ *
+ * Blank is a legitimate value and means "use the build’s own text" — see
+ * DEFAULT_LESSON_RULES in tutorPrompt.ts — so emptiness is not what this
+ * refuses. What it refuses is a non-string, which is the only shape that would
+ * reach the composer and break it.
+ */
+export function looksLikeLessonRules(value: unknown): value is string {
+  return typeof value === 'string' && value.length <= MAX_LESSON_RULES;
+}
 
 /** More styles than a teacher can hold in their head at a picker. */
 export const MAX_STYLES = 12;

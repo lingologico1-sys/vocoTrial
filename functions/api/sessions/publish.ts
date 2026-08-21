@@ -18,7 +18,7 @@ import {
 } from '../../../src/realtime/vocoSessions';
 import { kitKey } from '../../../src/facekit/published';
 import type { Persona } from '../../../src/facekit/persona';
-import { readPerformance, readStyles, type HouseEnv } from '../house/_library';
+import { readLessonRules, readPerformance, readStyles, type HouseEnv } from '../house/_library';
 import { codeTaken, writeSetup, type SessionEnv } from './_library';
 
 /**
@@ -33,9 +33,9 @@ import { codeTaken, writeSetup, type SessionEnv } from './_library';
  * bucket are both in reach.
  *
  * IT NO LONGER COMPOSES THE PROMPT, and that is the change this route exists
- * to carry. It resolves the three things a prompt is built from — the style out
- * of the house library, the persona out of the face bucket, the lesson out of
- * the request — and stores them as data. The student page composes them when it
+ * to carry. It resolves the four things a prompt is built from — the style and
+ * the lesson rules out of the house library, the persona out of the face
+ * bucket, the lesson out of the request — and stores them as data. The student page composes them when it
  * dials. What a teacher decided is still frozen at this moment; what is really
  * a protocol between the prompt and the tools a call declares now moves with
  * the build that implements it. See session.ts and composeTutorPrompt.
@@ -167,6 +167,15 @@ export async function onRequestPost(
    */
   const styles = env.HOUSE ? await readStyles(env.HOUSE) : [];
   const style = styles.find((entry) => entry.id === incoming.styleId) ?? styles[0] ?? null;
+  /*
+   * The lesson rules, which unlike the style have no id and cannot be missing
+   * in a way that stops a publish. Null is an ordinary state — the state every
+   * deployment is in until somebody rewrites the block — and it composes the
+   * text this build ships with. So there is no `no_rules` refusal to match the
+   * `no_style` one below: a tutor with no instructions is not a tutor, and a
+   * tutor with the build’s own instructions is exactly the tutor of last week.
+   */
+  const lessonRules = env.HOUSE ? await readLessonRules(env.HOUSE) : null;
   if (!style) {
     return json(
       {
@@ -209,6 +218,7 @@ export async function onRequestPost(
    */
   const composed = composeTutorPrompt({
     style: style.text || defaultInstructions(language),
+    rules: lessonRules ?? undefined,
     persona,
     questions,
     targets,
@@ -281,10 +291,16 @@ export async function onRequestPost(
     label: label || undefined,
     updatedAt: Date.now(),
     language: language.code,
-    // The two halves of a prompt that are a teacher's and an administrator's,
-    // stored as they were at this moment. The third — the protocol the tutor is
-    // told to follow — is the build's, and is not stored at all. See session.ts.
+    // The halves of a prompt that are a teacher's and an administrator's, stored
+    // as they were at this moment. What is not stored is the protocol the tutor
+    // is told to follow — the tool it calls and the notes it will be sent —
+    // which is the build's, and travels with the build that implements it.
+    // `lessonRules` sits on the administrator's side of that line and not on
+    // the build's; see session.ts, and DEFAULT_LESSON_RULES on where the line
+    // falls. Undefined rather than '' when nobody has written one, so an
+    // unconfigured house stores nothing instead of storing a blank.
     style: style.text,
+    lessonRules: lessonRules ?? undefined,
     persona,
     // Off the face, never off the request — see the header. An incoming `voice`
     // is a field /teach no longer sends, and honouring one would leave the door

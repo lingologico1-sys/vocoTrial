@@ -272,6 +272,7 @@ export default function Eleve() {
       findLanguage(session.language) ?? findLanguage(defaultLanguageCode())!;
     return composeTutorPrompt({
       style: session.style?.trim() || defaultInstructions(language),
+      rules: session.lessonRules,
       persona: session.persona,
       questions: session.questions,
       targets: session.targets,

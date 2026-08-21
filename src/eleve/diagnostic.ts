@@ -350,6 +350,22 @@ export function buildDiagnostic(input: DiagnosticInput): string {
             }`,
       ),
     );
+    /*
+     * Which lesson rules the tutor is running, because it is now a thing that
+     * varies and it is the block a rewrite is judged on. The length is here so
+     * that a rewrite is identifiable at a glance without reading the whole
+     * prompt below — two runs of the same lesson under two different blocks
+     * differ in this number, which is the first thing to check when a lesson
+     * behaves unlike the last one. See DEFAULT_LESSON_RULES.
+     */
+    put(
+      field(
+        'Lesson rules',
+        setup.lessonRules?.trim()
+          ? `house-written, ${setup.lessonRules.trim().length} characters — in full below`
+          : "this build's own — no house block was published with this code",
+      ),
+    );
     put(
       field(
         'Persona',
@@ -451,6 +467,7 @@ export function buildDiagnostic(input: DiagnosticInput): string {
      */
     const composed = composeTutorPrompt({
       style: setup.style?.trim() || defaultInstructions(language),
+      rules: setup.lessonRules,
       persona: setup.persona,
       questions: setup.questions,
       targets: setup.targets,

@@ -1,13 +1,15 @@
 import { json } from '../_middleware';
-import { type HouseEnv, readPerformance, readStyles } from './_library';
+import { type HouseEnv, readLessonRules, readPerformance, readStyles } from './_library';
 
 /**
- * The house, whole: the tutor styles and the performance profile.
+ * The house, whole: the tutor styles, the lesson rules and the performance
+ * profile.
  *
- * BOTH IN ONE READ because both callers want both. /teach draws a style picker
- * and wants to say whether an administrator has tuned the faces yet; studio
- * wants to show what a "save as house default" would be replacing. Two routes
- * would be two round trips to render one panel.
+ * ALL IN ONE READ because the callers want more than one. /teach draws a style
+ * picker and wants to say whether an administrator has tuned the faces yet;
+ * studio wants to show what a "save as house default" would be replacing, and
+ * wants the saved lesson rules in the box it opens on. Three routes would be
+ * three round trips to render one panel.
  *
  * AN UNCONFIGURED HOUSE IS NOT AN ERROR. A deployment where no administrator
  * has saved a style is an ordinary state — the state every new install is in —
@@ -23,10 +25,11 @@ export async function onRequestPost(
     return json({ error: 'No house library is configured', code: 'no_bucket' }, 500);
   }
 
-  const [styles, performance] = await Promise.all([
+  const [styles, performance, lessonRules] = await Promise.all([
     readStyles(env.HOUSE),
     readPerformance(env.HOUSE),
+    readLessonRules(env.HOUSE),
   ]);
 
-  return json({ styles, performance });
+  return json({ styles, performance, lessonRules });
 }

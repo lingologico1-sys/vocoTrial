@@ -240,6 +240,60 @@ Talk about your own life only when the learner asks about it: one sentence, then
 `;
 }
 
+/**
+ * How the tutor is told to work the list, and the one part of this file an
+ * administrator can rewrite without a deploy.
+ *
+ * THE LINE IT SITS ON IS THE LINE THIS FILE ALREADY DREW. Everything under it
+ * in the composed prompt — the tool, the notes — describes machinery the
+ * running build implements, and a stored copy of that is the failure the header
+ * documents: a prompt describing a tool the build no longer declares, which
+ * from the outside is indistinguishable from a model ignoring its instructions.
+ * These two paragraphs describe none of it. They are pedagogy — how long to
+ * stay on an answer, how many questions a turn may carry — and the worst a
+ * wrong one does is teach less, which is a lesson somebody can sit through and
+ * then fix.
+ *
+ * SO IT IS DATA, WITH A STYLE’S LIFECYCLE: written in studio, held in the house
+ * library, frozen onto a setup at publish, composed back in at dial time. An
+ * administrator rewriting it next week cannot reach a class mid-lesson.
+ *
+ * ONE BLOCK AND NOT A LIBRARY OF THEM, which is the asymmetry house.ts draws
+ * between a style and the performance profile. Which manner a tutor has is a
+ * pedagogical choice a teacher should make per lesson; whether a turn may carry
+ * two questions is not — it is a property of how this deployment runs lessons,
+ * and a second dropdown on /teach would be a choice a teacher has no grounds to
+ * make.
+ *
+ * THIS TEXT IS THE FALLBACK AND NOT A SECOND SET OF DEFAULTS, which is
+ * FALLBACK_PERFORMANCE’s rule in the same file. A deployment where nobody has
+ * written one composes exactly the prompt this build ships with, so making the
+ * block editable moved no lesson by itself.
+ *
+ * WHOEVER REWRITES IT IS OVERWRITING MEASUREMENTS. Two of the sentences here
+ * were written against observed runs rather than from first principles — the
+ * header says which, and what each replaced. The one failing as this is written
+ * is "ends with one question, and carries no other": on gemini-flash-31 it
+ * broke on all six turns of a five-question lesson, the tutor stapling the next
+ * question of the list onto the end of a follow-up so that the follow-up went
+ * unanswered and the lesson finished in a third of its cap. That is the kind of
+ * thing this block is editable in order to fix, and the diagnostic timeline is
+ * where a rewrite is judged.
+ */
+export const DEFAULT_LESSON_RULES = `Ask one, listen, and talk about the answer the way a friend would before you go
+on to the next. Follow-up questions about what the learner has just said are the
+conversation — ask as many as the answer is worth. Ask for the detail: why, what
+happened, what they thought of it. Whether an answer grows past its safe first
+sentence is decided by what you ask next, so be interested in what they say and
+never in their grammar. Never open a subject of your own: they prepared this
+list and have the words for it, where a question they have never seen tests
+their listening instead of their speaking. There is nothing after the last one.
+
+Every turn you take ends with one question for them to answer, and carries no
+other. Two questions in a turn loses the first, because a learner answers the
+thing they heard last. The goodbye is the only turn that ends without one. You
+cannot see a clock: never mention the time, and never say how much is left.`;
+
 /** Everything a composed prompt is built from. All of it is snapshot data. */
 export interface TutorPromptParts {
   /**
@@ -251,6 +305,14 @@ export interface TutorPromptParts {
    * when a setup carries no style of its own.
    */
   style: string;
+  /**
+   * How the tutor is told to work the list, or absent for this build’s own.
+   *
+   * The administrator’s, out of the house library and stored on the setup
+   * beside `style` — see DEFAULT_LESSON_RULES on why this half of the lesson
+   * block is data and the protocol under it is not.
+   */
+  rules?: string;
   persona?: Persona;
   questions: string[];
   targets?: string[];
@@ -278,6 +340,13 @@ export function composeTutorPrompt(parts: TutorPromptParts): string {
   const questions = parts.questions.map((question, index) => `${index + 1}. ${question}`);
   const count = parts.questions.length;
 
+  /*
+   * Blank falls back rather than composing a hole. An administrator who clears
+   * the box wants this build’s own text, not a lesson whose only instruction on
+   * how to ask a question is a missing paragraph.
+   */
+  const rules = parts.rules?.trim() || DEFAULT_LESSON_RULES;
+
   const targets = parts.targets?.length
     ? `\nSteer towards ${parts.targets.join(', ')} where a turn invites it, by asking something whose natural answer uses one. Never name a grammatical structure out loud, and let a turn that does not invite one go.\n`
     : '';
@@ -290,19 +359,7 @@ These ${count} questions are the whole lesson. Ask them in order, one at a time:
 
 ${questions.join('\n')}
 
-Ask one, listen, and talk about the answer the way a friend would before you go
-on to the next. Follow-up questions about what the learner has just said are the
-conversation — ask as many as the answer is worth. Ask for the detail: why, what
-happened, what they thought of it. Whether an answer grows past its safe first
-sentence is decided by what you ask next, so be interested in what they say and
-never in their grammar. Never open a subject of your own: they prepared this
-list and have the words for it, where a question they have never seen tests
-their listening instead of their speaking. There is nothing after the last one.
-
-Every turn you take ends with one question for them to answer, and carries no
-other. Two questions in a turn loses the first, because a learner answers the
-thing they heard last. The goodbye is the only turn that ends without one. You
-cannot see a clock: never mention the time, and never say how much is left.
+${rules}
 ${targets}
 REPORTING YOUR PROGRESS
 Call ${PROGRESS_TOOL} when a question is finished, with that question's number —

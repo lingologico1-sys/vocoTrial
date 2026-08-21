@@ -1,14 +1,20 @@
 /**
  * The R2 side of the house library.
  *
- * TWO OBJECTS, NOT ONE, and they are different shapes of thing. The styles are
- * a list somebody picks from; the performance profile is a single setting the
- * deployment has or has not got. Holding them in one object would mean a save
- * to either being a read-modify-write of both, and an administrator saving a
- * style while another tab saves a profile losing one of them.
+ * ONE OBJECT EACH, NOT ONE BETWEEN THEM, and they are different shapes of
+ * thing. The styles are a list somebody picks from; the performance profile and
+ * the lesson rules are single settings the deployment has or has not got.
+ * Holding them in one object would mean a save to any of them being a
+ * read-modify-write of all, and an administrator saving a style while another
+ * tab saves a profile losing one of them.
  *
  *   styles.json        { "styles": [ ... ] }
  *   performance.json   one PerformanceProfile
+ *   lesson-rules.json  { "rules": "..." }
+ *
+ * The rules are wrapped in an object where the profile is not, because the
+ * profile is already one and a bare JSON string is a thing every future field
+ * would have to be added beside rather than into.
  *
  * WRITTEN BY AN ADMINISTRATOR, READ BY A TEACHER, SPENT BY THE PUBLISH ROUTE.
  * Nothing a student's browser ever sees: a published setup carries the composed
@@ -20,11 +26,17 @@
  * one, which costs a re-save rather than data.
  */
 
-import { looksLikePerformance, looksLikeStyle, type TutorStyle } from '../../../src/realtime/house';
+import {
+  looksLikeLessonRules,
+  looksLikePerformance,
+  looksLikeStyle,
+  type TutorStyle,
+} from '../../../src/realtime/house';
 import type { PerformanceProfile } from '../../../src/realtime/session';
 
 export const STYLES_KEY = 'styles.json';
 export const PERFORMANCE_KEY = 'performance.json';
+export const LESSON_RULES_KEY = 'lesson-rules.json';
 
 export interface HouseEnv {
   /**
@@ -84,6 +96,36 @@ export function writePerformance(
   performance: PerformanceProfile,
 ): Promise<unknown> {
   return bucket.put(PERFORMANCE_KEY, JSON.stringify(performance), {
+    httpMetadata: { contentType: 'application/json' },
+  });
+}
+
+/**
+ * The saved lesson rules, or null when nobody has written any.
+ *
+ * Null and empty-string are the same answer here — both compose the build’s own
+ * text — but they are kept distinct on the way out so studio can tell an
+ * administrator which of the two they are looking at: a block nobody has
+ * touched, or one somebody deliberately cleared.
+ */
+export async function readLessonRules(bucket: R2Bucket): Promise<string | null> {
+  const object = await bucket.get(LESSON_RULES_KEY);
+  if (!object) return null;
+
+  try {
+    const parsed = (await object.json()) as { rules?: unknown };
+    // Validated on the way out as well as in, for readPerformance’s reason:
+    // what is in the bucket was written by an older version of this app as
+    // often as by the current one, and anything unreadable should compose the
+    // build’s own text rather than reach a prompt.
+    return looksLikeLessonRules(parsed.rules) ? parsed.rules : null;
+  } catch {
+    return null;
+  }
+}
+
+export function writeLessonRules(bucket: R2Bucket, rules: string): Promise<unknown> {
+  return bucket.put(LESSON_RULES_KEY, JSON.stringify({ rules }), {
     httpMetadata: { contentType: 'application/json' },
   });
 }

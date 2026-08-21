@@ -5,9 +5,9 @@
  * shared with functions/, this file talks to the network, and nothing
  * server-side may import it.
  *
- * Both ends live here — studio writes through `saveStyle` and
- * `savePerformance`, /teach reads through `fetchHouse` — because they are two
- * halves of one contract and a change to either is a change to both.
+ * Both ends live here — studio writes through `saveStyle`, `savePerformance`
+ * and `saveLessonRules`, /teach reads through `fetchHouse` — because they are
+ * two halves of one contract and a change to either is a change to both.
  *
  * A FAILED READ IS AN EMPTY HOUSE, NOT A THROW, which is evaluatorStore's
  * posture. An unreachable bucket should leave /teach's picker empty and say
@@ -52,6 +52,14 @@ export interface House {
   styles: TutorStyle[];
   /** Null when no administrator has saved one. See FALLBACK_PERFORMANCE. */
   performance: PerformanceProfile | null;
+  /**
+   * How a lesson is worked through, or null when nobody has written it.
+   *
+   * Null and '' both compose the build’s own text, and are kept apart so studio
+   * can say which one an administrator is looking at — a block nobody has
+   * touched, or one somebody deliberately cleared. See DEFAULT_LESSON_RULES.
+   */
+  lessonRules: string | null;
 }
 
 async function post<T>(path: string, body: unknown): Promise<T> {
@@ -82,11 +90,13 @@ export async function fetchHouse(): Promise<House & { error?: string }> {
     return {
       styles: [...house.styles].sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0)),
       performance: house.performance ?? null,
+      lessonRules: house.lessonRules ?? null,
     };
   } catch (error) {
     return {
       styles: [],
       performance: null,
+      lessonRules: null,
       error: error instanceof Error ? error.message : 'Could not read the house library',
     };
   }
@@ -108,6 +118,18 @@ export async function savePerformance(
     performance,
   });
   return answer.performance;
+}
+
+/**
+ * Writes the lesson rules, and hands back what was stored.
+ *
+ * The answer is read rather than assumed because the route trims: an
+ * administrator who pasted a trailing blank line should see the box settle on
+ * what was actually saved, not on what they typed.
+ */
+export async function saveLessonRules(rules: string): Promise<string> {
+  const answer = await post<{ lessonRules: string }>('/api/house/rules-save', { rules });
+  return answer.lessonRules;
 }
 
 /**

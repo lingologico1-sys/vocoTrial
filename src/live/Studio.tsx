@@ -5,8 +5,20 @@ import { LANGUAGES, defaultLanguageCode, findLanguage } from '../realtime/langua
 import { lastUsedKey, listPresets, rememberPreset, renderPreset } from '../realtime/presets';
 import { MAX_INSTRUCTIONS, withPersona } from '../realtime/instructions';
 import { VOICES } from '../realtime/settings';
-import { MAX_STYLE_NAME, newStyleId, type TutorStyle } from '../realtime/house';
-import { deleteStyle, fetchHouse, savePerformance, saveStyle } from '../realtime/houseStore';
+import {
+  MAX_LESSON_RULES,
+  MAX_STYLE_NAME,
+  newStyleId,
+  type TutorStyle,
+} from '../realtime/house';
+import { DEFAULT_LESSON_RULES } from '../realtime/tutorPrompt';
+import {
+  deleteStyle,
+  fetchHouse,
+  saveLessonRules,
+  savePerformance,
+  saveStyle,
+} from '../realtime/houseStore';
 import type { PerformanceProfile } from '../realtime/session';
 import type { SessionStatus } from '../realtime/types';
 import type { FaceKit } from '../facekit/kit';
@@ -617,11 +629,32 @@ export default function Studio() {
   const [housing, setHousing] = useState(false);
   const [houseNote, setHouseNote] = useState('');
   const [houseError, setHouseError] = useState('');
+  /**
+   * The lesson rules as the box has them, and as the house last stored them.
+   *
+   * TWO PIECES OF STATE FOR ONE STRING, because the question the panel has to
+   * answer is not "what does it say" but "is this what would be published".
+   * `lessonRules` is what has been typed; `savedLessonRules` is what a lesson
+   * published this second would carry. Null there means nobody has ever written
+   * one, which is a different thing from a block somebody cleared — and both
+   * compose the same prompt, so the panel is the only place the difference is
+   * visible.
+   *
+   * The box opens on the build’s own text when the house has none, rather than
+   * on emptiness. An administrator rewriting this is editing a paragraph, not
+   * composing one from nothing, and handing them a blank textarea for a block
+   * whose current contents are three screens away in a source file is handing
+   * them a way to lose it.
+   */
+  const [lessonRules, setLessonRules] = useState(DEFAULT_LESSON_RULES);
+  const [savedLessonRules, setSavedLessonRules] = useState<string | null>(null);
 
   const loadHouse = () => {
     void fetchHouse().then((house) => {
       setHouseStyles(house.styles);
       setHousePerformance(house.performance !== null);
+      setSavedLessonRules(house.lessonRules);
+      setLessonRules(house.lessonRules?.trim() || DEFAULT_LESSON_RULES);
       if (house.error) setHouseError(house.error);
     });
   };
@@ -663,6 +696,34 @@ export default function Studio() {
       await savePerformance(currentPerformance());
       setHousePerformance(true);
       setHouseNote('Saved. The next lesson published carries this tuning.');
+    } catch (error) {
+      setHouseError(error instanceof Error ? error.message : 'Could not save that');
+    } finally {
+      setHousing(false);
+    }
+  };
+
+  /**
+   * Writes the lesson rules, or puts the build’s own text back.
+   *
+   * RESTORING IS A SAVE OF THE DEFAULT TEXT, not a delete, and the difference
+   * matters on the next publish rather than here: a stored block that happens
+   * to equal `DEFAULT_LESSON_RULES` composes the same prompt as no block at
+   * all, so the two are indistinguishable to a student and only one of them
+   * needs a route. What it costs is that a deployment which restores stays
+   * pinned to today’s text — a later build that rewrites the default will not
+   * reach it. That is the same bargain every published style already makes, and
+   * the panel says so.
+   */
+  const publishLessonRules = async (text: string) => {
+    setHousing(true);
+    setHouseNote('');
+    setHouseError('');
+    try {
+      const written = await saveLessonRules(text);
+      setSavedLessonRules(written);
+      setLessonRules(written || DEFAULT_LESSON_RULES);
+      setHouseNote('Saved. The next lesson published carries these rules.');
     } catch (error) {
       setHouseError(error instanceof Error ? error.message : 'Could not save that');
     } finally {
@@ -1721,6 +1782,85 @@ export default function Studio() {
                 No styles published. A teacher cannot hand out a lesson until there is one.
               </span>
             )}
+          </div>
+
+          {/*
+            How a lesson is worked through, which is the half of the lesson
+            block that is not this build’s.
+
+            IT IS NOT BESIDE THE STYLE PICKER BY ACCIDENT. A style is rendered
+            from a preset and published under a name, and there can be a dozen;
+            this is one block with no name and no list, because a manner is a
+            teacher’s choice per lesson and how a lesson is conducted is a
+            property of the deployment. See house.ts on that asymmetry, and
+            DEFAULT_LESSON_RULES on where the line between this and the
+            protocol falls.
+
+            THE PROTOCOL IS DELIBERATELY NOT IN THIS BOX. What the tutor is
+            told about the questionDone tool and about system notes describes
+            machinery the running build implements, and an administrator who
+            could rewrite that could describe a tool that does not exist — a
+            failure that reads, from the outside, exactly like a model ignoring
+            its instructions.
+          */}
+          <div className="mt-3 border-t border-slate-800 pt-3">
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <span className="text-[11px] uppercase tracking-wide text-slate-500">
+                How a lesson is worked through
+              </span>
+              <span
+                className={`text-[11px] ${
+                  lessonRules.length > MAX_LESSON_RULES ? 'text-rose-400' : 'text-slate-600'
+                }`}
+              >
+                {lessonRules.length.toLocaleString()}/{MAX_LESSON_RULES.toLocaleString()}
+              </span>
+            </div>
+            <textarea
+              value={lessonRules}
+              onChange={(event) => setLessonRules(event.target.value)}
+              rows={10}
+              spellCheck={false}
+              disabled={housing}
+              className="mt-1.5 w-full resize-y rounded border border-slate-800 bg-transparent px-2.5 py-2 font-mono text-[11px] leading-relaxed text-slate-300 outline-none focus:border-slate-700 disabled:opacity-40"
+            />
+            <div className="mt-2 flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                onClick={() => void publishLessonRules(lessonRules)}
+                disabled={
+                  housing ||
+                  lessonRules.length > MAX_LESSON_RULES ||
+                  lessonRules.trim() === (savedLessonRules ?? '').trim()
+                }
+                className="rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-200 hover:bg-slate-900 disabled:opacity-40"
+              >
+                Save as the house lesson rules
+              </button>
+              <button
+                type="button"
+                onClick={() => setLessonRules(DEFAULT_LESSON_RULES)}
+                disabled={housing || lessonRules === DEFAULT_LESSON_RULES}
+                className="text-[11px] text-slate-500 underline-offset-4 hover:text-slate-300 hover:underline disabled:opacity-40"
+              >
+                Put the built-in text back
+              </button>
+            </div>
+            {/*
+              Which of the three states this deployment is in, said plainly,
+              because two of them compose the same prompt and nothing a student
+              sees can tell them apart.
+            */}
+            <p className="mt-1.5 text-[11px] leading-relaxed text-slate-500">
+              {savedLessonRules === null
+                ? 'Nothing saved, so lessons publish with the text above — the one this build ships with.'
+                : savedLessonRules.trim() === DEFAULT_LESSON_RULES
+                  ? 'Saved, and identical to the built-in text. A later build that rewrites the default will not reach this deployment until it is saved again.'
+                  : 'Saved. Every lesson published from /teach carries this block until it is rewritten.'}{' '}
+              It goes under the questions and above the reporting rules, which stay with the build.
+              Republishing is what carries a change to a class; codes already handed out keep the
+              block they went out with.
+            </p>
           </div>
 
           {houseNote && <p className="mt-2 text-xs text-emerald-400">{houseNote}</p>}
