@@ -11,10 +11,13 @@ import {
   LESSON_DONE_SIGNAL,
   TIME_UP_SIGNAL,
   capMinutesOf,
+  openingSignal,
 } from '../realtime/vocoSessions';
 import { codeFromUrl, fetchSetup } from '../realtime/sessionStore';
+import type { SessionSettings } from '../realtime/settings';
 import { useVoiceCall } from '../live/useVoiceCall';
 import ConsignePanel from './ConsignePanel';
+import DiagnosticPanel from './DiagnosticPanel';
 import DictionaryPanel, { type LookupRequest } from './DictionaryPanel';
 import EvaluationPanel, {
   EvaluationGate,
@@ -59,6 +62,16 @@ const CLOSING_GRACE_MS = 45_000;
 /** Where the learner's own language is remembered. Nothing here is a secret. */
 const L1_KEY = 'vocotrial.eleve.l1';
 
+/**
+ * The one model a student ever meets.
+ *
+ * A constant rather than a literal in the `useVoiceCall` call because two
+ * readers now need it: the call that dials it, and the diagnostic that reports
+ * what was dialled. A diagnostic naming a different model from the one in use
+ * is worse than one naming none.
+ */
+const MODEL_KEY = 'gemini-native-audio';
+
 type Tab = 'evaluation' | 'dictionary' | 'vocab';
 
 function loadL1(): string {
@@ -98,11 +111,55 @@ export default function Eleve() {
   const [reporting, setReporting] = useState(false);
   const [reportError, setReportError] = useState<string | null>(null);
 
+  /**
+   * The diagnostic, which is open or it is not.
+   *
+   * NOTHING ELSE ON THE PAGE KNOWS ABOUT IT. It renders over everything, holds
+   * no state of its own beyond the snapshot it takes on opening, and closes
+   * back to exactly the page that was underneath — a call keeps running while
+   * it is up, which is the whole point of being able to take one mid-lesson.
+   */
+  const [diagnostic, setDiagnostic] = useState(false);
+
   /** Ticks only while a call is up, so the elapsed line moves. */
   const [now, setNow] = useState(() => Date.now());
 
+  /**
+   * Turn-taking and voice, as one value with two readers.
+   *
+   * IT USED TO BE BUILT INSIDE THE `useVoiceCall` CALL, and lifting it out is
+   * what lets the diagnostic report the settings that were actually sent rather
+   * than working them out a second time from the same setup. Two derivations of
+   * one payload is two things that can disagree, and the one place it would
+   * show is a diagnostic quietly describing a call that never happened.
+   */
+  const settings = useMemo<SessionSettings>(() => {
+    if (!session) return {};
+    // Absent rather than empty throughout — see settings.ts on why "leave it
+    // upstream" and "pin today's default" have to stay distinguishable.
+    return {
+      ...(session.voice ? { voice: session.voice } : {}),
+      ...(session.silenceDurationMs !== undefined
+        ? { silenceDurationMs: session.silenceDurationMs }
+        : {}),
+      ...(session.prefixPaddingMs !== undefined
+        ? { prefixPaddingMs: session.prefixPaddingMs }
+        : {}),
+      ...(session.startSensitivity ? { startSensitivity: session.startSensitivity } : {}),
+      ...(session.endSensitivity ? { endSensitivity: session.endSensitivity } : {}),
+      ...(session.affectiveDialog !== undefined
+        ? { affectiveDialog: session.affectiveDialog }
+        : {}),
+      ...(session.proactiveAudio !== undefined ? { proactiveAudio: session.proactiveAudio } : {}),
+      ...(session.temperature !== undefined ? { temperature: session.temperature } : {}),
+      ...(session.maxOutputTokens !== undefined
+        ? { maxOutputTokens: session.maxOutputTokens }
+        : {}),
+    };
+  }, [session]);
+
   const call = useVoiceCall({
-    modelKey: 'gemini-native-audio',
+    modelKey: MODEL_KEY,
     language: session?.language ?? 'fr',
     instructions: session?.instructions ?? '',
     /*
@@ -118,32 +175,7 @@ export default function Eleve() {
      */
     idleTimeoutMs: 30_000,
     idleNotice: FR.idleEnded,
-    settings: useMemo(() => {
-      if (!session) return {};
-      // Absent rather than empty throughout — see settings.ts on why "leave it
-      // upstream" and "pin today's default" have to stay distinguishable.
-      return {
-        ...(session.voice ? { voice: session.voice } : {}),
-        ...(session.silenceDurationMs !== undefined
-          ? { silenceDurationMs: session.silenceDurationMs }
-          : {}),
-        ...(session.prefixPaddingMs !== undefined
-          ? { prefixPaddingMs: session.prefixPaddingMs }
-          : {}),
-        ...(session.startSensitivity ? { startSensitivity: session.startSensitivity } : {}),
-        ...(session.endSensitivity ? { endSensitivity: session.endSensitivity } : {}),
-        ...(session.affectiveDialog !== undefined
-          ? { affectiveDialog: session.affectiveDialog }
-          : {}),
-        ...(session.proactiveAudio !== undefined
-          ? { proactiveAudio: session.proactiveAudio }
-          : {}),
-        ...(session.temperature !== undefined ? { temperature: session.temperature } : {}),
-        ...(session.maxOutputTokens !== undefined
-          ? { maxOutputTokens: session.maxOutputTokens }
-          : {}),
-      };
-    }, [session]),
+    settings,
   });
 
   /**
@@ -258,10 +290,28 @@ export default function Eleve() {
 
   const refreshWords = useCallback(() => setWords(vocab.load()), []);
 
-  const start = () => {
+  /**
+   * The microphone, and the tutor getting the first word.
+   *
+   * THE GREETING IS SENT FROM HERE RATHER THAN LIVING IN THE PROMPT, because
+   * Live only ever answers — a tutor told in its instructions to say hello
+   * says hello after the learner does. So the page opens the conversation on
+   * their behalf with a note the tutor acts on and never reads out. See
+   * `openingSignal`, which is also where the part of the day comes from: the
+   * clock is the browser's, because the browser is the thing in the room.
+   *
+   * AFTER THE AWAIT, NOT BESIDE IT. `connect` resolves once the socket is up
+   * and the session has been handed back, and `say` before that lands on a
+   * session ref that is still null — a no-op, which would leave exactly the
+   * silence this exists to end and nothing at all to say why. A connect that
+   * failed resolves too, and there the same no-op is what is wanted: the page
+   * is already showing why nobody is talking.
+   */
+  const start = async () => {
     setReport(null);
     setReportError(null);
-    void call.connect();
+    await call.connect();
+    call.say(openingSignal(), 'opening — greet the learner');
   };
 
   const evaluate = async () => {
@@ -361,12 +411,16 @@ export default function Eleve() {
       // lands should still be told it finished.
       if (lessonDone) {
         closedAt.current = Date.now();
-        call.say(LESSON_DONE_SIGNAL);
+        // Labelled, because the two closes are indistinguishable in a log
+        // otherwise — both notes open on the same sixty characters of marker,
+        // and which one went is the difference between a lesson that finished
+        // and one that was cut off. See `say` in useVoiceCall.
+        call.say(LESSON_DONE_SIGNAL, 'closing — every question answered');
         return;
       }
       if (!capMs || elapsedMs < capMs) return;
       closedAt.current = Date.now();
-      call.say(TIME_UP_SIGNAL);
+      call.say(TIME_UP_SIGNAL, 'closing — out of time, questions unanswered');
       return;
     }
 
@@ -442,7 +496,7 @@ export default function Eleve() {
 
   return (
     <div className="lingo-light flex h-screen flex-col overflow-hidden bg-lingo-mat font-lingo text-lingo-ink">
-      <BrandBar tagline={FR.tagline}>
+      <BrandBar tagline={FR.tagline} onTripleTap={() => setDiagnostic(true)}>
         <label className="flex items-center gap-2">
           <span className="text-[11px] uppercase tracking-wide text-lingo-paper/70">
             {FR.l1Label}
@@ -592,7 +646,10 @@ export default function Eleve() {
               busy={call.busy}
               tiltCue={call.tiltCue}
               idleHint={idleHint}
-              onCall={() => (call.live ? call.hangUp() : start())}
+              onCall={() => {
+                if (call.live) call.hangUp();
+                else void start();
+              }}
               onWord={askDictionary}
             />
 
@@ -693,6 +750,41 @@ export default function Eleve() {
             )}
           </aside>
         </div>
+      )}
+
+      {/*
+        Last, and outside everything.
+
+        It is `fixed inset-0` and covers the page whatever it is showing, which
+        includes the code box — a student who cannot open a code is exactly the
+        case where somebody needs to see what the box was told. Rendering it
+        inside either branch above would make the diagnostic available only on
+        the half of the page that is already working.
+      */}
+      {diagnostic && (
+        <DiagnosticPanel
+          onClose={() => setDiagnostic(false)}
+          input={{
+            setup: session,
+            typedCode: typed,
+            codeError,
+            modelKey: MODEL_KEY,
+            settings,
+            l1,
+            status: call.status,
+            detail: call.detail,
+            turns: call.turns,
+            events: call.events,
+            connectedAt: call.connectedAt,
+            lastCallMs: call.lastCallMs,
+            answered: call.answered,
+            capMinutes: session ? capMinutesOf(session) : null,
+            lessonDone,
+            report,
+            reportError,
+            reporting,
+          }}
+        />
       )}
     </div>
   );

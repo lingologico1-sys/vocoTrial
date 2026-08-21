@@ -51,6 +51,74 @@ export interface Turn {
   role: 'user' | 'agent';
   text: string;
   done: boolean;
+  /**
+   * Wall clock at the moment this turn's first words landed.
+   *
+   * ON THE AGENT'S SIDE THAT IS WHEN THEY WERE HEARD, not when they arrived on
+   * the socket: `flush` is what calls `append`, and it releases only text the
+   * voice has already reached. So the stamp is the learner's own experience of
+   * the conversation, which is the only reading that can be compared with the
+   * events around it.
+   *
+   * Nothing on screen draws it — it is here for the diagnostic. A conversation
+   * that went wrong is nearly always one where *when* is the whole question: a
+   * question asked twice a minute apart is a tutor that lost the thread, and
+   * the same question twice in four seconds is one whose first asking was
+   * talked over.
+   */
+  at: number;
+  /** Wall clock when `done` went true, so a turn's length can be read off. */
+  endedAt?: number;
+}
+
+/**
+ * Everything a call does that is not words.
+ *
+ * WHY A TRANSCRIPT IS NOT ENOUGH. The turns say what was said; they cannot say
+ * that the tutor's tool reported question three twice, that the learner talked
+ * over the answer, that the page injected a closing note, or that the socket
+ * dropped and came back. Every one of those produces a conversation that reads
+ * oddly on the page and reads as nothing at all in the transcript — so the
+ * transcript alone sends whoever is diagnosing it hunting for a cause among the
+ * only evidence that survived, which is the prompt.
+ *
+ * IN MEMORY AND ACROSS CALLS. `turns` is cleared when a new call is dialled,
+ * because the page draws them; this is not, because a second call that goes
+ * wrong is very often explained by the first. A reload clears it, which is the
+ * right way: this is a stethoscope, not a record.
+ */
+export interface CallEvent {
+  /** Wall clock, on the same clock as `Turn.at`, so the two interleave. */
+  at: number;
+  kind:
+    /** `connect` was called — one per press of the microphone. */
+    | 'dialled'
+    /** The session reported a new status, with whatever it said about it. */
+    | 'status'
+    /** The page said something to the tutor as the learner. See `say`. */
+    | 'note'
+    /** The tutor's tool reported a question done. Raw, repeats included. */
+    | 'answered'
+    /** The learner talked over the tutor and unheard words were dropped. */
+    | 'interrupted'
+    /** Something asked for the call to stop, and said why. */
+    | 'hung-up';
+  detail: string;
+}
+
+/**
+ * How many events are kept.
+ *
+ * A long lesson is a few dozen; the cap is only here to stop a page left open
+ * all afternoon from growing without bound. Oldest go first, so what survives
+ * is always the part nearest whatever is being diagnosed.
+ */
+const EVENT_LIMIT = 400;
+
+/** One line of it, for an event detail. Notes are paragraphs. */
+function oneLine(text: string, limit = 160): string {
+  const flat = text.replace(/\s+/g, ' ').trim();
+  return flat.length > limit ? `${flat.slice(0, limit - 1)}…` : flat;
 }
 
 /**
@@ -148,6 +216,13 @@ export interface VoiceCall {
    * apart: a page with no questions does not draw a counter.
    */
   answered: number;
+  /**
+   * What happened, in order, for the diagnostic to print beside the turns.
+   *
+   * Spans every call this page has made rather than only the current one — see
+   * CallEvent. Nothing on screen reads it.
+   */
+  events: CallEvent[];
   connect: () => Promise<void>;
   hangUp: (reason?: string) => void;
   toggleMute: () => void;
@@ -157,8 +232,15 @@ export interface VoiceCall {
    * The page owns the clock — see `say` in types.ts — so this is how it tells
    * the tutor the time is up. A no-op between calls rather than a throw: a
    * timer that fires as the learner hangs up is an ordinary race, not a fault.
+   *
+   * `label` names the note in the event log, and exists because the notes are
+   * paragraphs that all open on the same sixty characters of marker. Without it
+   * a log line cannot say whether the page congratulated a finished lesson or
+   * admitted to cutting one short, which is the difference between two very
+   * different bugs. Absent falls back to an excerpt, so the call layer keeps
+   * knowing nothing about which notes exist.
    */
-  say: (text: string) => void;
+  say: (text: string, label?: string) => void;
   /**
    * Refuse before dialling, in the caller's own words.
    *
@@ -199,6 +281,35 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
   const [connectedAt, setConnectedAt] = useState<number | null>(null);
   const [lastCallMs, setLastCallMs] = useState<number | null>(null);
   const [answered, setAnswered] = useState(0);
+  const [events, setEvents] = useState<CallEvent[]>([]);
+
+  /**
+   * Writes one line of the account. See CallEvent.
+   *
+   * The stamp is taken out here rather than inside the updater, and the updater
+   * itself does nothing else: StrictMode double-invokes updaters in
+   * development, and an event built in there would be built twice off two
+   * different clocks. React discards the first result either way, so the log
+   * gets one entry — but only because the work is pure. Nothing with a side
+   * effect may move inside it. Same rule as `toggleMute` below.
+   */
+  const record = useCallback((kind: CallEvent['kind'], detail: string) => {
+    const at = Date.now();
+    setEvents((current) => {
+      const next = [...current, { at, kind, detail }];
+      return next.length > EVENT_LIMIT ? next.slice(next.length - EVENT_LIMIT) : next;
+    });
+  }, []);
+
+  /**
+   * `answered` as a plain value, for the two readers that cannot wait a render.
+   *
+   * The log line has to say whether a reported number moved the count forward
+   * or repeated one already past, and that comparison needs the value as it is
+   * *now* — state would be a render behind, and reading it inside the updater
+   * would put the logging side effect somewhere StrictMode runs twice.
+   */
+  const answeredFar = useRef(0);
 
   /**
    * The last thing that happened worth leaning at.
@@ -260,15 +371,25 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
    */
   const append = useCallback((role: 'user' | 'agent', text: string, done: boolean) => {
     if (!text && !done) return;
+    // Outside the updater, for `record`'s reason: one append must not be able
+    // to stamp itself twice off two different clocks.
+    const now = Date.now();
     setTurns((current) => {
       let index = current.length - 1;
       while (index >= 0 && current[index].role !== role) index--;
       if (index >= 0 && !current[index].done) {
         const next = [...current];
-        next[index] = { ...next[index], text: next[index].text + text, done };
+        next[index] = {
+          ...next[index],
+          text: next[index].text + text,
+          done,
+          ...(done ? { endedAt: now } : {}),
+        };
         return next;
       }
-      return text ? [...current, { role, text, done }] : current;
+      return text
+        ? [...current, { role, text, done, at: now, ...(done ? { endedAt: now } : {}) }]
+        : current;
     });
   }, []);
 
@@ -325,12 +446,20 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
     return () => cancelAnimationFrame(frame);
   }, [status, tap, flush]);
 
-  const hangUp = useCallback((reason?: string) => {
-    session.current?.stop();
-    session.current = null;
-    // stop() drives onStatus('closed'), which clears detail — so say why after.
-    if (reason) setDetail(reason);
-  }, []);
+  const hangUp = useCallback(
+    (reason?: string) => {
+      // Only when there is something to hang up. The page calls this from a
+      // timer and from a button, and both can land on a call that has already
+      // closed — logging those would fill the account with hang-ups that hung
+      // nothing up.
+      if (session.current) record('hung-up', reason ?? 'asked to stop, with no reason given');
+      session.current?.stop();
+      session.current = null;
+      // stop() drives onStatus('closed'), which clears detail — so say why after.
+      if (reason) setDetail(reason);
+    },
+    [record],
+  );
 
   useEffect(() => {
     if (status !== 'live') return;
@@ -357,6 +486,7 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
   }, []);
 
   const connect = useCallback(async () => {
+    record('dialled', `${latest.current.modelKey} · ${latest.current.language}`);
     setTurns([]);
     setDetail(null);
     setMuted(false);
@@ -364,6 +494,7 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
 
     const handlers = {
       onStatus: (next: SessionStatus, message?: string) => {
+        record('status', message ? `${next} — ${oneLine(message)}` : next);
         setStatus(next);
         setDetail(message ?? null);
         if (next === 'live' && startedAt.current === null) {
@@ -423,7 +554,10 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
       // Barge-in. The audio for anything still queued was thrown away unplayed,
       // so showing those words would put sentences on screen that were cut off
       // mid-breath and never spoken.
-      onInterrupted: () => queue.current.discard(),
+      onInterrupted: () => {
+        record('interrupted', 'the learner talked over the tutor; unheard words were dropped');
+        queue.current.discard();
+      },
       /*
        * Monotonic, and deliberately not a tally of calls received.
        *
@@ -435,7 +569,24 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
        * watching a countdown is concerned, dealt with four of them.
        */
       onQuestionAnswered: (number: number) => {
-        setAnswered((far) => Math.max(far, number));
+        /*
+         * Logged raw, and that is the point of logging it here rather than
+         * reading the counter afterwards. `Math.max` is what makes the number
+         * safe to show and is also what destroys the evidence: a tutor that
+         * reports question three, wanders off and reports it again produces a
+         * count that never moved and a lesson that feels like it is being
+         * asked twice. The account keeps both reports; the counter keeps the
+         * floor.
+         */
+        const far = answeredFar.current;
+        record(
+          'answered',
+          number > far
+            ? `question ${number} reported done`
+            : `question ${number} reported done again — the count was already at ${far}`,
+        );
+        answeredFar.current = Math.max(far, number);
+        setAnswered(answeredFar.current);
       },
     };
 
@@ -443,6 +594,7 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
       lastActivity.current = Date.now();
       // A new call is a new pass down the list. Reset here rather than on hang
       // up, so the count stays readable on the summary of the call that ended.
+      answeredFar.current = 0;
       setAnswered(0);
       const { modelKey, language: code, instructions, settings } = latest.current;
       const started = await startGeminiSession(handlers, modelKey, code, {
@@ -459,11 +611,23 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
       setStatus('error');
       setDetail(error instanceof Error ? error.message : 'Could not start the session');
     }
-  }, [append, cue, onTranscript]);
+  }, [append, cue, onTranscript, record]);
 
-  const say = useCallback((text: string) => {
-    session.current?.say(text);
-  }, []);
+  const say = useCallback(
+    (text: string, label?: string) => {
+      const said = label ?? oneLine(text);
+      /*
+       * A note with no call to land in is recorded as dropped rather than not
+       * recorded at all. That is the single most useful line this log can
+       * carry: a closing note the page believes it sent and the tutor never
+       * received is a conversation that runs to the idle timeout, and from the
+       * outside it looks exactly like a tutor ignoring its instructions.
+       */
+      record('note', session.current ? said : `${said} — DROPPED, no call was running`);
+      session.current?.say(text);
+    },
+    [record],
+  );
 
   // Read-then-set rather than a functional updater: the session call is a side
   // effect, and StrictMode double-invokes updaters in development, so putting
@@ -488,6 +652,7 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
     connectedAt,
     lastCallMs,
     answered,
+    events,
     connect,
     hangUp,
     toggleMute,

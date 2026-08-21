@@ -238,9 +238,24 @@ consigne back with no machinery of its own.
 
 ### How the tutor is steered, and what it reports back
 
-Four instructions in `lessonBlock` are worth knowing about, because three of
-them reverse or constrain what a model would do left alone:
+Six instructions in `lessonBlock` are worth knowing about, because most of them
+reverse or constrain what a model would do left alone:
 
+- **The tutor speaks first, and it takes a note to make that happen.** Live only
+  ever answers — nothing is generated until something arrives — so a tutor told
+  in its prompt to greet the learner greets them once *they* have said hello. A
+  beginner who pressed the microphone met a silence and had to open in the
+  language they are there to learn. `/eleve` now sends `openingSignal()` as soon
+  as the socket is up: a system note carrying the part of the day on the
+  learner's own clock, never the time, with the greeting left to the tutor —
+  the page publishes lessons in several languages, and even in French the two
+  o'clock hello is *"bonjour"*, since *"bonne après-midi"* is how you leave. Its
+  marker drops the closing notes' "do not answer it" half, because a model told
+  both to act on a note and not to answer it, at the one moment its whole job is
+  to produce speech, goes quiet. And it says in as many words that it is not a
+  closing note: setups published before it existed carry a prompt saying every
+  system note ends the conversation, and those prompts are snapshots that cannot
+  be rewritten.
 - **Every turn ends on a question.** Keeping the conversation alive is the
   tutor's job, not the learner's — a tutor that trails off leaves a beginner
   holding a silence they have no language to fill, and the silence reads to
@@ -333,6 +348,62 @@ be handed a transcript with nothing in it.
 See [src/realtime/vocoSessions.ts](src/realtime/vocoSessions.ts),
 [functions/api/voco-sessions/](functions/api/voco-sessions/) and
 [src/teach/Teach.tsx](src/teach/Teach.tsx).
+
+## The diagnostic, and how to get one
+
+**Tap the microphone badge in the header three times.** Not the big microphone
+the learner presses to talk — the little one in the `Voco` lockup at the top
+left. Three taps inside a second and a half opens a slate panel over the page
+with one button on it: **Copy all**. That text is the whole of what the browser
+knows about the conversation, and it is meant to be pasted straight into a
+message to whoever can fix it.
+
+It is deliberately undiscoverable. The badge is the one piece of chrome with
+nothing to do — it is decoration on every page in the family — so a gesture put
+there cannot collide with anything a student might press, and it is not in the
+tab order or the accessibility tree. A student who finds it anyway meets a dark
+English panel that plainly is not their app, and a Close button.
+
+**What is in it, and why each part is there:**
+
+| Section | What it settles |
+| --- | --- |
+| The lesson | Which setup opened, when it was published, and the questions, targets and consigne *as the student's browser has them* — not as `/teach` currently holds them |
+| What was sent to the model | The turn-taking that left the browser, **and the fields deliberately left unsent**. A tutor cutting in mid-clause is usually a `silenceDurationMs` nobody set, which a list of present fields alone would show as nothing being wrong |
+| The face | The house performance profile, so "it never blinked" needs no second round trip |
+| The call | Status, elapsed, and how many questions the tutor *claims* — a floor, not a count |
+| The timeline | Every turn and every event on one clock |
+| The composed prompt | The whole thing, verbatim, as published and as sent |
+
+**The timeline is the part that matters.** The transcript alone cannot tell
+three completely different bugs apart, and they all look identical from the
+outside — the conversation read oddly. A tutor asking the same question twice
+is a question turn followed by one of:
+
+- `· interrupted` — the first asking was talked over and never heard, so the
+  tutor is repeating something that, from the learner's side, is new.
+- a `LEARNER` line reading *(nothing was transcribed)* — the learner answered
+  and the words never arrived, so the tutor saw silence and asked again.
+- `· answered  question 3 reported done again — the count was already at 3` —
+  the tutor's own tool is reporting a number it has already passed, which means
+  it believes it is further down the list than it is.
+
+Three different fixes. Turns are stamped at the moment their words were
+**heard** rather than when they arrived on the socket, so the agent's side and
+the page's own events sit on one clock and a note that appears between two
+questions really did land between them.
+
+The snapshot is taken when the panel opens and never rewritten, so a call can
+keep running underneath it without the text drifting away from the copy
+somebody just took. Events span every call the page has made; the transcript is
+cleared when a new one is dialled, so anything above the last `· dialled`
+belongs to an earlier conversation. Nothing survives a reload — it is a
+stethoscope, not a record — and nothing in it is anything the browser did not
+already hold: no credentials, no cookies, no account.
+
+See [src/eleve/diagnostic.ts](src/eleve/diagnostic.ts),
+[src/eleve/DiagnosticPanel.tsx](src/eleve/DiagnosticPanel.tsx) and `CallEvent`
+in [src/live/useVoiceCall.ts](src/live/useVoiceCall.ts).
 
 ## The house
 
@@ -458,6 +529,8 @@ the key private at the cost of a latency leg and some billed Worker time.
 | [functions/api/house/](functions/api/house/) | The house library on R2 — get, style-save, style-delete, performance-save |
 | [src/lingo/BrandBar.tsx](src/lingo/BrandBar.tsx) | The LingoMondo lockup, worn by both `/teach` and `/eleve` |
 | [src/eleve/ConsignePanel.tsx](src/eleve/ConsignePanel.tsx) | The consigne and questions as the student reads them, up during the call |
+| [src/eleve/diagnostic.ts](src/eleve/diagnostic.ts) | One conversation written out as text — settings, timeline and prompt — for pasting to somebody who was not there |
+| [src/eleve/DiagnosticPanel.tsx](src/eleve/DiagnosticPanel.tsx) | Where that text is shown and copied. Three taps on the header's microphone badge |
 
 ## What a call can be configured with
 

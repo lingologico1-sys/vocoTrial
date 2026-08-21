@@ -1,5 +1,5 @@
 import { Mic } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { useRef, type ReactNode } from 'react';
 
 /**
  * The LingoMondo header lockup, and the bar it sits in.
@@ -30,6 +30,18 @@ import type { ReactNode } from 'react';
  * the same 16px.
  */
 
+/**
+ * How long three taps have to arrive within, for `onTripleTap`.
+ *
+ * Comfortably fast rather than hurried: a second and a half is three unhurried
+ * taps by somebody who means it, and is short enough that a student poking the
+ * badge twice over a minute never reaches it.
+ */
+const TAP_WINDOW_MS = 1500;
+
+/** How many taps it takes. Three, as everywhere else that hides a panel. */
+const TAPS = 3;
+
 interface BrandBarProps {
   /**
    * The line after the divider — what this page is, in the target language.
@@ -41,9 +53,50 @@ interface BrandBarProps {
   tagline?: string;
   /** The right-hand control: a language picker, a link, a count. */
   children?: ReactNode;
+  /**
+   * Three quick taps on the microphone badge, for whatever the page hides
+   * behind that.
+   *
+   * ON THE BADGE BECAUSE IT IS THE ONE PIECE OF CHROME WITH NOTHING TO DO. The
+   * wordmark, the sub-name and the tagline all say what the page is; the badge
+   * is decoration beside them, present on every page in the family and clicked
+   * by nobody. So a gesture put here cannot collide with anything, and — more
+   * to the point — cannot be found by a student pressing things to see what
+   * happens, which is the requirement a hidden panel actually has.
+   *
+   * THE COUNTING IS HERE AND NOT IN THE PAGE, because the element being tapped
+   * is here. A page that had to own the count would need the badge handed out
+   * to it, and then two files would share a gesture between them; this way the
+   * page is told once, when it has happened.
+   *
+   * Absent leaves the badge exactly what it was: a decorative span with no
+   * handler, no cursor and nothing in the accessibility tree.
+   */
+  onTripleTap?: () => void;
 }
 
-export default function BrandBar({ tagline, children }: BrandBarProps) {
+export default function BrandBar({ tagline, children, onTripleTap }: BrandBarProps) {
+  /**
+   * When the recent taps landed.
+   *
+   * A ref rather than state: nothing on screen changes as they accumulate, and
+   * a re-render per tap would be a re-render of the whole page's header for a
+   * gesture that usually goes nowhere. Trimmed to the window on every tap, so
+   * a tap an hour ago cannot combine with two now.
+   */
+  const taps = useRef<number[]>([]);
+
+  const tapped = () => {
+    if (!onTripleTap) return;
+    const now = Date.now();
+    taps.current = [...taps.current, now].filter((at) => now - at < TAP_WINDOW_MS);
+    if (taps.current.length < TAPS) return;
+    // Cleared before the handler runs, so the fourth tap of an enthusiastic
+    // four does not open a second one behind the first.
+    taps.current = [];
+    onTripleTap();
+  };
+
   return (
     <header className="flex h-14 shrink-0 items-center border-b-4 border-lingo-rule bg-lingo-bar">
       <div className="mx-auto flex w-full max-w-6xl items-center justify-between px-4">
@@ -99,7 +152,24 @@ export default function BrandBar({ tagline, children }: BrandBarProps) {
           </div>
 
           <div className="ml-[9px] flex items-center gap-1.5">
-            <span className="flex h-[26px] w-[26px] items-center justify-center rounded-md border-2 border-lingo-stroke bg-lingo-accent shadow-lingo-pop-sm">
+            {/*
+              A span with a handler and deliberately not a button.
+
+              A button is a control, and this is not one: it has no label it
+              could truthfully carry, it does nothing a keyboard user could
+              discover, and putting it in the tab order would announce a hidden
+              panel to exactly the people using the page as a page. What it is
+              is a gesture target on a decoration — so it stays out of the
+              accessibility tree, and the diagnostic behind it stays something
+              you have to be told about.
+
+              `select-none` because three taps on text is how a browser decides
+              you meant to select a word.
+            */}
+            <span
+              onClick={tapped}
+              className="flex h-[26px] w-[26px] select-none items-center justify-center rounded-md border-2 border-lingo-stroke bg-lingo-accent shadow-lingo-pop-sm"
+            >
               <Mic size={15} className="text-lingo-paper" strokeWidth={2.5} />
             </span>
             <span

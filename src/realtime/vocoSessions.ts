@@ -278,6 +278,34 @@ export function capLooksTight(questionCount: number, capMinutes: number): boolea
 export const ANSWERED_TOOL = 'questionAnswered';
 
 /**
+ * How anything this app has to say reaches a conversation it is not part of.
+ *
+ * Marked as notes rather than phrased as speech. They arrive through
+ * `clientContent`, whose only available role is `user`, so without the marker
+ * they read as the learner suddenly saying "the time is up" in English — and a
+ * tutor that believes that will answer it out loud.
+ */
+const NOT_THE_LEARNER = '[NOTE FROM THE SYSTEM, NOT FROM THE LEARNER';
+
+const SYSTEM_NOTE = `${NOT_THE_LEARNER} — do not answer it or read it out]`;
+
+/**
+ * The same marker, minus the half that would silence the opening note.
+ *
+ * "Do not answer it" is right for a note that arrives mid-conversation: it says
+ * the sentence you have just been handed is not something the learner said, so
+ * do not reply to it as though it were. Handed to a tutor that has not spoken
+ * yet, at the one moment its whole job is to produce speech, the same clause is
+ * a coin toss — and the side it lands on half the time is the silence this note
+ * exists to end. So the opening note asks to be acted on and keeps the rest.
+ *
+ * Composed from a shared phrase rather than written out twice, because the half
+ * that matters is the half both must keep saying: this did not come from the
+ * person you are talking to.
+ */
+const OPENING_NOTE = `${NOT_THE_LEARNER} — act on it, but do not read it out]`;
+
+/**
  * The two ways a lesson ends, as the page says them into the conversation.
  *
  * CONSTANTS BECAUSE TWO PLACES HAVE TO AGREE. `lessonBlock` tells the tutor to
@@ -292,18 +320,74 @@ export const ANSWERED_TOOL = 'questionAnswered';
  * signs off warmly there, as though the work were done, tells a learner they
  * finished something they did not. The learner can see the list on their own
  * screen, so it is a lie they can check.
- *
- * Marked as notes rather than phrased as speech. They arrive through
- * `clientContent`, whose only available role is `user`, so without the marker
- * they read as the learner suddenly saying "the time is up" in English — and a
- * tutor that believes that will answer it out loud.
  */
-const SYSTEM_NOTE =
-  '[NOTE FROM THE SYSTEM, NOT FROM THE LEARNER — do not answer it or read it out]';
-
 export const LESSON_DONE_SIGNAL = `${SYSTEM_NOTE} Every question on the list has been answered. Close the conversation now, exactly as described under HOW THIS ENDS.`;
 
 export const TIME_UP_SIGNAL = `${SYSTEM_NOTE} This session has run out of time with questions still unanswered. Close the conversation now, exactly as described under HOW THIS ENDS — and do not suggest the lesson was finished, because it was not.`;
+
+/**
+ * Which greeting the hour has earned, on the clock of whoever is talking.
+ *
+ * `getHours` reads the browser's own zone, and the browser is in the room with
+ * the learner — which is the only clock that can be right here, since the
+ * lesson was published from a staffroom that may be three time zones away.
+ *
+ * Evening runs from six in the evening through to five in the morning. One in
+ * the morning is an odd hour to be practising, but "bonsoir" is still what a
+ * person says at it, and the alternative — a fourth part of the day for the
+ * night — buys a greeting most languages do not have.
+ */
+export type DayPart = 'morning' | 'afternoon' | 'evening';
+
+export function dayPartAt(when: Date = new Date()): DayPart {
+  const hour = when.getHours();
+  if (hour < 5 || hour >= 18) return 'evening';
+  if (hour < 12) return 'morning';
+  return 'afternoon';
+}
+
+/**
+ * The note that opens the conversation, and the one here that is not about a
+ * lesson.
+ *
+ * IT EXISTS BECAUSE LIVE ONLY ANSWERS. Nothing is generated until something
+ * arrives, so a tutor told in its own instructions to greet the learner still
+ * sits there. Every conversation therefore opened on the learner having to say
+ * "bonjour" into a silence to find out whether the thing was working — which
+ * is the app asking the beginner to go first, at the exact moment they are
+ * least sure of themselves. The note is the something that arrives.
+ *
+ * IN THIS FILE, BESIDE THE CLOSING NOTES, though a call with no questions opens
+ * exactly the same way and nothing about the greeting is lesson-specific. What
+ * it shares with them is the marker and the prompt half that has to know these
+ * notes exist, which is `lessonBlock` below. Three notes and one vocabulary is
+ * worth keeping in one place; a greeting in a file of its own would be half a
+ * convention kept somewhere else.
+ *
+ * IT SAYS IT IS NOT A CLOSING NOTE, IN AS MANY WORDS, and that line is the
+ * load-bearing one. Lessons published before today are sitting in R2 with a
+ * prompt that says a system note will arrive and that there are two of them,
+ * both of which end the conversation — and this one arrives at second zero.
+ * Those prompts are snapshots and cannot be rewritten, so the note has to carry
+ * its own correction. `lessonBlock` names the opening note too, which fixes it
+ * properly for everything published from now on.
+ *
+ * THE PART OF THE DAY AND NEVER THE TIME. The tutor is told under THERE IS NO
+ * LENGTH TO FILL that it cannot see a clock and must never mention one, and
+ * that rule is what stops it pacing to fill a number. "It is the evening" is
+ * what a greeting needs and is not a clock; an hour would be, so no hour goes.
+ *
+ * THE GREETING ITSELF IS THE TUTOR'S WORD, not ours. Sending "bonsoir" would
+ * send French to a page that publishes Spanish and German lessons too, and it
+ * would get the afternoon wrong in the very language it was written for: the
+ * French for a two o'clock hello is still "bonjour", and "bonne après-midi" is
+ * how you leave rather than how you arrive. A model that speaks the language
+ * knows that. What it cannot do is look out of the window, so that is the one
+ * thing it is told.
+ */
+export function openingSignal(part: DayPart = dayPartAt()): string {
+  return `${OPENING_NOTE} The learner has just connected and is waiting for you to speak first. Greet them now, in the language you are speaking, with the greeting a person would use in the ${part} — then open the conversation exactly as your instructions describe. Never say what the time is: the part of the day is here so that your greeting fits it, and for nothing else. This is not one of the notes that end the conversation — it is only beginning.`;
+}
 
 /**
  * More targets than one conversation can evidence.
@@ -419,6 +503,14 @@ export function looksLikeVocoSession(value: unknown): value is VocoSession {
  * reads to them as their own failure. The exemption is the closing turn, which
  * has to be exempt or the conversation cannot end at all.
  *
+ * THE TUTOR OPENS, AND IT TAKES A NOTE TO MAKE THAT HAPPEN. Live only ever
+ * answers, so an instruction to greet the learner is an instruction that fires
+ * once the learner has greeted you — which is the wrong way round, and was the
+ * whole of what a beginner met when they pressed the microphone. The page sends
+ * a note instead; see `openingSignal`. What the section here is really for is
+ * keeping that note from being read as a closing one, because until it existed
+ * every system note in a lesson meant the conversation was over.
+ *
  * PROGRESS IS REPORTED THROUGH A TOOL, which is the only structured channel
  * this app has into a call. Nothing else could carry it: the transcript is
  * untyped text, and a spoken marker would be a marker the tutor eventually says
@@ -516,13 +608,22 @@ who works through half the list properly has done better than one rushed through
 all of it. You cannot see a clock. Never guess how long you have been talking,
 never say how much time is left, and never mention the time at all.
 
-HOW THIS ENDS
-A note will arrive in the conversation, marked as coming from the system rather
-than from the learner. It is not something the learner said: never answer it,
-never read it out, and never mention that it arrived. Never end the conversation
-before one arrives — not even when you are sure the last question is done.
+HOW THIS STARTS
+You speak first. Before the learner has said anything, a note will arrive marked
+as coming from the system, telling you to greet them and saying which part of
+the day it is where they are. Act on it: say hello the way a person would at
+that time of day, and then ask the first question on the list. Never read the
+note out, never mention that it arrived, and never say what the time is — the
+part of the day is there so that your greeting fits it, and for nothing else.
+It is not one of the notes described below.
 
-There are two of them, and they close differently.
+HOW THIS ENDS
+Another note will arrive when it is time to stop, also marked as coming from
+the system. It is not something the learner said: never answer it, never read it out, and never
+mention that it arrived. Never end the conversation before one arrives — not
+even when you are sure the last question is done.
+
+There are two of these closing notes, and they close differently.
 
   EVERY QUESTION HAS BEEN ANSWERED — the lesson is complete. Close in a turn or
   two: say something warm and specific about how they did, quote back one thing
