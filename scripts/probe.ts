@@ -45,6 +45,7 @@ import { patienceSettings } from '../src/realtime/settings';
 import {
   LESSON_DONE_SIGNAL,
   PROGRESS_TOOL,
+  TIME_UP_SIGNAL,
   composeTutorPrompt,
   openingSignal,
 } from '../src/realtime/tutorPrompt';
@@ -77,54 +78,134 @@ const PERSONA = {
 };
 
 /**
- * The learner, scripted — and scripted badly on purpose.
+ * The learner, who answers the question they were actually asked.
  *
- * A learner who answers every question in a full sentence tests nothing: the
- * failure being watched for is a tutor that takes a shrug for an answer and
- * moves on, so the script opens with the shrugs that were in the transcript
- * ("Ça va bien", "Pas grand-chose") and only expands when pushed. The last few
- * lines are deliberately generous, so a run that reaches them can distinguish
- * "the tutor never got there" from "the learner never gave it anything".
+ * A FIXED SCRIPT MEASURED THE SCRIPT, NOT THE TUTOR. The first version was a
+ * list of twelve lines played in order, and it fell out of step on the second
+ * turn: the tutor asked an age, the script replied "Pas grand-chose", and every
+ * turn after that was the tutor coping with a learner who answers questions
+ * nobody asked. It then looked like a tutor asking two questions at once and
+ * losing its place — which is exactly the fault being investigated, arriving
+ * for a reason that lives in this file rather than in the prompt. A probe that
+ * manufactures the bug it is looking for is worse than no probe.
  *
- * Twelve lines for five questions. A tutor asking one follow-up per question
- * needs about that many; a tutor that runs out has been asking too many.
+ * MATCHED ON THE TUTOR'S LAST TURN, crudely and on purpose: the point is a
+ * conversation that stays coherent, not a learner simulator. Each topic holds
+ * two replies — a short one and a fuller one — so a tutor that asks a good
+ * follow-up gets rewarded with the longer answer, and one that moves straight
+ * on never sees it. That difference is the thing worth measuring.
+ *
+ * THE FIRST REPLY TO EVERY TOPIC IS SHORT, because the failure being watched
+ * for is a tutor that takes a shrug for an answer and reports the question
+ * finished. Give it nothing but full sentences and it cannot show that.
+ *
+ * The negative pattern is tested before the positive one: "qu'est-ce que tu
+ * n'aimes pas faire" contains "aimes faire", and matching that first would
+ * answer question five with question four's answer for the whole run.
  */
-const LEARNER = [
-  'Ça va bien, merci.',
-  'Pas grand-chose.',
-  "J'ai dix-sept ans.",
-  'Oui, je suis au lycée, en première.',
-  "Je viens de Manchester, en Angleterre.",
-  "C'est une grande ville, il pleut beaucoup mais j'aime bien.",
-  "J'aime jouer au football avec mes amis le week-end.",
-  "On joue dans le parc, et après on mange une pizza ensemble.",
-  "Je n'aime pas faire mes devoirs, surtout les maths.",
-  "Parce que c'est difficile et je préfère être dehors avec mes amis.",
-  "Oui, c'est vrai.",
-  "Merci beaucoup, au revoir!",
+const TOPICS: Array<{ asks: RegExp; replies: string[] }> = [
+  {
+    asks: /n['’]aimes pas|n['’]aime pas|détest|pas envie/i,
+    replies: [
+      "Je n'aime pas faire mes devoirs.",
+      "Surtout les maths, parce que c'est difficile et je préfère être dehors avec mes amis.",
+    ],
+  },
+  {
+    asks: /aimes faire|aimes-tu faire|loisir|temps libre|passe-temps|métier|dans la vie/i,
+    replies: [
+      "J'aime le football.",
+      "Je joue dans le parc avec mes amis le week-end, et après on mange une pizza ensemble.",
+    ],
+  },
+  {
+    asks: /âge|ans\b|quel age/i,
+    replies: ["J'ai dix-sept ans.", 'Oui, je suis au lycée, en première.'],
+  },
+  {
+    asks: /d['’]où|viens|habites|ville|région|pays/i,
+    replies: [
+      'Je viens de Manchester.',
+      "C'est une grande ville en Angleterre, il pleut beaucoup mais j'aime bien y vivre.",
+    ],
+  },
+  {
+    asks: /ça va|comment vas|en forme|bien dormi|aujourd['’]hui/i,
+    replies: ['Ça va bien, merci.', 'Je suis un peu fatigué, mais content de parler français.'],
+  },
 ];
 
-/** How long to wait for the model to finish a turn before giving up on it. */
-const TURN_TIMEOUT_MS = 45_000;
+/** When nothing matched: keep talking without answering anything specific. */
+const SHRUGS = [
+  'Pas grand-chose.',
+  'Oui, je pense.',
+  'Je ne sais pas trop.',
+  "Peut-être, oui.",
+  "Oui, c'est vrai.",
+];
+
+/**
+ * The most turns to take before giving up on the list.
+ *
+ * Five questions with a follow-up apiece is ten or eleven exchanges. Sixteen
+ * leaves room for a tutor that asks two follow-ups and still finishes; a tutor
+ * that has not finished in sixteen is the finding, not a run that was cut off.
+ */
+const MAX_EXCHANGES = 16;
+
+/**
+ * How long to wait for the model to finish a turn before giving up on it.
+ *
+ * NINETY RATHER THAN FORTY-FIVE, because audio streams in something close to
+ * real time: a turn is not slow because the model is thinking, it is slow
+ * because it is talking, and a tutor that has decided to say a paragraph takes
+ * a paragraph's worth of seconds to say it. Forty-five was tripping on turns
+ * that were still arriving, which reads as a hang and is a tutor being
+ * long-winded — itself worth seeing, and only visible if the wait outlasts it.
+ */
+const TURN_TIMEOUT_MS = 90_000;
 
 // --- Reading the key, which is the one thing here that is not in the repo.
 
-function apiKey(): string {
-  const fromEnv = process.env.GOOGLE_API_KEY;
-  if (fromEnv) return fromEnv;
+/**
+ * The shortest thing that could be a key, for telling one from a placeholder.
+ *
+ * AI Studio keys are around forty characters and open with "AIza". The value
+ * that sent this probe looking for a bug in its own socket handling was three
+ * characters long — a placeholder somebody typed to make a file parse — and
+ * Google's answer to it is "API key not valid. Please pass a valid API key.",
+ * which reads as a key that has been revoked rather than one that was never
+ * filled in. Twenty is well under any real key and well over any placeholder.
+ */
+const KEY_LOOKS_REAL = 20;
 
-  try {
-    const vars = readFileSync('.dev.vars', 'utf8');
-    const found = vars.match(/^GOOGLE_API_KEY=(.+)$/m)?.[1]?.trim();
-    if (found) return found;
-  } catch {
-    // Falls through to the message below, which says what to do about it.
-  }
+function apiKey(): string {
+  const found = (() => {
+    if (process.env.GOOGLE_API_KEY) return process.env.GOOGLE_API_KEY;
+    try {
+      return readFileSync('.dev.vars', 'utf8').match(/^GOOGLE_API_KEY=(.+)$/m)?.[1]?.trim() ?? '';
+    } catch {
+      return '';
+    }
+  })();
+
+  if (found.length >= KEY_LOOKS_REAL) return found;
 
   console.error(
-    'No GOOGLE_API_KEY. Put one in .dev.vars or the environment — an AI Studio\n' +
-      'key, not a Vertex one: this probe talks to the surface 3.1 Flash Live is\n' +
-      'published on. See functions/api/_aistudio.ts.',
+    found
+      ? `GOOGLE_API_KEY is ${found.length} characters, which is a placeholder rather than\n` +
+          'a key — a real AI Studio key is around forty and starts with "AIza". Google\n' +
+          'answers one of these with "API key not valid", which sounds like a revoked\n' +
+          'key and is not.\n\n' +
+          'Get one from https://aistudio.google.com/apikey and put it in .dev.vars. An\n' +
+          'AI Studio key, not a Vertex one: this probe talks to the surface 3.1 Flash\n' +
+          'Live is published on, and the two are different accounts. See\n' +
+          'functions/api/_aistudio.ts.\n\n' +
+          'The same secret is set separately in the Pages dashboard, and the student\n' +
+          'page needs it there: /eleve dials a model only AI Studio carries.'
+      : 'No GOOGLE_API_KEY. Put one in .dev.vars or the environment — an AI Studio\n' +
+          'key, not a Vertex one: this probe talks to the surface 3.1 Flash Live is\n' +
+          'published on. See functions/api/_aistudio.ts.',
   );
   process.exit(2);
 }
@@ -157,8 +238,27 @@ interface LiveFrame {
   serverContent?: {
     outputTranscription?: { text?: string };
     turnComplete?: boolean;
+    generationComplete?: boolean;
     interrupted?: boolean;
+    modelTurn?: unknown;
   };
+  usageMetadata?: unknown;
+}
+
+/** A frame in a few words, for the account of a wait that gave up. */
+function describe(frame: LiveFrame): string {
+  const content = frame.serverContent;
+  if (!content) return Object.keys(frame).join('+') || 'empty';
+  const parts = Object.entries({
+    audio: !!content.modelTurn,
+    words: !!content.outputTranscription?.text,
+    generationComplete: !!content.generationComplete,
+    turnComplete: !!content.turnComplete,
+    interrupted: !!content.interrupted,
+  })
+    .filter(([, present]) => present)
+    .map(([name]) => name);
+  return parts.length ? parts.join('+') : 'serverContent (nothing in it)';
 }
 
 /** One thing that happened, in the order it happened. */
@@ -166,6 +266,24 @@ interface Event {
   at: number;
   kind: 'tutor' | 'learner' | 'tool' | 'note';
   text: string;
+}
+
+/**
+ * Records an event and prints it immediately.
+ *
+ * PRINTED AS IT HAPPENS, NOT COLLECTED AND PRINTED AT THE END, which is how
+ * this was written and was wrong in the way that matters: the first run to
+ * reach the API spent nine minutes talking to the model, hit a timeout on one
+ * turn, and printed a single line saying so — throwing away every turn before
+ * it. A probe whose output survives only the successful runs is a probe that
+ * goes quiet in exactly the cases somebody runs it for, which is the same
+ * mistake the tool logging in useVoiceCall.ts was added to fix.
+ */
+function note(events: Event[], at: number, kind: Event['kind'], text: string): void {
+  events.push({ at, kind, text });
+  const seconds = (at / 1000).toFixed(1).padStart(6);
+  const shown = kind === 'note' ? `${text.slice(0, 64)}…` : text;
+  console.log(`+${seconds}s  ${kind.toUpperCase().padEnd(8)}${shown}`);
 }
 
 async function frameText(data: unknown): Promise<string> {
@@ -215,7 +333,27 @@ async function connect(setup: Record<string, unknown>, events: Event[]) {
 
   const waitFor = <T,>(test: (frame: LiveFrame) => T | undefined, what: string): Promise<T> =>
     new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error(`timed out waiting for ${what}`)), TURN_TIMEOUT_MS);
+      /**
+       * What did arrive while we were waiting, for the message that says we
+       * gave up.
+       *
+       * "Timed out waiting for the tutor to finish a turn" is true and useless:
+       * a model that said nothing, a model that spoke and never closed the
+       * turn, and a model whose generation was cancelled all produce it, and
+       * they are three different bugs. Naming the frames separates them.
+       */
+      const seen: string[] = [];
+      const timer = setTimeout(
+        () =>
+          reject(
+            new Error(
+              `timed out waiting for ${what}. Frames that did arrive: ${
+                seen.length ? seen.join(', ') : 'none at all'
+              }`,
+            ),
+          ),
+        TURN_TIMEOUT_MS,
+      );
       const settle = (finish: () => void) => {
         clearTimeout(timer);
         onFrame = null;
@@ -224,17 +362,28 @@ async function connect(setup: Record<string, unknown>, events: Event[]) {
       };
       waiting = (error) => settle(() => reject(error));
       onFrame = (frame) => {
+        seen.push(describe(frame));
         const hit = test(frame);
         if (hit !== undefined) settle(() => resolve(hit));
       };
     });
 
   await new Promise<void>((resolve, reject) => {
-    socket.onopen = () => resolve();
-    socket.onerror = () => reject(new Error('could not open the socket'));
+    // A socket that neither opens nor errors would otherwise wait for ever:
+    // every other wait here is bounded and this one was not.
+    const timer = setTimeout(() => reject(new Error('the socket never opened')), 15_000);
+    socket.onopen = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    socket.onerror = () => {
+      clearTimeout(timer);
+      reject(new Error('could not open the socket'));
+    };
   });
   socket.send(JSON.stringify({ setup }));
   await waitFor((frame) => (frame.setupComplete ? true : undefined), 'setupComplete');
+  console.log(`+   0.0s  SETUP   accepted — ${MODEL_KEY} is live on AI Studio\n`);
 
   /**
    * Says something and collects everything the tutor says back.
@@ -245,7 +394,7 @@ async function connect(setup: Record<string, unknown>, events: Event[]) {
    * paused to think about it would be measuring its own latency.
    */
   const say = async (text: string, kind: Event['kind']): Promise<string> => {
-    events.push({ at: Date.now() - started, kind, text });
+    note(events, Date.now() - started, kind, text);
     socket.send(
       JSON.stringify({
         clientContent: { turns: [{ role: 'user', parts: [{ text }] }], turnComplete: true },
@@ -253,12 +402,22 @@ async function connect(setup: Record<string, unknown>, events: Event[]) {
     );
 
     let spoken = '';
+    /*
+     * The partial is printed if the wait gives up, and that is not a nicety.
+     * A turn that never closes is the one case where the words are the whole
+     * evidence — a model reading a note out, a model rambling past the audio
+     * budget, and a model genuinely hung all look identical from the frame
+     * types alone, and quite different from what it was saying at the time.
+     */
+    const partial = () => {
+      if (spoken.trim()) note(events, Date.now() - started, 'tutor', `${spoken.trim()} …[turn never closed]`);
+    };
     await waitFor((frame) => {
       const calls = frame.toolCall?.functionCalls;
       if (calls?.length) {
         for (const call of calls) {
           const args = call.args ? ` ${JSON.stringify(call.args)}` : ' (no arguments)';
-          events.push({ at: Date.now() - started, kind: 'tool', text: `${call.name}${args}` });
+          note(events, Date.now() - started, 'tool', `${call.name}${args}`);
         }
         socket.send(
           JSON.stringify({
@@ -274,12 +433,18 @@ async function connect(setup: Record<string, unknown>, events: Event[]) {
         return undefined;
       }
 
+      if (frame.serverContent?.interrupted) {
+        note(events, Date.now() - started, 'tool', '(the tutor was interrupted — generation cancelled)');
+      }
       const said = frame.serverContent?.outputTranscription?.text;
       if (said) spoken += said;
       return frame.serverContent?.turnComplete ? true : undefined;
-    }, 'the tutor to finish a turn');
+    }, 'the tutor to finish a turn').catch((error) => {
+      partial();
+      throw error;
+    });
 
-    events.push({ at: Date.now() - started, kind: 'tutor', text: spoken.trim() });
+    note(events, Date.now() - started, 'tutor', spoken.trim() || '(said nothing)');
     return spoken.trim();
   };
 
@@ -294,9 +459,20 @@ interface Finding {
   detail: string;
 }
 
+/** How many distinct questions the tutor has reported so far. */
+function reported(events: Event[]): number {
+  const numbers = events
+    .filter((event) => event.kind === 'tool' && event.text.startsWith(PROGRESS_TOOL))
+    .map((event) => Number(event.text.match(/"number"\s*:\s*(\d+)/)?.[1]))
+    .filter(Number.isFinite);
+  return new Set(numbers).size;
+}
+
 function check(events: Event[]): Finding[] {
   const findings: Finding[] = [];
-  const tools = events.filter((event) => event.kind === 'tool');
+  const tools = events.filter(
+    (event) => event.kind === 'tool' && event.text.startsWith(PROGRESS_TOOL),
+  );
   const numbers = tools.map((event) => {
     const found = event.text.match(/"number"\s*:\s*(\d+)/);
     return found ? Number(found[1]) : NaN;
@@ -314,8 +490,26 @@ function check(events: Event[]): Finding[] {
     detail: `${numbers.filter(Number.isFinite).length} of ${numbers.length} did`,
   });
 
-  const inOrder = numbers.every((number, index) => index === 0 || number >= numbers[index - 1]);
-  findings.push({ ok: inOrder, what: 'reports arrive in order', detail: numbers.join(', ') || 'none' });
+  /*
+   * NOT "IN ORDER", WHICH WAS THE WRONG TEST. The tutor catches its bookkeeping
+   * up in a single breath — `questionDone(2)` and `questionDone(1)` in one
+   * frame — and there is no order inside a frame to violate. What actually
+   * matters is that reports stay near the front of the list: a report for
+   * question five while three of them are unaccounted for is a tutor that has
+   * lost its place, and it is the shape of the failure this whole rewrite came
+   * from. This is the same rule `acceptProgress` enforces on the page.
+   */
+  let ahead = '';
+  const counted: number[] = [];
+  for (const number of [...numbers].sort((a, b) => a - b)) {
+    if (number > counted.length + 1 && !ahead) ahead = `question ${number} with only ${counted.length} counted`;
+    counted.push(number);
+  }
+  findings.push({
+    ok: !ahead,
+    what: 'no report jumps ahead of the list',
+    detail: ahead || numbers.join(', ') || 'none',
+  });
 
   findings.push({
     ok: new Set(numbers).size === numbers.length,
@@ -345,6 +539,36 @@ function check(events: Event[]): Finding[] {
   });
 
   /*
+   * ONE QUESTION A TURN, which is the rule a learner actually feels. Asked two,
+   * they answer the last one they heard and the first is simply lost — so a
+   * turn carrying a follow-up and the next question on the list gets the
+   * follow-up dropped, and the answers stay short. Counting question marks is
+   * crude and catches exactly this: French writes them where English does.
+   */
+  const crowded = spoken.filter((text) => (text.match(/\?/g) ?? []).length > 1);
+  findings.push({
+    ok: crowded.length === 0,
+    what: 'one question a turn',
+    detail: crowded.length ? `${crowded.length} turns asked more: ${crowded[0].slice(0, 70)}` : 'never more than one',
+  });
+
+  /*
+   * A TURN THAT SAYS NOTHING IS DEAD AIR ON A VOICE CALL. It happens when the
+   * model spends a turn on the tool call alone: `scheduling: 'SILENT'` stops
+   * the result becoming a turn of its own, which is what keeps the tutor from
+   * repeating itself — and if the model had no speech in that turn to begin
+   * with, the learner hears silence after answering. The prompt asks for the
+   * call to ride along with a turn that also speaks. This is where that gets
+   * measured.
+   */
+  const silent = events.filter((event) => event.kind === 'tutor' && event.text === '(said nothing)');
+  findings.push({
+    ok: silent.length === 0,
+    what: 'no turn is silent',
+    detail: silent.length ? `${silent.length} left the learner with dead air` : 'the tutor spoke every turn',
+  });
+
+  /*
    * A tutor that says goodbye before the closing note has ended the lesson on
    * its own authority, which is the thing the page is supposed to decide.
    */
@@ -358,6 +582,20 @@ function check(events: Event[]): Finding[] {
     detail: earlyGoodbye ? earlyGoodbye.text.slice(0, 80) : 'it never said goodbye early',
   });
 
+  /*
+   * And the other half of the same rule: told to close, it closes. The last
+   * turn of the run should be a goodbye and should not end on a question — the
+   * one turn in the whole lesson that is exempt from ending on one. A tutor
+   * that answers a closing note with another question leaves the page hanging
+   * up mid-conversation, which the learner experiences as being cut off.
+   */
+  const last = spoken.at(-1) ?? '';
+  findings.push({
+    ok: /au revoir|à bientôt|bonne journée|bonne continuation|salut/i.test(last) && !last.includes('?'),
+    what: 'the closing note is acted on',
+    detail: last ? last.slice(0, 90) : 'the tutor said nothing at all after the note',
+  });
+
   return findings;
 }
 
@@ -368,24 +606,67 @@ async function runLesson(): Promise<number> {
   const events: Event[] = [];
   const call = await connect(buildSetup(prompt), events);
 
-  await call.say(openingSignal('morning'), 'note');
-  for (const line of LEARNER) {
-    const reply = await call.say(line, 'learner');
-    // A tutor with nothing left to say has finished early — every turn is meant
-    // to end on a question, so an empty one is worth stopping on rather than
-    // feeding another eight lines into.
-    if (!reply) break;
-    if (events.filter((event) => event.kind === 'tool').length >= LESSON.questions.length) break;
-  }
-  await call.say(LESSON_DONE_SIGNAL, 'note');
-  call.close();
+  /**
+   * What the learner says next, given what the tutor just said.
+   *
+   * The used counter per topic is what makes the second visit to a subject give
+   * the fuller answer: a tutor that follows up gets more to work with, and one
+   * that does not never earns it.
+   */
+  const used = new Map<RegExp, number>();
+  let shrugs = 0;
+  const answer = (heard: string): string => {
+    const topic = TOPICS.find((entry) => entry.asks.test(heard));
+    if (topic) {
+      const taken = used.get(topic.asks) ?? 0;
+      if (taken < topic.replies.length) {
+        used.set(topic.asks, taken + 1);
+        return topic.replies[taken];
+      }
+    }
+    return SHRUGS[shrugs++ % SHRUGS.length];
+  };
 
-  for (const event of events) {
-    const seconds = (event.at / 1000).toFixed(1).padStart(6);
-    const label = event.kind.toUpperCase().padEnd(8);
-    const text = event.kind === 'note' ? `${event.text.slice(0, 60)}…` : event.text;
-    console.log(`+${seconds}s  ${label}${text}`);
+  let heard = await call.say(openingSignal('morning'), 'note');
+  for (let exchange = 0; exchange < MAX_EXCHANGES; exchange += 1) {
+    const line = answer(heard);
+    /*
+     * A beat before answering, because a person has one.
+     *
+     * `turnComplete` says the model has finished generating, not that the
+     * learner has finished hearing it — the audio is still playing out on a
+     * real call. Replying on the same millisecond is a barge-in, and a
+     * barge-in cancels generation without ever closing the turn, which is a
+     * wait that can only end in a timeout. The probe is not trying to test
+     * interruption handling here; it is trying to hold an ordinary
+     * conversation, and an ordinary conversation has gaps in it.
+     */
+    await new Promise((resume) => setTimeout(resume, 1_500));
+    heard = await call.say(line, 'learner');
+    /*
+     * A SILENT TURN IS NOT AN ENDING, and reading it as one cost a whole run.
+     * The loop used to stop on a tutor turn with no words in it, on the
+     * reasonable-sounding theory that a tutor with nothing left to say has
+     * finished early. But a turn that carries only a tool call has no words in
+     * it by design: `scheduling: 'SILENT'` is what stops the result becoming a
+     * turn of its own, so the model reports and says nothing. The probe read
+     * that as the end of the lesson, stopped after two learner lines, and
+     * reported one question of five — a failure entirely of its own making,
+     * sitting in the same output as the real ones.
+     */
+    if (reported(events) >= LESSON.questions.length) break;
   }
+
+  /*
+   * The note the page would actually send from here, which is not always the
+   * warm one. A run that ends with questions unreported is the state
+   * TIME_UP_SIGNAL exists for, and sending the other one would be testing the
+   * tutor's response to a claim it can see is false — the model reads the same
+   * transcript we do.
+   */
+  const finished = reported(events) >= LESSON.questions.length;
+  await call.say(finished ? LESSON_DONE_SIGNAL : TIME_UP_SIGNAL, 'note');
+  call.close();
 
   console.log('\n--- WHAT THE RUN SHOWS ---');
   const findings = check(events);

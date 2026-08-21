@@ -306,17 +306,25 @@ export async function startGeminiSession(
         // into a turn it has already spoken. See onToolCall in types.ts.
         for (const call of calls) handlers.onToolCall?.(call.name ?? '(unnamed)', call.args);
         /*
-         * Passed on one at a time and exactly as they arrived, including the
-         * numbers that make no sense. Five calls in one frame is five reports,
-         * because five reports is what the model sent, and a layer that quietly
-         * collapsed them would be deciding something it has no evidence for.
-         * The believing happens in useVoiceCall.
+         * Passed on as the frame carried them: all of it, unfiltered, in one
+         * handoff. The believing happens in useVoiceCall.
+         *
+         * A FRAME IS ONE DECISION, WHICH IS WHY THEY GO TOGETHER. This used to
+         * dispatch each call separately, on the reasoning that five calls is
+         * five reports and collapsing them would be deciding something without
+         * evidence. Measuring it showed the opposite: the tutor catches its
+         * bookkeeping up in a single breath — `questionDone(2)` and
+         * `questionDone(1)` arrived in one frame, then `(3)` and `(4)` in
+         * another — and there is no order within a frame to respect, since the
+         * model emitted them at once. Handing them over one at a time made them
+         * look like separate moments and invited the layer above to hold the
+         * second against the first for arriving too soon.
          */
-        for (const call of calls) {
-          if (call.name !== PROGRESS_TOOL) continue;
-          const number = (call.args as { number?: unknown } | undefined)?.number;
-          handlers.onQuestionDone?.(typeof number === 'number' ? number : undefined);
-        }
+        const numbers = calls
+          .filter((call) => call.name === PROGRESS_TOOL)
+          .map((call) => (call.args as { number?: unknown } | undefined)?.number)
+          .map((number) => (typeof number === 'number' ? number : undefined));
+        if (numbers.length) handlers.onQuestionDone?.(numbers);
         return;
       }
 

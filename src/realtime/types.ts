@@ -119,10 +119,17 @@ export interface SessionHandlers {
    * see `acceptProgress` — and the separation is deliberate, because the run
    * that prompted it was a lesson ended by one unexamined tool call.
    *
-   * `number` is the question's position in the list, counting from 1, or
+   * ONE FRAME, ONE CALL OF THIS HANDLER, carrying every number the frame held.
+   * The tutor catches its bookkeeping up in a single breath — two reports in
+   * one frame, out of order, is ordinary observed behaviour — and a frame has
+   * no internal chronology to preserve, because the model emitted all of it at
+   * once. Splitting them made two halves of one decision look like two
+   * decisions arriving too close together.
+   *
+   * Each entry is the question's position in the list, counting from 1, or
    * undefined when the model called the tool without one.
    */
-  onQuestionDone?: (number: number | undefined) => void;
+  onQuestionDone?: (numbers: Array<number | undefined>) => void;
 }
 
 /**

@@ -33,6 +33,25 @@
  * from the old text. "Never open a subject of your own" is checkable against
  * the turn being composed; "keep the conversation focused" is not.
  *
+ * THREE OF THESE SENTENCES WERE WRITTEN AGAINST MEASUREMENTS rather than from
+ * first principles, and `npm run probe` is where the measurements came from.
+ * Each replaced a milder version the model had already been observed ignoring:
+ *
+ *  - "ends with one question, and carries no other" was "ends with a question".
+ *    The tutor opened a lesson with three of them in a single turn, and a
+ *    learner answers the one they heard last — so the follow-up that was meant
+ *    to grow the answer is the one that gets dropped.
+ *  - "not the moment they answer, but after you have replied" was "as soon as a
+ *    question has been answered and talked about". The tutor reported question
+ *    one immediately after "Ça va bien, merci", having said nothing about it,
+ *    which is a lesson that can march through five questions on five shrugs.
+ *  - "never as a turn of its own" is about dead air, and is the one that is
+ *    really about the transport. `scheduling: 'SILENT'` on the tool response is
+ *    what stops the result from becoming a turn — the thing that made the tutor
+ *    repeat itself on Vertex — so a model that spends a turn on the call alone
+ *    says nothing at all, and the learner is left listening to silence after
+ *    answering. Observed once in three runs.
+ *
  * ONE SENTENCE HERE IS AIMED AT THE REPORT RATHER THAN THE CONVERSATION. "Ask
  * for the detail" was a headed section of its own and is now a clause, but it
  * could not simply go: a learner who answers "Ça va bien" has answered the
@@ -280,15 +299,20 @@ never in their grammar. Never open a subject of your own: they prepared this
 list and have the words for it, where a question they have never seen tests
 their listening instead of their speaking. There is nothing after the last one.
 
-Every turn you take ends with a question for them to answer. The goodbye is the
-only exception. You cannot see a clock: never mention the time, and never say
-how much of the lesson is left.
+Every turn you take ends with one question for them to answer, and carries no
+other. Two questions in a turn loses the first, because a learner answers the
+thing they heard last. The goodbye is the only turn that ends without one. You
+cannot see a clock: never mention the time, and never say how much is left.
 ${targets}
 REPORTING YOUR PROGRESS
-Call ${PROGRESS_TOOL} as soon as a question has been answered and talked about,
-with that question's number — once each, in order, up to ${count}. It is
-bookkeeping between you and the program, so never mention it, never say how many
-questions are left, and carry straight on talking after the call.
+Call ${PROGRESS_TOOL} when a question is finished, with that question's number —
+once each, in order, up to ${count}. Finished means the learner has answered it
+and you have already said something back about their answer; not the moment they
+answer, but after you have replied. Make the call in a turn where you are also
+speaking, never as a turn of its own: a turn spent only on the call is silence,
+and the learner is left listening to nothing. It is bookkeeping between you and
+the program, so never mention it, never say how many questions are left, and
+carry straight on talking.
 
 NOTES FROM THE SYSTEM
 Some things arrive in this conversation marked as notes from the system. They

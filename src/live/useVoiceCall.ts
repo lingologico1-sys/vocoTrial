@@ -102,10 +102,10 @@ export interface CallEvent {
      * The tutor called a tool, named and with its arguments, before anything
      * was made of it — including tools this build does not implement.
      *
-     * Distinct from `complete` below, which is what the page *did* about one
-     * particular name. Two lines for one moment on purpose: a call that arrives
-     * and is not acted on is the interesting case, and it can only be seen as
-     * the gap between these two.
+     * Distinct from `progress` below, which is what the page *made* of one.
+     * Two lines for one moment on purpose: a call that arrives and is not acted
+     * on is the interesting case, and it can only be seen as the gap between
+     * these two.
      */
     | 'tool'
     /**
@@ -364,25 +364,18 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
   const accepted = useRef<number[]>([]);
 
   /**
-   * How many turns the learner has finished, and how many they had finished
-   * when the last report was believed.
+   * How many turns the learner has finished speaking.
    *
-   * THE WHOLE GUARD, AND IT IS DELIBERATELY THIS CHEAP. A tutor is allowed to
-   * say a question is done; it is not allowed to say two are done without the
-   * learner having said anything in between. That one test is what the run this
-   * was written for would have failed: the report arrived on a one-word answer
-   * to question three with questions four and five never asked, and a page that
-   * had asked "has the learner spoken since?" would have refused the calls that
-   * followed it.
-   *
-   * It is not a test of whether the answer was any good, and nothing here
-   * should grow into one. Reading the text would mean the call layer deciding
-   * what a full sentence is in twenty-eight languages, on a transcript of a
-   * hesitant beginner — see the report for who is allowed to make that
-   * judgement, and on what evidence.
+   * THE CEILING ON WHAT A TUTOR MAY CLAIM. Five questions cannot have been
+   * answered by somebody who has spoken three times, whatever the tutor
+   * reports, and that is the whole of what this counts. See `acceptProgress`,
+   * which spends it, and note what it is *not*: a judgement about whether any
+   * of those turns was a good answer. Reading the text would mean this layer
+   * deciding what a full sentence is in twenty-eight languages, on a transcript
+   * of a hesitant beginner — see the report for who is allowed to make that
+   * call, and on what evidence.
    */
   const learnerTurns = useRef(0);
-  const turnsAtLastAccept = useRef(0);
 
   /**
    * The last thing that happened worth leaning at.
@@ -467,68 +460,110 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
   }, []);
 
   /**
-   * What the page does with a progress report, which is mostly refuse it.
+   * What the page does with a frame of progress reports.
    *
    * THE MODEL REPORTS AND THE PAGE COUNTS. That division is the fix this file
    * carries. A tutor used to make one claim that the lesson was over and the
    * page acted on it unexamined, which is exactly as reliable as it sounds: the
    * claim arrived after question three of five, on a one-word answer, and two
-   * questions were never asked. Nothing here can tell whether an answer was any
-   * good — but it can tell that nobody answered anything, and that is the
-   * failure that was actually happening.
+   * questions were never asked.
    *
-   * FOUR TESTS, ALL OF THEM CHEAP AND NONE OF THEM ABOUT LANGUAGE. Is there a
-   * list at all; is this a question on it; has it already been reported; has
-   * the learner spoken since the last one that was believed. A report that
-   * passes all four is believed, and a report that fails any of them is written
-   * into the account with the reason, because a refused report is evidence
-   * about the tutor and an invisible one is not.
+   * WHAT THESE TESTS CAN AND CANNOT DO, stated plainly because the first
+   * version of this promised more than it delivered. They are a cheap bound on
+   * an untrusted claim, not a proof that a lesson happened. Nothing here reads
+   * the answer: judging whether a hesitant beginner's sentence was good enough,
+   * in twenty-eight languages, off a transcript, is the end-of-call report's
+   * job and is made afterwards on the whole conversation. What the page can
+   * cheaply know is that the tutor is claiming more than the conversation could
+   * possibly contain, and that is what it refuses.
+   *
+   * FOUR TESTS. Is there a list at all; is this a question on it; has it been
+   * reported already; and the two arithmetic ones below. A report that passes
+   * is counted, and one that fails is written into the account with its reason,
+   * because a refused report is evidence about the tutor and an invisible one
+   * is not.
+   *
+   * NO QUESTION MAY OUTRUN THE LEARNER. The count of questions believed
+   * answered can never exceed the number of turns the learner has finished:
+   * five answered questions require five times the learner has spoken. This is
+   * the test that makes the pathological case impossible — a tutor reporting
+   * the whole list before anybody has said anything gets one report counted and
+   * the rest refused.
+   *
+   * NO REPORT MAY JUMP AHEAD OF THE LIST. A report for question five while one
+   * through three are uncounted is a tutor that has lost its place, so a number
+   * is refused unless everything before it is already counted or arrives in the
+   * same frame. This is the test that would have caught the run this rewrite
+   * came from, where the ending arrived two questions early.
+   *
+   * A FRAME IS ONE DECISION AND IS SORTED BEFORE IT IS JUDGED. The tutor
+   * catches its bookkeeping up in a single breath — `questionDone(2)` and
+   * `questionDone(1)` in one frame, then `(3)` and `(4)` in another, which is
+   * ordinary measured behaviour rather than a fault. Judged in arrival order
+   * they refuse each other; sorted, they are what they are, which is two
+   * questions finished. The earlier rule here — one report per learner turn —
+   * refused two of five on a run where the tutor did everything right, and
+   * would have closed a finished lesson with "we ran out of time".
    *
    * AN UNNUMBERED CALL IS STILL A REPORT. The tool declares `number` as
    * required and a model will occasionally call it without one anyway. Refusing
    * those would throw away a real signal over a missing field, so it is read as
-   * the next question not yet reported — which is what "in order" means, and is
-   * self-correcting in the same way the numbered reports are.
+   * the next question not yet counted.
    */
   const acceptProgress = useCallback(
-    (reported: number | undefined) => {
+    (reports: Array<number | undefined>) => {
       const total = latest.current.questionCount ?? 0;
       const seen = accepted.current;
-      const named = reported === undefined ? '(unnumbered)' : String(reported);
-      const refuse = (why: string) => record('progress', `question ${named} refused — ${why}`);
+
+      const refuse = (named: string, why: string) =>
+        record('progress', `question ${named} refused — ${why}`);
 
       if (!total) {
-        refuse('this call has no question list');
+        refuse(reports.map((entry) => entry ?? '(unnumbered)').join(', '), 'this call has no question list');
         return;
       }
 
-      // The lowest question nobody has reported yet, for the unnumbered case.
-      let number = reported;
-      if (number === undefined) {
-        number = 1;
-        while (number <= total && seen.includes(number)) number += 1;
+      // Sorted, with the unnumbered ones last: they are read as "the next one
+      // not yet counted", and that reading is only right once the numbered
+      // reports in the same frame have been placed.
+      const ordered = [...reports].sort((a, b) => (a ?? Infinity) - (b ?? Infinity));
+      let took = false;
+
+      for (const reported of ordered) {
+        const named = reported === undefined ? '(unnumbered)' : String(reported);
+
+        let number = reported;
+        if (number === undefined) {
+          number = 1;
+          while (number <= total && seen.includes(number)) number += 1;
+        }
+
+        if (!Number.isInteger(number) || number < 1 || number > total) {
+          refuse(named, `there is no question ${number} on a list of ${total}`);
+          continue;
+        }
+        if (seen.includes(number)) {
+          refuse(named, 'it was counted already');
+          continue;
+        }
+        if (number > seen.length + 1) {
+          refuse(named, `the ${number - seen.length - 1} question(s) before it are not counted yet`);
+          continue;
+        }
+        if (seen.length + 1 > learnerTurns.current) {
+          refuse(named, `the learner has only finished ${learnerTurns.current} turn(s)`);
+          continue;
+        }
+
+        seen.push(number);
+        took = true;
+        record(
+          'progress',
+          `question ${named} answered${reported === undefined ? ` — read as ${number}` : ''} — ${seen.length} of ${total}`,
+        );
       }
 
-      if (!Number.isInteger(number) || number < 1 || number > total) {
-        refuse(`there is no question ${number} on a list of ${total}`);
-        return;
-      }
-      if (seen.includes(number)) {
-        refuse('it was reported already');
-        return;
-      }
-      if (learnerTurns.current <= turnsAtLastAccept.current) {
-        refuse('the learner has not finished a turn since the last one was taken');
-        return;
-      }
-
-      seen.push(number);
-      turnsAtLastAccept.current = learnerTurns.current;
-      setAnswered([...seen]);
-      record(
-        'progress',
-        `question ${named} answered${reported === undefined ? ` — read as ${number}` : ''} — ${seen.length} of ${total}`,
-      );
+      if (took) setAnswered([...seen]);
     },
     [record],
   );
@@ -754,7 +789,6 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
       accepted.current = [];
       setAnswered([]);
       learnerTurns.current = 0;
-      turnsAtLastAccept.current = 0;
       const { modelKey, language: code, instructions, settings } = latest.current;
       const started = await startGeminiSession(handlers, modelKey, code, {
         instructions,
