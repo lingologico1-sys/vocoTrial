@@ -9,9 +9,16 @@ import { listSetups, type SessionEnv } from './_library';
  * is to publish again and hand out a different one. So /teach keeps a list of
  * what it has sent out.
  *
- * It carries no prompts, no questions and no face — a code, a name and a date,
- * assembled from the object listing rather than by reading every setup in the
- * bucket. See listSetups on why the metadata lives where it does.
+ * It carries no prompts, no questions and no face — a code, a name, a date, and
+ * which tutor protocol the prompt behind it was composed against, all assembled
+ * from the object listing rather than by reading every setup in the bucket. See
+ * listSetups on why the metadata lives where it does.
+ *
+ * That last one is the only field here the teacher could not have worked out
+ * themselves, and it is why the list is worth more than a record of what went
+ * out: a code published before a protocol change still opens and starts teaching
+ * badly, and nothing about the code, the name or the date says so. See
+ * PROMPT_COMPOSER_VERSION in src/realtime/vocoSessions.ts.
  *
  * THIS IS THE ROUTE THAT WOULD LEAK A CLASS LIST if the deployment ever grew
  * more than one teacher behind one password. It is behind the site password

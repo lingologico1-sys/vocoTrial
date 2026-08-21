@@ -5,6 +5,7 @@ import { findModel } from '../realtime/models';
 import type { SessionReport } from '../realtime/report';
 import type { PublishedSetup } from '../realtime/session';
 import { SETTING_FIELDS, fieldsFor, type SessionSettings } from '../realtime/settings';
+import { PROMPT_COMPOSER_VERSION, promptIsStale } from '../realtime/vocoSessions';
 
 /**
  * One conversation, written out so it can be handed to somebody who was not in
@@ -27,13 +28,22 @@ import { SETTING_FIELDS, fieldsFor, type SessionSettings } from '../realtime/set
  * visible, and the reassembly is exactly the step nobody does.
  *
  * THE TIMELINE IS THE POINT and everything else is context for it. A tutor
- * asking the same question twice is a question turn followed by one of three
+ * asking the same question twice is a question turn followed by one of four
  * different things: an `interrupted`, meaning its first asking was talked over
  * and never heard; a learner turn that came back empty, meaning nothing was
- * transcribed so the tutor never saw an answer; or a `complete` line, meaning
- * the tutor called its tool and was restarted into a turn it had already
- * spoken. Three bugs, three fixes, and the transcript alone cannot tell them
- * apart.
+ * transcribed so the tutor never saw an answer; a `complete` line, meaning the
+ * tutor called its tool and was restarted into a turn it had already spoken; or
+ * a `tool` line naming something this build does not implement, which is the
+ * same restart arriving from a prompt published before the tools changed. Four
+ * bugs, four fixes, and the transcript alone cannot tell them apart.
+ *
+ * THE FOURTH ONE IS WHY THE `tool` LINES EXIST AT ALL. They were added after a
+ * real conversation where the tutor repeated every question and drifted off the
+ * list, and the diagnostic taken from it showed doubled turns with nothing
+ * beside them — because the calls causing the doubling were for a tool no
+ * handler here recognised, and only recognised calls were being logged. A log
+ * that records what it understood rather than what arrived is a log that goes
+ * quiet in exactly the cases somebody opens it for.
  *
  * NOTHING IS REDACTED, INCLUDING THE PROMPT. This is taken deliberately, by a
  * gesture nobody finds by accident, for the person who published the lesson —
@@ -89,10 +99,25 @@ function head(title: string): string {
   return `\n--- ${title} ${'-'.repeat(Math.max(3, 67 - title.length))}`;
 }
 
+/** Where a field's value starts, and so where a continuation of one resumes. */
+const GUTTER = 18;
+
 /** `name  value`, padded so a run of them reads as a column. */
 function field(name: string, value: string | number | null | undefined): string {
   const shown = value === null || value === undefined || value === '' ? '—' : String(value);
-  return `${name.padEnd(18)}${shown}`;
+  return `${name.padEnd(GUTTER)}${shown}`;
+}
+
+/**
+ * More lines under a field, indented to sit in its value column.
+ *
+ * For the handful of findings that need a sentence rather than a value. Putting
+ * that sentence *in* the value would be one 200-character line in a document
+ * whose every other line fits in eighty — which wraps wherever the reader's
+ * window happens to end and stops looking like the same document.
+ */
+function under(...lines: string[]): string[] {
+  return lines.map((line) => `${' '.repeat(GUTTER)}${line}`);
 }
 
 /** `+M:SS.s` from the origin, which is whenever the account starts. */
@@ -305,6 +330,41 @@ export function buildDiagnostic(input: DiagnosticInput): string {
       ),
     );
     put(field('Published', `${stamp(setup.updatedAt)}  (${age(now - setup.updatedAt)})`));
+    /*
+     * The line that answers "why is this tutor behaving like that" before
+     * anybody reads the timeline.
+     *
+     * A published prompt is frozen and the build that runs it is not, so a code
+     * handed out before a protocol change is a conversation that will go wrong
+     * in ways nothing else here explains — the questions repeat, the tutor
+     * wanders off the list, and every other section of this document looks
+     * correct. Directly under the publish date because the date is the other
+     * half of the same thought: it is the age of the snapshot that matters, not
+     * the age of the lesson.
+     */
+    const stale = promptIsStale(setup.composerVersion);
+    put(
+      field(
+        'Prompt protocol',
+        stale
+          ? `v${setup.composerVersion ?? '?'} — STALE. This build composes v${PROMPT_COMPOSER_VERSION}.`
+          : `v${setup.composerVersion} — current`,
+      ),
+    );
+    if (stale) {
+      put(
+        ...under(
+          'Publish this lesson again and hand out the new code.',
+          'A prompt composed against an older protocol asks the tutor',
+          'for tools this build no longer declares. It calls them, every',
+          'call is answered because an unanswered one leaves a tutor',
+          'silent, and each answer restarts it into the turn it has just',
+          'spoken — which is heard as the same question twice, and as the',
+          'tutor wandering off the list. Look for `tool` lines below',
+          'saying NOT A TOOL THIS PAGE KNOWS.',
+        ),
+      );
+    }
     put(field('Language', language ? `${setup.language} — ${language.label}` : setup.language));
     put(field('Voice', setup.voice || "the provider's own default"));
     put(field('Face', setup.faceId ?? "the deployment's own"));

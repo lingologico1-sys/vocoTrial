@@ -80,6 +80,29 @@ export interface SessionHandlers {
    */
   onUsage?: (usage: UsageTotals) => void;
   /**
+   * The model called a tool — any tool, by whatever name, before anything has
+   * been made of it.
+   *
+   * THE RAW EVENT, AND THAT IS THE ENTIRE POINT. `onLessonComplete` below is an
+   * interpretation: it fires for one name and is silent for every other, which
+   * means a model calling a tool this build does not implement produces no
+   * signal anywhere. That is not a hypothetical gap. A prompt published against
+   * an older protocol goes on asking for a tool that no longer exists, the model
+   * obliges, and each answer restarts it into a turn spoken on top of the last
+   * one — so the learner hears every question twice, and nothing in the account
+   * of the call says why. See PROMPT_COMPOSER_VERSION in vocoSessions.ts.
+   *
+   * Fires for every call in the frame, including the recognised one, so the
+   * account carries what actually arrived rather than what was understood. What
+   * is done about a call is a separate line in the log from the call itself, and
+   * a gap between the two is exactly the sort of thing worth being able to see.
+   *
+   * `args` is whatever the model sent, unvalidated. It is for reading, not for
+   * acting on: a diagnostic that can print `questionAnswered {"n":1}` twice in
+   * four seconds has answered the question a transcript cannot.
+   */
+  onToolCall?: (name: string, args?: Record<string, unknown>) => void;
+  /**
    * The tutor reported that it has reached the end of its question list.
    *
    * The only structured thing a call ever says about its own progress, and it

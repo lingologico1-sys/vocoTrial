@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { startGeminiSession } from '../realtime/gemini';
 import type { SessionSettings } from '../realtime/settings';
+import { COMPLETE_TOOL } from '../realtime/vocoSessions';
 import type {
   AudioTap,
   SessionStatus,
@@ -97,6 +98,16 @@ export interface CallEvent {
     | 'status'
     /** The page said something to the tutor as the learner. See `say`. */
     | 'note'
+    /**
+     * The tutor called a tool, named and with its arguments, before anything
+     * was made of it — including tools this build does not implement.
+     *
+     * Distinct from `complete` below, which is what the page *did* about one
+     * particular name. Two lines for one moment on purpose: a call that arrives
+     * and is not acted on is the interesting case, and it can only be seen as
+     * the gap between these two.
+     */
+    | 'tool'
     /** The tutor's tool reported the question list finished. Repeats included. */
     | 'complete'
     /** The learner talked over the tutor and unheard words were dropped. */
@@ -227,7 +238,25 @@ export interface VoiceCall {
    */
   events: CallEvent[];
   connect: () => Promise<void>;
-  hangUp: (reason?: string) => void;
+  /**
+   * Ends the call, in two registers.
+   *
+   * `notice` is shown on the page, so it is written for whoever is looking at
+   * it — on /eleve that is a French sentence addressed to a learner. `why` is
+   * the line in the account, written for whoever is reading a diagnostic
+   * afterwards, and it falls back to the notice when there is nothing separate
+   * to say.
+   *
+   * THEY SPLIT BECAUSE THE PAGE'S OWN HANG-UPS HAVE NOTHING TO SHOW. A call
+   * closing on a finished lesson wants no message at all — the tutor has just
+   * said goodbye, and a line of chrome underneath it is the app talking over the
+   * ending. But it very much wants a log line, because "the page hung up after
+   * the closing note" and "the learner pressed the microphone" are the same
+   * event from the outside and different bugs from the inside. With one string
+   * doing both jobs, every silent close read as `asked to stop, with no reason
+   * given` and the two were indistinguishable.
+   */
+  hangUp: (notice?: string, why?: string) => void;
   toggleMute: () => void;
   /**
    * Say something to the tutor as the learner, invisibly.
@@ -450,16 +479,19 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
   }, [status, tap, flush]);
 
   const hangUp = useCallback(
-    (reason?: string) => {
+    (notice?: string, why?: string) => {
       // Only when there is something to hang up. The page calls this from a
       // timer and from a button, and both can land on a call that has already
       // closed — logging those would fill the account with hang-ups that hung
       // nothing up.
-      if (session.current) record('hung-up', reason ?? 'asked to stop, with no reason given');
+      if (session.current) {
+        record('hung-up', why ?? notice ?? 'asked to stop, with no reason given');
+      }
       session.current?.stop();
       session.current = null;
-      // stop() drives onStatus('closed'), which clears detail — so say why after.
-      if (reason) setDetail(reason);
+      // stop() drives onStatus('closed'), which clears detail — so say why
+      // after. Only the notice is ever shown: `why` is for the account.
+      if (notice) setDetail(notice);
     },
     [record],
   );
@@ -477,6 +509,11 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
       hangUp(
         latest.current.idleNotice ??
           `Ended automatically after ${limit / 1000}s with no one talking`,
+        // Said separately, in English and with the number in it, because the
+        // notice beside it is in whatever language the page speaks — and a log
+        // line a reader has to translate before they can tell which timer fired
+        // is a log line that gets skipped.
+        `idle — nobody said anything for ${limit / 1000}s`,
       );
     }, IDLE_POLL_MS);
 
@@ -553,6 +590,37 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
       onVoice: (active: boolean) => {
         if (active) lastActivity.current = Date.now();
         setHeard(active);
+      },
+      /*
+       * Every tool call, named, with what it carried and what became of it.
+       *
+       * THE ANNOTATION IS A CLAIM ABOUT THIS FILE AND NOT ABOUT THE DECLARATIONS.
+       * `COMPLETE_TOOL` is the one name anything here tests; everything else is
+       * answered on the socket and then dropped on the floor. So "not a tool
+       * this page knows" is true by construction and stays true — a second tool
+       * declared server-side and handled nowhere is still, accurately, one this
+       * page does nothing with. A list of declared names copied over from
+       * _setup.ts would be a second thing to keep in step, and a log that lies
+       * about which tools exist is worse than one that says less.
+       *
+       * WHY THE UNKNOWN CASE SHOUTS. It is the signature of a setup published
+       * against an older protocol, and its symptom — the tutor asking every
+       * question twice — looks exactly like a model ignoring its prompt. That
+       * cost a full diagnosis to find once. See PROMPT_COMPOSER_VERSION.
+       *
+       * The arguments are printed because they are what tell two calls of the
+       * same tool apart, which is the whole question when one is arriving after
+       * every question. Trimmed hard: this is a log line, not a payload.
+       */
+      onToolCall: (name: string, args?: Record<string, unknown>) => {
+        const carried =
+          args && Object.keys(args).length ? ` ${oneLine(JSON.stringify(args), 80)}` : '';
+        record(
+          'tool',
+          name === COMPLETE_TOOL
+            ? `${name}${carried} — the signal this page waits for`
+            : `${name}${carried} — NOT A TOOL THIS PAGE KNOWS; answered on the socket, then ignored`,
+        );
       },
       // Barge-in. The audio for anything still queued was thrown away unplayed,
       // so showing those words would put sentences on screen that were cut off

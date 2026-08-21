@@ -60,6 +60,34 @@ import type { VocabItem } from './vocab';
 const CLOSING_GRACE_MS = 45_000;
 
 /**
+ * How long the tutor has to be quiet, after the closing note, before the page
+ * hangs up on it.
+ *
+ * THE GRACE ABOVE IS A CEILING AND THIS IS THE ORDINARY WAY A LESSON ENDS. A
+ * flat forty-five seconds assumed the goodbye always comes *after* the note, so
+ * the only question was how long to allow for it. It does not always come after.
+ * Answering the completion tool restarts the model into a turn nothing on this
+ * side asked for — see COMPLETE_TOOL — and a tutor which spends that turn on its
+ * goodbye has said everything it has to say before the note even goes out. The
+ * note then lands on a tutor with nothing left, and the call sits in dead air
+ * for the rest of the grace period with the learner looking at a face that has
+ * already waved. That is what a real diagnostic showed, and hanging up on quiet
+ * rather than on a fixed number is what fixes it in both orders at once.
+ *
+ * MEASURED FROM THE LATER OF THE NOTE AND THE LAST WORD SPOKEN, which is what
+ * makes one rule cover both cases. A tutor that closes normally keeps resetting
+ * this while it talks and is hung up on six seconds after it stops; a tutor with
+ * nothing to say is hung up on six seconds after the note. Neither is cut off.
+ *
+ * Six seconds rather than two or three: the gap it must not mistake for the end
+ * is a tutor drawing breath before a closing turn, and the cost of waiting too
+ * long is a few seconds of silence where the cost of cutting early is talking
+ * over a goodbye. The ceiling is still overhead, for a `speaking` flag stuck
+ * true on a stalled player.
+ */
+const CLOSING_QUIET_MS = 6_000;
+
+/**
  * The beat the closing note waits before it will even look for a gap.
  *
  * Answering the completion tool restarts the model into a turn it was not going
@@ -437,12 +465,22 @@ export default function Eleve() {
   const closedAt = useRef<number | null>(null);
   /** When the list was first seen complete, so the wait for a gap is bounded. */
   const doneSince = useRef<number | null>(null);
+  /**
+   * When the tutor last fell quiet after the closing note. See CLOSING_QUIET_MS.
+   *
+   * A ref for `closedAt`'s reason: it is read and written inside an effect that
+   * runs on every tick, and holding it as state would re-render the page once a
+   * second through the one stretch of the lesson where nothing on screen is
+   * changing.
+   */
+  const quietSince = useRef<number | null>(null);
   const capMs = session ? capMinutesOf(session) * 60_000 : 0;
 
   useEffect(() => {
     if (!call.live) {
       closedAt.current = null;
       doneSince.current = null;
+      quietSince.current = null;
       return;
     }
     if (elapsedMs === null) return;
@@ -479,7 +517,32 @@ export default function Eleve() {
       return;
     }
 
-    if (Date.now() - closedAt.current >= CLOSING_GRACE_MS) call.hangUp();
+    /*
+     * The note has gone. What is left is deciding when the goodbye is over.
+     *
+     * The clock restarts on every word the tutor says, so what it measures is
+     * always the silence since the last one — or, when the tutor never speaks
+     * again, the silence since the note itself. See CLOSING_QUIET_MS for why
+     * that second case is not the unlikely one.
+     */
+    if (call.speaking) quietSince.current = null;
+    else if (quietSince.current === null) quietSince.current = Date.now();
+
+    const quiet = quietSince.current === null ? 0 : Date.now() - quietSince.current;
+    if (quiet >= CLOSING_QUIET_MS) {
+      // Nothing shown: the tutor has just said goodbye, and a line of chrome
+      // under it would be the page talking over the ending. The account still
+      // gets a sentence, which is why `hangUp` takes the two separately.
+      call.hangUp(undefined, `closed — the tutor had been quiet for ${Math.round(quiet / 1000)}s`);
+      return;
+    }
+
+    if (Date.now() - closedAt.current >= CLOSING_GRACE_MS) {
+      call.hangUp(
+        undefined,
+        `closed — ${CLOSING_GRACE_MS / 1000}s after the closing note and the tutor was still talking`,
+      );
+    }
   }, [call, call.live, call.speaking, elapsedMs, capMs, lessonDone]);
 
   /**
@@ -702,7 +765,12 @@ export default function Eleve() {
               tiltCue={call.tiltCue}
               idleHint={idleHint}
               onCall={() => {
-                if (call.live) call.hangUp();
+                // Nothing to show — the learner pressed the button and knows
+                // what it did — but the account has to be able to tell this
+                // apart from the page closing a lesson on its own, which from
+                // the outside is the same event and from the inside is a
+                // different bug. See `hangUp`.
+                if (call.live) call.hangUp(undefined, 'the learner pressed the microphone');
                 else void start();
               }}
               onWord={askDictionary}

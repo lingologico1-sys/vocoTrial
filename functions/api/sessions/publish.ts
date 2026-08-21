@@ -11,6 +11,7 @@ import {
 import {
   MAX_QUESTIONS,
   MAX_TARGETS,
+  PROMPT_COMPOSER_VERSION,
   lessonBlock,
   capMinutesOf,
   type VocoSession,
@@ -256,6 +257,11 @@ export async function onRequestPost(
     updatedAt: Date.now(),
     language: language.code,
     instructions,
+    // Stamped here because here is the only place that knows what went into
+    // the text above. `lessonBlock` and the tools a live call declares are two
+    // halves of one agreement, and a snapshot is the one thing that cannot
+    // notice the other half moving underneath it. See session.ts.
+    composerVersion: PROMPT_COMPOSER_VERSION,
     // Off the face, never off the request — see the header. An incoming `voice`
     // is a field /teach no longer sends, and honouring one would leave the door
     // open for a hand-written POST to put Fenrir behind Marta's biography.

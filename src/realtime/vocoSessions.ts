@@ -303,6 +303,59 @@ export function capLooksTight(questionCount: number, capMinutes: number): boolea
 export const COMPLETE_TOOL = 'lessonComplete';
 
 /**
+ * Which generation of the tutor protocol `lessonBlock` writes, stamped into
+ * every setup at publish time.
+ *
+ * WHY A PUBLISHED SETUP CAN GO WRONG WITHOUT ANYBODY TOUCHING IT. Publishing
+ * snapshots a composed prompt into R2 and it stays exactly as it was — see
+ * session.ts, where that immutability is the whole design: a teacher editing
+ * next week's questions must not rewrite the screen of somebody talking now.
+ * The other half of the app is not frozen. Deploy a build that changes which
+ * tools a call declares, and every code handed out before it is a prompt
+ * describing a protocol the running build no longer speaks.
+ *
+ * That is not hypothetical, and it is what this constant was written for. A
+ * lesson published under version 1 tells the tutor to report every question
+ * through `questionAnswered`; the build answering it declares only
+ * `lessonComplete`. The model calls the old tool anyway, the client answers it
+ * because an unanswered call leaves a tutor silent, and on Vertex being answered
+ * is a fresh turn spoken on top of the last — so the learner hears every
+ * question twice, and hears the second telling wander off the list looking for
+ * something to say. From the outside that is indistinguishable from a tutor
+ * ignoring its instructions, which is the most expensive kind of fault there is:
+ * every piece of evidence points at the prompt, and the prompt is doing exactly
+ * what it was told.
+ *
+ * SO THE NUMBER IS ONLY EVER READ TO SAY "REPUBLISH". It gates nothing and
+ * resolves nothing — a stale setup still opens, still dials and still teaches,
+ * because refusing to run one would take a class's lesson away five minutes
+ * before it starts, over a fault that only makes the conversation worse. What it
+ * buys is that the diagnostic and the teacher's own list can name which lessons
+ * are affected, instead of somebody working it back from a timeline.
+ *
+ * ABSENT MEANS UNKNOWN RATHER THAN VERSION 1. Setups written before this field
+ * existed carry no number, and nothing distinguishes a genuinely old one from a
+ * setup published in the hour between the protocol change and this stamp. Both
+ * want the same answer, so both are reported as stale rather than dated.
+ *
+ * RAISE IT WHEN A CHANGE MAKES OLD PROMPTS WRONG, not on every edit to the
+ * wording below. Rewriting a paragraph for clarity leaves last week's codes
+ * perfectly able to teach. Changing which tools exist, what they are called, or
+ * what the closing notes say does not — those are agreements the snapshot and
+ * the running build have to share, and only those are worth telling a teacher to
+ * republish over.
+ *
+ *   1  a `questionAnswered` call per question, carrying the question's number
+ *   2  one `lessonComplete` at the end of the list, with no arguments
+ */
+export const PROMPT_COMPOSER_VERSION = 2;
+
+/** True when a setup was composed against an older protocol. See above. */
+export function promptIsStale(composerVersion: number | undefined): boolean {
+  return (composerVersion ?? 0) < PROMPT_COMPOSER_VERSION;
+}
+
+/**
  * How anything this app has to say reaches a conversation it is not part of.
  *
  * Marked as notes rather than phrased as speech. They arrive through

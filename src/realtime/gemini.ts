@@ -287,6 +287,12 @@ export async function startGeminiSession(
           );
         }
 
+        // Reported before it is interpreted, and reported whatever the name is.
+        // A tool this build does not implement is answered above and would
+        // otherwise vanish without trace — which is precisely the call that
+        // wrecks a conversation, because answering it is what restarts the model
+        // into a turn it has already spoken. See onToolCall in types.ts.
+        for (const call of calls) handlers.onToolCall?.(call.name ?? '(unnamed)', call.args);
         if (calls.some((call) => call.name === COMPLETE_TOOL)) handlers.onLessonComplete?.();
         return;
       }

@@ -149,6 +149,28 @@ export interface PublishedSetup extends PerformanceProfile {
   language: string;
   /** The composed system prompt. See the header on why it is not an id. */
   instructions: string;
+  /**
+   * Which generation of the tutor protocol `instructions` was composed against.
+   *
+   * THE ONE FIELD HERE THAT DESCRIBES THE SNAPSHOT RATHER THAN THE LESSON, and
+   * it exists because everything else in this type is deliberately frozen. A
+   * published setup is what was handed out and never changes; the build that
+   * runs it ships again every week. When those two stop agreeing about which
+   * tools a call declares, the prompt is still perfectly valid text describing a
+   * protocol nothing implements any more — and the conversation goes wrong in a
+   * way that reads entirely as the model misbehaving. See
+   * PROMPT_COMPOSER_VERSION in vocoSessions.ts for what that looked like, and
+   * why the answer is a stamp rather than a migration.
+   *
+   * Nothing branches on it. It is read by the student page's diagnostic and by
+   * /teach's list of what has gone out, both of which say "republish this one"
+   * and neither of which refuses to run it.
+   *
+   * Optional by the mechanism `tiltSettle` documents below: setups written
+   * before the field existed are in the bucket and have to keep opening. Absent
+   * reads as stale — see `promptIsStale`.
+   */
+  composerVersion?: number;
   /** Prebuilt voice name, or empty for the provider's own default. */
   voice: string;
   /** A face in the shared library, or null for the deployment's own. */
@@ -269,6 +291,10 @@ export function looksLikeSetup(value: unknown): value is PublishedSetup {
     isString(setup.language) &&
     isString(setup.instructions) &&
     setup.instructions.trim().length > 0 &&
+    // Absent is the common case and a legal one — every setup published before
+    // the stamp existed. It must never be the reason a lesson stops opening:
+    // the whole posture of this field is that a stale setup still teaches.
+    (setup.composerVersion === undefined || typeof setup.composerVersion === 'number') &&
     isString(setup.voice) &&
     (setup.faceId === null || isString(setup.faceId)) &&
     isString(setup.evaluatorId) &&
