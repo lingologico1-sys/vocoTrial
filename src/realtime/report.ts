@@ -116,6 +116,7 @@ const ORDER = [
   'turnConfidence',
   'comprehensionMisses',
   'bestSentences',
+  'ambition',
   'task',
   'bands',
   'diagnosis',
@@ -182,6 +183,32 @@ export const REPORT_SCHEMA = {
           quote: quoted('Verbatim, in the target language.'),
           why: quoted('One line, in the L1.'),
         },
+      },
+    },
+    ambition: {
+      type: 'OBJECT',
+      description:
+        'How far the learner reached past the simplest answer each question allowed.',
+      propertyOrdering: ['verdict', 'reaches', 'note'],
+      required: ['verdict', 'reaches', 'note'],
+      properties: {
+        verdict: { type: 'STRING', enum: ['stretched', 'mixed', 'played-safe'] },
+        reaches: {
+          type: 'ARRAY',
+          description: 'Up to three attempts at something harder than the question required.',
+          items: {
+            type: 'OBJECT',
+            propertyOrdering: ['turn', 'quote', 'reach', 'landed'],
+            required: ['turn', 'quote', 'reach', 'landed'],
+            properties: {
+              turn: { type: 'INTEGER' },
+              quote: quoted('Verbatim, in the target language.'),
+              reach: quoted('One line, in the L1, on what they were reaching for.'),
+              landed: { type: 'BOOLEAN', description: 'Whether it came out right.' },
+            },
+          },
+        },
+        note: quoted('One or two lines, in the L1, addressed to the learner.'),
       },
     },
     task: {
@@ -311,6 +338,41 @@ export interface SessionReport {
   }[];
   bestSentences: { turn: number; quote: string; why: string }[];
   /**
+   * How far the learner reached past the easy answer, and what it cost them.
+   *
+   * A THIRD AXIS, AND THE ONLY ONE THAT REWARDS FAILURE. `bands` says where the
+   * learner stands and `task` says whether they did what was asked; both are
+   * measurements, and both are answered by safe correct language. Nothing in
+   * the report used to be able to say the one thing a tutor says constantly —
+   * that an answer was right and cost nothing, and that the learner knows more
+   * than they just used.
+   *
+   * `landed: false` IS NOT AN ERROR HERE. A reach that came out wrong is the
+   * evidence this section is looking for: "Ça va, mais j'aurais voulu qu'il
+   * fasse plus beau" with the mood wrong is worth more than "Ça va bien" with
+   * nothing wrong, and a learner who is told so twice will start reaching. The
+   * grammar of a failed reach still lands in `errorPatterns` if it is part of a
+   * real pattern; what changes is that it is no longer *only* an error.
+   *
+   * IT MUST NOT MOVE THE BAND, which is the constraint the prompt spends most
+   * of its words on. The diagnosis is the highest band genuinely in evidence,
+   * not the highest one attempted — that rule is what makes the level worth
+   * anything, and a section that praises attempts is exactly the pressure that
+   * would erode it. Ambition is emitted before the band walk so it is read off
+   * the transcript rather than off a verdict, and the band walk is told to
+   * ignore it.
+   *
+   * `played-safe` on a genuinely elementary learner is a fair verdict and not a
+   * criticism: there is a floor below which there is nothing to reach with. The
+   * note is addressed to the learner and carries that distinction, which is why
+   * it is prose from the model rather than a string on the page.
+   */
+  ambition: {
+    verdict: 'stretched' | 'mixed' | 'played-safe';
+    reaches: { turn: number; quote: string; reach: string; landed: boolean }[];
+    note: string;
+  };
+  /**
    * The lesson's own targets, one verdict each.
    *
    * A SECOND AXIS, NOT A SECOND SCALE. `bands` says where the learner stands;
@@ -433,7 +495,7 @@ ${targets!.map((target) => `- ${target}`).join('\n')}
     : '';
 
   const taskStep = set
-    ? `4. task — walk the lesson's targets above, in order, one entry each, copying
+    ? `5. task — walk the lesson's targets above, in order, one entry each, copying
    each target verbatim. "met" means they used it and it worked. "partly" means
    they reached for it and it came out wrong — say so, and quote it. "not-shown"
    means it never came up, which is NOT the same as being unable to use it and
@@ -447,7 +509,7 @@ ${targets!.map((target) => `- ${target}`).join('\n')}
    was asked, and a strong one can talk their way around it for ten minutes.
 
 `
-    : `4. task — the lesson set no targets. Return it empty and move on.
+    : `5. task — the lesson set no targets. Return it empty and move on.
 
 `;
 
@@ -473,8 +535,8 @@ Emit the fields in the order given by the schema, and treat that order as the
 method rather than a layout. The first two decide what is admissible; the rest
 may only use what survived; and the band walk comes before the verdict because
 the verdict is drawn from it rather than the other way round. What the lesson
-asked for is settled before the level is, so that neither answer is read off the
-other.
+asked for, and how far the learner reached, are both settled before the level
+is, so that none of the three answers is read off another.
 
 1. turnConfidence — the transcript was produced by a speech model listening to
    an accented, hesitant speaker, and some of it is wrong. List every learner
@@ -497,13 +559,49 @@ other.
    learner needs to know a turn did not land far more than they need it graded.
 
 3. bestSentences — up to three, the learner's best. Say in one line what made
-   each good. Judge them against the scale, not against a native speaker. Never
-   pick a sentence that also appears under errorPatterns or comprehensionMisses:
-   praising the sentence that heads the error list, or one that answered the
-   wrong question, reads as though nothing was actually read. Fewer than three
-   is a fine answer, and none is a fine answer.
+   each good. Judge them against the scale, not against a native speaker.
 
-${taskStep}5. bands — walk EVERY band, lowest first, including ones far above and far below
+   PREFER THE AMBITIOUS SENTENCE TO THE SAFE ONE. Between a correct simple
+   sentence and a longer one that reached for something harder and mostly got
+   there, the second is the better sentence and is the one to quote. Say what
+   they reached for when you pick one — "you did not just say it was fine, you
+   said what you would have preferred" tells a learner what to do again;
+   "correct sentence" does not.
+
+   Never pick a sentence that also appears under errorPatterns or
+   comprehensionMisses: praising the sentence that heads the error list, or one
+   that answered the wrong question, reads as though nothing was actually read.
+   A sentence quoted under ambition may appear here too if it genuinely
+   succeeded. Fewer than three is a fine answer, and none is a fine answer.
+
+4. ambition — how far the learner reached past the simplest answer each question
+   allowed, which is a different question from whether they were correct.
+
+   A learner asked "Comment ça va ?" can answer "Ça va bien" and be right, or
+   reach for "Ça va, mais j'aurais voulu qu'il fasse plus beau" and be right or
+   wrong. The second is what this section is looking for, INCLUDING WHEN IT
+   COMES OUT WRONG. List up to three such attempts with \`landed\` saying whether
+   each worked. A reach that failed is evidence of ambition and is recorded as
+   one; the grammar of it belongs to errorPatterns and stays there.
+
+   "stretched" — they repeatedly went past what the question required.
+   "mixed" — they did it sometimes, and took the easy answer elsewhere.
+   "played-safe" — they answered accurately and used nothing they did not have to.
+
+   The note is addressed to the learner. If they played safe, say what they
+   could have reached for on one specific answer they gave, and quote it back.
+   Do not scold: a learner near the bottom of the scale who answered simply
+   because simple is what they have has done nothing wrong, and the note should
+   say what to try next rather than what was missing.
+
+   THIS MUST NOT MOVE THE BAND. Answer it here, from the transcript, before the
+   band walk — and when you get to the band walk, judge only what the learner
+   PRODUCED SUCCESSFULLY. An attempted structure that came out wrong is not
+   evidence of that band, however ambitious it was. The two sections disagreeing
+   is a correct result: "played safe" beside a high band, or "stretched" beside
+   a low one, are both real and both worth telling a learner.
+
+${taskStep}6. bands — walk EVERY band, lowest first, including ones far above and far below
    where the learner turns out to be. For each: which of its structures they
    actually produced, which never came up, and one quote if there is one.
    "met" means the band is comfortably in evidence. "partly" means some of it
@@ -512,26 +610,39 @@ ${taskStep}5. bands — walk EVERY band, lowest first, including ones far above 
    A short conversation leaves most bands not-shown, and saying so plainly is
    the honest result.
 
-6. diagnosis — name the one band the learner is at, from the codes above. It is
+7. diagnosis — name the one band the learner is at, from the codes above. It is
    the highest band that is genuinely in evidence, not the highest one they
    attempted and not an average. Say why that band and not the one above it. If
    the conversation was too short, too damaged, or too narrow to place them,
    say so with "too-little-evidence" rather than guessing — an unsupported band
    is worse than no band, because it will be believed.
 
-7. errorPatterns — at most three. GROUP BY UNDERLYING CAUSE rather than listing
+8. errorPatterns — at most three. GROUP BY UNDERLYING CAUSE rather than listing
    occurrences: three slips that come from one gap are one pattern with three
    quotes, and saying so is the whole reason a report beats being corrected in
    the moment. Rank by how much each one blocks being understood, not by how
    often it appears. Ignore accent, hesitation and false starts.
 
-8. uptake — the tutor corrects by saying a sentence back correctly rather than
+9. uptake — the tutor corrects by saying a sentence back correctly rather than
    explaining. For each correction, did the learner use the corrected form later?
    Record both the ones that took and the ones that did not.
 
-9. toNextBand — two or three concrete things that would move the learner up one
+10. toNextBand — two or three concrete things that would move the learner up one
    band from the one you diagnosed. Drawn from that next band's structures, and
-   from what they avoided rather than what they got wrong.
+   from what they avoided rather than what they got wrong. If ambition came back
+   "played-safe", at least one of them is a structure to attempt rather than an
+   error to fix.
+
+A SHORT CONVERSATION IS A SAMPLE, NOT A FAILURE. Some of these are three or
+four questions long because that is the whole lesson the teacher set, and the
+learner finished it. Do not treat brevity as something to apologise for and do
+not pad. Fill every section the transcript can actually support — best
+sentences, ambition, the lesson's targets and the error patterns all work on a
+handful of turns — and let the band walk come back mostly "not-shown", which on
+a short sample is the honest answer rather than a poor one. The one thing that
+needs length is placing the learner on the scale, so a short conversation is
+exactly where "too-little-evidence" is the right confidence: say it plainly
+there and let the rest of the report stand on its own.
 
 Never correct the learner's grammar inside a quote. The errors are the data.
 If the conversation is too short or too damaged to support a section, return it

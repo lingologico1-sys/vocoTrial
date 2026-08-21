@@ -7,12 +7,20 @@ import { L1_CHOICES, resolveL1 } from '../realtime/l1';
 import type { SessionReport } from '../realtime/report';
 import { LESSON_CODE_LENGTH, normaliseLessonCode } from '../realtime/lessonCodes';
 import { hasLesson, type PublishedSetup } from '../realtime/session';
-import { TIME_UP_SIGNAL, minutesOf } from '../realtime/vocoSessions';
+import {
+  LESSON_DONE_SIGNAL,
+  TIME_UP_SIGNAL,
+  capMinutesOf,
+} from '../realtime/vocoSessions';
 import { codeFromUrl, fetchSetup } from '../realtime/sessionStore';
 import { useVoiceCall } from '../live/useVoiceCall';
 import ConsignePanel from './ConsignePanel';
 import DictionaryPanel, { type LookupRequest } from './DictionaryPanel';
-import EvaluationPanel, { EvaluationGate } from './EvaluationPanel';
+import EvaluationPanel, {
+  EvaluationGate,
+  MIN_COMPLETE_EVAL_MS,
+  MIN_EVAL_MS,
+} from './EvaluationPanel';
 import TutorStage from './TutorStage';
 import VocabPanel from './VocabPanel';
 import { FR } from './strings';
@@ -33,9 +41,6 @@ import type { VocabItem } from './vocab';
  * opened on a laptop that has never met the workshop: without it the student
  * would silently get a different tutor from the one that was tuned for them.
  */
-
-/** Below this a conversation has not produced enough to read. Two minutes. */
-const MIN_EVAL_MS = 120_000;
 
 /**
  * How long the tutor gets to close before the page hangs up on it.
@@ -298,42 +303,101 @@ export default function Eleve() {
   const elapsedMs = call.connectedAt === null ? null : now - call.connectedAt;
 
   /**
-   * The lesson's clock, and the close it triggers.
+   * Whether the tutor says it has been through the whole list.
    *
-   * THE PAGE OWNS THE CLOCK because nothing else can. A model cannot see one —
-   * it is told its budget in prose so it can pace itself and told explicitly
-   * never to guess the time — so the moment of closing has to be decided out
-   * here and said into the conversation. See TIME_UP_SIGNAL.
+   * THE TUTOR'S CLAIM AND NOT A FACT, which is why it is named for what it is.
+   * `answered` is a tool count the model volunteers — see `onQuestionAnswered`
+   * in useVoiceCall — and it under-reports more readily than it over-reports.
+   * What follows from it here is when the call hangs up, and nothing else: the
+   * report reads the transcript afterwards and is the authority on what was
+   * actually covered.
+   *
+   * Absent questions means no lesson — a setup published before there were any,
+   * or a bench call — and such a conversation can never complete. It runs to the
+   * cap, which is what it did before this existed.
+   */
+  const total = session?.questions?.length ?? 0;
+  const lessonDone = total > 0 && call.answered >= total;
+
+  /**
+   * The two ways a lesson ends, and the close each one triggers.
+   *
+   * THE QUESTIONS END IT AND THE CLOCK ONLY CATCHES IT. This effect used to
+   * watch one condition; it watches two, and the order they are tested in is
+   * the whole design. A lesson is over when its questions are answered. The cap
+   * is a cost bound underneath — it ends a call the tutor has stopped making
+   * progress in, and on a healthy lesson it never fires at all. See
+   * vocoSessions.ts above `MIN_CAP_MINUTES`.
+   *
+   * THE PAGE OWNS BOTH because nothing else can. The model is told there is no
+   * length to fill and told never to guess the time, so it has no clock and is
+   * given none — the moment of closing is decided out here and said into the
+   * conversation. Which of the two notes goes matters: one congratulates a
+   * finished lesson, the other admits to cutting one short. See
+   * LESSON_DONE_SIGNAL and TIME_UP_SIGNAL.
    *
    * TWO STEPS, NOT ONE. The note goes first and the hang-up follows a grace
    * period later, so the conversation ends on a goodbye rather than mid-clause.
    * Cutting the socket at the limit would also cost the end of the transcript,
    * which is the part a report reads for how the learner handled a close.
    *
-   * The ref is what stops it firing every second once past the limit: state
-   * would re-render before the note was sent and send it again on the next
-   * tick. It is cleared when a call ends, so a second conversation gets its own
-   * clock rather than closing the instant it connects.
+   * The ref is what stops it firing every second once the moment has passed:
+   * state would re-render before the note was sent and send it again on the
+   * next tick. It is cleared when a call ends, so a second conversation gets
+   * its own clock rather than closing the instant it connects.
    */
   const closedAt = useRef<number | null>(null);
-  const lengthMs = session ? minutesOf(session) * 60_000 : 0;
+  const capMs = session ? capMinutesOf(session) * 60_000 : 0;
 
   useEffect(() => {
     if (!call.live) {
       closedAt.current = null;
       return;
     }
-    if (!lengthMs || elapsedMs === null) return;
+    if (elapsedMs === null) return;
 
     if (closedAt.current === null) {
-      if (elapsedMs < lengthMs) return;
+      // Completion first: a lesson that finishes on the very tick the cap
+      // lands should still be told it finished.
+      if (lessonDone) {
+        closedAt.current = Date.now();
+        call.say(LESSON_DONE_SIGNAL);
+        return;
+      }
+      if (!capMs || elapsedMs < capMs) return;
       closedAt.current = Date.now();
       call.say(TIME_UP_SIGNAL);
       return;
     }
 
     if (Date.now() - closedAt.current >= CLOSING_GRACE_MS) call.hangUp();
-  }, [call, call.live, elapsedMs, lengthMs]);
+  }, [call, call.live, elapsedMs, capMs, lessonDone]);
+
+  /**
+   * Whether the conversation that just ended is worth reading.
+   *
+   * TWO DOORS, AND COMPLETING THE LESSON IS ONE OF THEM. The gate was a flat
+   * two minutes, on the sound argument that a level judgement needs a couple of
+   * minutes of learner speech to stand on. What that missed is a short lesson
+   * done properly: three questions, answered fully, over in ninety seconds. The
+   * student has finished everything they were set and the page told them they
+   * had not talked enough — which is the app punishing them for the teacher's
+   * list being short.
+   *
+   * So a completed lesson opens the gate at MIN_COMPLETE_EVAL_MS instead. The
+   * report that comes back is honestly smaller: most bands stay `not-shown` and
+   * the diagnosis is free to answer `too-little-evidence`, which the panel
+   * already renders as "not placed" rather than as a bad mark. What still works
+   * on ninety seconds is the half a student actually reads — their best
+   * sentences, whether they hit the consigne, whether they reached for
+   * anything. See report.ts, which is told to expect a short sample rather than
+   * to apologise for one.
+   *
+   * The floor does not go away entirely, because "completed" is the tutor's
+   * word. A model that reports all five questions in the first twenty seconds
+   * would otherwise produce a report on nothing at all.
+   */
+  const evalFloorMs = lessonDone ? MIN_COMPLETE_EVAL_MS : MIN_EVAL_MS;
 
   /**
    * What the arrow in the pill points at when there is no call running.
@@ -608,7 +672,8 @@ export default function Eleve() {
                       live={call.live}
                       elapsedMs={elapsedMs}
                       lastCallMs={call.lastCallMs}
-                      minimumMs={MIN_EVAL_MS}
+                      minimumMs={evalFloorMs}
+                      complete={lessonDone}
                       busy={reporting}
                       error={reportError}
                       under={consigne}

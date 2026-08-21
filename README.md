@@ -143,27 +143,68 @@ field drains the next time the lesson is saved.
 ```
 /teach ──save──► R2 sheets.json
                      │
-                     └──publish──► setup ──► /eleve   (questions, consigne, clock)
+                     └──publish──► setup ──► /eleve   (questions, consigne, cap)
                                           └──► report  (targets)
 ```
 
-**Questions are one input each**, up to 15, starting at 5 empty rows. They were
+**Questions are one input each**, up to 20, starting at 5 empty rows. They were
 one textarea until the app started counting in questions: the tutor is handed
 them numbered, reports progress by number, and the student watches a countdown
 of them, so the number beside each box is the number all three of those mean.
 The textarea also sliced silently at the ceiling; rows cannot, because the Add
 button disappears instead.
 
-**A lesson is a length as well as a list.** The teacher sets 5–10 minutes, and
-that one number is both floor and ceiling — the tutor keeps the conversation
-alive until it is reached, inventing questions of its own once the list runs
-out, and closes when it arrives.
+Fifteen until the list became the bound. That number was never a judgement about
+lists — it was arithmetic on the clock, since ten minutes over fifteen questions
+is forty seconds each. With the clock gone the sum has nothing left to protect.
 
-Five minutes rather than three, because what a level judgement needs is
-*learner* speech: in a conversation where the tutor discusses each answer, the
-learner's share is 35–50% of the clock, so three minutes elapsed is about 90
-seconds of talking. Five buys nearer two and a half. For scale, DELF A2's
-speaking test runs 6–8 minutes.
+**The list is the lesson, and its end is the end.** A conversation runs until
+its questions have been answered. It used to run until a clock ran out, and the
+difference is the single largest change in this section.
+
+The old length was one number acting as both floor and ceiling: the tutor kept
+the conversation alive until it was reached, *inventing questions of its own
+once the list ran out*, and closed when it arrived. That improvised tail is what
+the change removes, for three reasons that compound:
+
+- The learner never prepared those questions and may not have the vocabulary to
+  answer them, or the comprehension to understand them at all.
+- The targets were written for the teacher's questions, so an improvised turn
+  invites none of them — and the report reads a comprehension failure as a
+  production failure.
+- Nobody chose it. It existed because a clock had to be filled and only the
+  tutor could fill it.
+
+`lessonBlock` now bans new subjects outright and says so as a rule with one
+written exemption for follow-ups, because a model asked merely to *prefer* the
+teacher's subjects drifts off them by the third turn.
+
+**The cap is a cost bound and nothing else.** The teacher sets 5–30 minutes,
+defaulting to 15, and it is only the point at which a lesson that has *not*
+finished is stopped and closed off. On a healthy lesson it never fires. It
+exists because a live model is billed by the minute and something has to end a
+call the tutor has stopped making progress in — an under-reported question, a
+learner gone quiet, a socket nobody hung up.
+
+Thirty rather than ten, because a question asked properly is about a minute and
+a half and twenty of them is half an hour. Ten was a fair ceiling when a lesson
+was six questions and the clock was the point; against 20 questions it would
+guillotine every long lesson, which is the one thing a backstop must not do.
+`/teach` says so out loud when the cap is set below `questions × 1.5`, since the
+clock used to make that trade-off visible by being the point of the control.
+
+**The tutor is never told the cap.** A model handed a length paces to fill it —
+told it has twenty minutes it will stretch eight questions across twenty rather
+than ask eight questions and stop — which is the floor coming back in prose
+through the back door. `lessonBlock` takes no minutes argument at all, which is
+what enforces it, and the composed prompt contains no number of minutes
+anywhere. What the tutor is told is that there is *no* length to fill, because a
+model that has worked out it is in a lesson will otherwise invent a schedule.
+
+Two notes can arrive, and they close differently: one for a lesson that finished
+its questions, one for a lesson the cap cut short. A tutor that signs off warmly
+on a truncated lesson tells a learner they finished something they did not — and
+the learner can see the list on their own screen.
 
 **The prose and the targets go to different readers**, which is the one thing
 worth reading twice:
@@ -204,19 +245,41 @@ them reverse or constrain what a model would do left alone:
   tutor's job, not the learner's — a tutor that trails off leaves a beginner
   holding a silence they have no language to fill, and the silence reads to
   them as their own failure. The closing turn is the one written exemption.
-- **Running out of questions is not the end.** This used to say "keep talking
-  about the same subjects instead of inventing new ones", written when a
-  conversation ended whenever the learner stopped it. There is a clock now, so
-  it is reversed: keep asking, preferring subjects already raised.
-- **The time is a budget, not a clock.** The tutor is told how long it has and
-  roughly what that buys per question, and told never to guess elapsed time.
-  The page owns the clock and says when to close, through `TIME_UP_SIGNAL` —
-  marked as a system note, because `clientContent`'s only role is `user` and an
-  unmarked note reads as the learner saying "the time is up" in English.
-- **Progress comes back through a tool.** `questionAnswered(n)` is the only
-  structured channel this app has into a live call, declared in the setup frame
-  the relay composes. Nothing else could carry it: the transcript is untyped
-  text, and a spoken marker is one the tutor eventually says out loud.
+- **Running out of questions IS the end.** This has now said three different
+  things. First "keep talking about the same subjects instead of inventing new
+  ones", when a conversation ended whenever the learner stopped it. Then "keep
+  asking, preferring subjects already raised", when a clock had to be filled.
+  Now: stop. New subjects of the tutor's own are banned outright, and follow-ups
+  about what the learner just said are named beside the ban as the thing it does
+  not cover.
+- **There is no length to fill.** The tutor is told that in as many words, and
+  told never to guess elapsed time. It is not told the cap — see above. The page
+  owns both endings and says which one happened, through `LESSON_DONE_SIGNAL` or
+  `TIME_UP_SIGNAL`, marked as system notes because `clientContent`'s only role
+  is `user` and an unmarked note reads as the learner saying "the time is up" in
+  English.
+- **Ask for the longer answer.** A learner who says *"Ça va bien"* has answered
+  the question and used none of what they know; the same learner saying *"Ça va,
+  mais j'aurais voulu qu'il fasse plus beau"* has given the scale something to
+  read. Which one happens is decided by the tutor's next question, so the
+  instruction is about what to ask — why, what happened, what they would have
+  preferred — and never about grammar, which the tutor may not name out loud.
+  It pairs with `ambition` in the report: an ask with no reward attached is one
+  nobody repeats.
+- **Progress comes back through a tool, and now ends the call.**
+  `questionAnswered(n)` is the only structured channel this app has into a live
+  call, declared in the setup frame the relay composes. Nothing else could carry
+  it: the transcript is untyped text, and a spoken marker is one the tutor
+  eventually says out loud.
+
+  Promoting a soft counter to a terminator is the one real risk here, and it is
+  designed around rather than trusted away. The count never goes backwards; the
+  cap ends any call the tool forgets about; and the report reads the transcript
+  and stays the authority on what was covered. The prompt names both errors —
+  reporting early ends a lesson on a question nobody answered, withholding
+  leaves the learner talking past the end of their own — because the incentive
+  flipped with the bound: when finishing the list ends the session, the shortest
+  path to done is accepting one-word answers and marching.
 
 **The countdown is a floor, not a count.** A model under-reports far more
 readily than it over-reports, so `answered` only ever moves forward, the
@@ -224,7 +287,7 @@ student page shows what is *left* rather than a score, and the end-of-call
 report — which reads the whole transcript — is the authority on what was really
 covered.
 
-At the limit the tutor is told to close and the page hangs up
+At either ending the tutor is told to close and the page hangs up
 `CLOSING_GRACE_MS` later, so the conversation ends on a goodbye rather than
 mid-clause, and the transcript keeps the part a report reads for how a learner
 handles a close.
@@ -236,6 +299,36 @@ targets are resolved server-side from the published setup rather than taken
 from the caller, for the reason the evaluator already is — they land in a system
 prompt. A report with no code gets no targets, rather than falling back to
 somebody else's lesson.
+
+And a **third axis that rewards failure**: `ambition` says how far the learner
+reached past the simplest answer each question allowed. Both the other axes are
+measurements, and both are satisfied by safe correct language — nothing in the
+report could say the thing a tutor says constantly, that an answer was right and
+cost nothing. A reach recorded with `landed: false` is the evidence this section
+wants: *"Ça va, mais j'aurais voulu qu'il fasse plus beau"* with the mood wrong
+is worth more than *"Ça va bien"* with nothing wrong.
+
+It must not move the band, and that constraint is where most of its prompt goes.
+The diagnosis is the highest band *genuinely in evidence*, not the highest one
+attempted — that rule is what makes a level worth anything, and a section
+praising attempts is exactly the pressure that would erode it. So `ambition` is
+emitted before the band walk, read off the transcript rather than off a verdict,
+and the band walk is told to judge only what was produced successfully. The two
+disagreeing is a correct result: "played safe" beside a high band, and
+"stretched" beside a low one, are both real and both worth telling a learner.
+
+**A short lesson still gets read.** The evaluation gate was a flat two minutes,
+on the sound argument that placing someone on a scale needs a couple of minutes
+of learner speech. What that missed is a three-question lesson answered properly
+in ninety seconds: the student finished everything they were set and the page
+told them they had not talked enough. A completed lesson now clears at
+`MIN_COMPLETE_EVAL_MS` instead, and the report is told that brevity is a sample
+rather than a failure — fill best sentences, ambition, the targets and the error
+patterns, let the band walk come back mostly `not-shown`, and answer
+`too-little-evidence` for the level, which is the honest answer rather than a
+poor one. The floor does not vanish entirely, because "completed" is the tutor's
+word and a model that reports five questions in twenty seconds would otherwise
+be handed a transcript with nothing in it.
 
 See [src/realtime/vocoSessions.ts](src/realtime/vocoSessions.ts),
 [functions/api/voco-sessions/](functions/api/voco-sessions/) and
@@ -651,7 +744,7 @@ npm run lint
 | `/api/sessions/publish`, composing the prompt server-side | **untested** — the three-layer composition (style → persona → lesson), the code mint-and-retry, and the house profile merge all need a browser and the buckets |
 | `/eleve` code entry | **untested** — the `?token=` path and the typed path share one function, but neither has been run |
 | `questionAnswered` tool calls | **untested, and the least certain thing here** — the declaration, the `toolResponse` handshake and the countdown all typecheck and build, but whether the model calls it reliably mid-conversation can only be found out on a real call. Under-reporting is designed around; silence is not |
-| The lesson clock and the close | **untested** — `minutesOf` clamping is verified (`99 → 10`, `NaN → 5`, `3 → 5`) and the prompt renders correctly, but the `TIME_UP_SIGNAL` round trip needs a real call |
+| The lesson's two closes | **untested** — `capMinutesOf` clamping is verified (`99 → 30`, `NaN → 15`, `3 → 5`, legacy `lengthMinutes` read through), and the prompt renders with no number of minutes in it, but both signal round trips need a real call. The one to watch is whether the tutor stops cleanly when the list ends rather than reaching for a new subject |
 | Gemini handshake | **working** — 2.5 native audio on Vertex, 3.1 Flash Live on AI Studio |
 | Gemini audio in a browser | untested; needs a mic |
 | Saved prompt presets | typechecks and builds; the create/update/delete round trip is **untested in a browser** |

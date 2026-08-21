@@ -63,13 +63,26 @@ export async function normalise(src: string): Promise<string> {
   return ctx.canvas.toDataURL('image/png');
 }
 
-export async function fileToDataUrl(file: File): Promise<string> {
+/**
+ * Any blob, as a data URL, with its bytes untouched.
+ *
+ * A straight read rather than a canvas round trip, which matters where this is
+ * used on artwork that is already correct: drawing a PNG onto a canvas and
+ * asking for it back re-encodes it, and a kit's patches are pixels somebody
+ * generated and cropped deliberately. Nothing here should be paying for a
+ * second encode to change a string's prefix.
+ */
+export function blobToDataUrl(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(String(reader.result));
     reader.onerror = () => reject(new Error('That file could not be read'));
-    reader.readAsDataURL(file);
+    reader.readAsDataURL(blob);
   });
+}
+
+export function fileToDataUrl(file: File): Promise<string> {
+  return blobToDataUrl(file);
 }
 
 /**

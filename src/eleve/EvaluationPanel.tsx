@@ -84,6 +84,55 @@ export default function EvaluationPanel({ report }: EvaluationPanelProps) {
       </section>
 
       {/*
+        What they dared, straight after what they did well.
+
+        SECOND, AND DELIBERATELY ABOVE THE CONSIGNE. This is the one section
+        that can say something the learner does not want to hear — "tu es resté
+        sur des phrases sûres" — and the header's argument is that the opening
+        is the part that gets believed. Buried under the level it would be read
+        as a footnote to a mark; read second, next to their own best sentences,
+        it is advice about the same language.
+
+        A FAILED REACH IS SHOWN AS A REACH. `landed` decides the colour and
+        nothing else: an attempt that came out wrong is bordered like a note
+        rather than like an error, because the section exists to make reaching
+        worth doing. What was actually wrong with it is downstream, under
+        "À corriger", where a correction belongs.
+      */}
+      {report.ambition && (
+        <section>
+          <Heading>{FR.evalAmbitionTitle}</Heading>
+          <p className="text-sm font-semibold leading-snug text-lingo-ink">
+            {report.ambition.verdict === 'stretched'
+              ? FR.evalAmbitionStretched
+              : report.ambition.verdict === 'mixed'
+                ? FR.evalAmbitionMixed
+                : FR.evalAmbitionSafe}
+          </p>
+          <p className="mt-1 text-xs leading-relaxed text-lingo-muted">{report.ambition.note}</p>
+          {report.ambition.reaches.length > 0 && (
+            <ul className="mt-2.5 space-y-2">
+              {report.ambition.reaches.map((reach, index) => (
+                <li
+                  key={index}
+                  className={`rounded-lg border px-3 py-2.5 ${
+                    reach.landed
+                      ? 'border-lingo-success/30 bg-lingo-success-bg'
+                      : 'border-lingo-accent-light bg-lingo-accent-glow'
+                  }`}
+                >
+                  <p className="text-sm leading-snug">
+                    <Quote>{reach.quote}</Quote>
+                  </p>
+                  <p className="mt-1 text-xs leading-relaxed text-lingo-muted">{reach.reach}</p>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      )}
+
+      {/*
         The consigne, read back.
 
         SECOND, NOT FIRST, AND NOT LAST. The best sentences keep the opening for
@@ -262,6 +311,34 @@ export default function EvaluationPanel({ report }: EvaluationPanelProps) {
 }
 
 /**
+ * Below this an unfinished conversation has not produced enough to read.
+ *
+ * Two minutes, for the reason MIN_CAP_MINUTES gives: a level judgement needs
+ * learner speech, and the learner's share of a conversation is realistically
+ * 35-50% of the clock. It applies to a lesson that stopped partway — someone
+ * who hung up, or a call the cap cut short with questions outstanding. A
+ * finished lesson is measured against the floor below instead.
+ */
+export const MIN_EVAL_MS = 120_000;
+
+/**
+ * Below this even a finished lesson has not produced enough to read.
+ *
+ * NINETY SECONDS, AND IT IS A DIFFERENT KIND OF NUMBER from the one above. That
+ * floor is a judgement about how much speech a level needs. This one is a guard
+ * against the tutor's bookkeeping being wrong: "finished" is a count the model
+ * volunteers, and a model that reports five questions in the first twenty
+ * seconds would otherwise be handed a transcript with nothing in it.
+ *
+ * A learner who has genuinely answered a short list in under ninety seconds is
+ * possible and is the case this number is unfair to. It is the only place left
+ * where the app second-guesses a completed lesson, and it stays because the
+ * failure it prevents — a confident-looking report on four exchanges — costs
+ * the student more than a wait does.
+ */
+export const MIN_COMPLETE_EVAL_MS = 90_000;
+
+/**
  * The states before there is a report: mid-call, too short, and ready.
  *
  * Kept beside the panel rather than in the page, because what they say is part
@@ -284,16 +361,27 @@ export function EvaluationGate({
   busy,
   error,
   under,
+  complete,
   onEvaluate,
 }: {
   live: boolean;
   elapsedMs: number | null;
   lastCallMs: number | null;
+  /**
+   * The floor this call has to clear, which is not a constant any more.
+   *
+   * The page picks it from whether the lesson finished — two minutes for a
+   * conversation that stopped partway, ninety seconds for one that got through
+   * its questions. See `evalFloorMs` in Eleve.tsx. It arrives as a number
+   * rather than as the rule, so the copy below can quote whatever it is.
+   */
   minimumMs: number;
   busy: boolean;
   error: string | null;
   /** True when a consigne is rendered above this. See the header. */
   under?: boolean;
+  /** True when the tutor got through every question. Changes what is said, twice. */
+  complete?: boolean;
   onEvaluate: () => void;
 }) {
   const pad = under ? 'px-4 py-3' : 'px-4 py-8';
@@ -329,11 +417,19 @@ export function EvaluationGate({
     );
   }
 
+  /*
+    Short of the floor. A learner who finished the list gets a different line:
+    the plain one reads as "you did not do enough" to somebody who did
+    everything they were set, and the shortfall is really the teacher's list
+    being brief. See evalRemainingDone in strings.ts.
+  */
   if (lastCallMs < minimumMs) {
     return (
       <div className={`${pad} text-center`}>
         <p className="text-sm leading-relaxed text-lingo-muted">
-          {FR.evalRemaining(frenchDuration(minimumMs - lastCallMs))}
+          {complete
+            ? FR.evalRemainingDone(frenchDuration(minimumMs - lastCallMs))
+            : FR.evalRemaining(frenchDuration(minimumMs - lastCallMs))}
         </p>
       </div>
     );
@@ -341,6 +437,18 @@ export function EvaluationGate({
 
   return (
     <div className={pad}>
+      {/*
+        Said before the button and not after the report, because it is a promise
+        rather than an excuse. A short finished lesson produces a reading with no
+        level in it — the scale needs more speech than four questions give — and
+        a learner who was expecting one reads "pas assez d'éléments" as the app
+        failing. Told first, the same page reads as what it is.
+      */}
+      {complete && lastCallMs < MIN_EVAL_MS && (
+        <p className="mb-2.5 text-center text-xs leading-relaxed text-lingo-muted">
+          {FR.evalShortSample}
+        </p>
+      )}
       <button
         type="button"
         onClick={onEvaluate}

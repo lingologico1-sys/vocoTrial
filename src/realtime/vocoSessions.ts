@@ -122,18 +122,29 @@ export interface VocoSession {
   /** Which scale the end-of-call report reads against. */
   evaluatorId?: string;
   /**
-   * How long the conversation should run, in minutes.
+   * The longest this conversation may run, in minutes.
    *
-   * ONE NUMBER, NOT TWO, and it is both a floor and a ceiling. The tutor is
-   * told to keep the conversation alive until it is reached — inventing
-   * questions of its own once the list runs out — and to begin closing when it
-   * is. A separate "at least" and "at most" would be two numbers a teacher has
-   * to reason about to describe one lesson slot.
+   * A CEILING AND NOT A LENGTH. The lesson ends when its questions are
+   * answered; this is only what stops a call that never gets there from running
+   * on the meter. See the long note above `MIN_CAP_MINUTES` for why the floor
+   * that used to live in this field had to go, and why the tutor is never told
+   * this number.
    *
-   * Absent means DEFAULT_MINUTES, by the mechanism session.ts documents on
+   * Absent means DEFAULT_CAP_MINUTES, by the mechanism session.ts documents on
    * `tiltSettle`: rows written before this field existed have to keep opening,
-   * and a lesson with no length is one nobody set rather than one of length
-   * zero.
+   * and a lesson with no cap is one nobody set rather than one of length zero.
+   */
+  capMinutes?: number;
+  /**
+   * What `capMinutes` was called when it was a length. Read, never written.
+   *
+   * Kept as a field rather than migrated, the way the header describes for
+   * `voice`: `capMinutesOf` falls back to it so last term's lessons keep
+   * opening, and the first save through /teach writes a `capMinutes` and drops
+   * it. A dead key in R2 is cheaper than a migration over a number that now
+   * means something slightly different anyway.
+   *
+   * @deprecated Read through `capMinutesOf`. Never set this.
    */
   lengthMinutes?: number;
 
@@ -150,72 +161,149 @@ export const MAX_VOCO_SESSION_NAME = 60;
 /**
  * More than this stops being a lesson and starts being a syllabus.
  *
- * Fifteen, raised from twelve when the editor stopped being one textarea. The
- * number is editorial rather than technical and always has been — fifteen
- * questions is well under a thousand characters against MAX_INSTRUCTIONS'
- * eight thousand, so nothing here is protecting a budget. What it protects is
- * the clock: at MAX_MINUTES and a full list, a question gets forty seconds,
- * which is about as short as a question with a follow-up can honestly be.
+ * TWENTY, RAISED FROM FIFTEEN when the questions became the bound. Fifteen was
+ * never a judgement about lists — it was arithmetic on the clock: at the old
+ * MAX_MINUTES and a full list a question got forty seconds, which is about as
+ * short as a question with a follow-up can honestly be. A conversation no
+ * longer runs to a clock, so that sum has nothing left to protect and the
+ * ceiling is free to be what it says it is.
+ *
+ * Nothing technical binds it. Twenty questions is under two thousand characters
+ * against MAX_INSTRUCTIONS' eight thousand, and a rounding error against
+ * MAX_VOCO_SESSION. What twenty costs is a learner's attention, and the clock
+ * used to be what protected that — so the number is now the teacher's
+ * judgement, and /teach says out loud what a list this long implies in minutes
+ * rather than leaving them to find out. See Teach.tsx.
  */
-export const MAX_QUESTIONS = 15;
+export const MAX_QUESTIONS = 20;
 
 /**
  * How many empty question rows /teach opens with.
  *
- * Not MAX_QUESTIONS. Fifteen empty boxes on a new lesson is a wall of nothing
- * to scroll past, and most lessons are four to six questions — so the editor
- * opens at five and grows on a button. See Teach.tsx.
+ * Not MAX_QUESTIONS. Twenty empty boxes on a new lesson is a wall of nothing to
+ * scroll past, and most lessons are four to six questions — so the editor opens
+ * at five and grows on a button. See Teach.tsx.
  */
 export const DEFAULT_QUESTION_ROWS = 5;
 
 /**
- * The shortest conversation worth reading, in minutes.
+ * THE CAP IS A CEILING AND NOTHING ELSE, which is the change this file turns on.
  *
- * FIVE, NOT THREE, and the difference is the point. What a level judgement
- * needs is *learner* speech, and in a conversation where the tutor discusses
- * each answer and asks a follow-up the learner's share is realistically 35-50%
- * of the clock — so three minutes elapsed is a minute and a half of talking,
- * about one exam long-turn. Five buys somewhere near two and a half, which is
- * thin but readable. For scale, DELF A2's speaking test runs 6-8 minutes and
- * B1's about 15.
+ * `lengthMinutes` used to be both floor and ceiling, and said so: the tutor was
+ * told to keep the conversation alive until the number was reached and to begin
+ * closing when it was. That floor is what invented questions. A tutor which
+ * finished the list with time still on the clock had to produce more
+ * conversation from somewhere, so it improvised — and the improvised half is
+ * the half the learner never prepared, has no vocabulary for, and may not even
+ * understand. It is also the half the report cannot read fairly: the targets
+ * were written for the teacher's questions, so an improvised turn invites none
+ * of them, and the learner's weakest stretch of speech ends up being the
+ * stretch that had nothing to do with the lesson. Removing the floor removes
+ * all of that in one move. See `lessonBlock`.
  *
- * Above MIN_EVAL_MS in Eleve.tsx, which refuses to write an evaluation under
- * two minutes, and deliberately so: the shortest lesson a teacher can set still
- * clears the bar the student page sets for reading it.
+ * WHAT IS LEFT IS A COST BOUND. A lesson ends when its questions are answered;
+ * the cap is what stops a call that will never answer them — a tutor
+ * under-reporting its progress, a learner who has gone quiet, a socket nobody
+ * hung up on — from running on the meter. It should rarely be the thing that
+ * ends a lesson, and when it is, it ends it with a goodbye rather than a cut.
+ * See TIME_UP_SIGNAL and Eleve.tsx.
+ *
+ * THE TUTOR IS NEVER TOLD THIS NUMBER, and that is a rule rather than an
+ * omission to tidy up later. A model handed a length paces to fill it: told it
+ * has twenty minutes it will stretch eight questions across twenty rather than
+ * ask eight questions and stop. The floor would come straight back in prose,
+ * through the back door. The client owns the cap and nothing upstream knows it
+ * exists — `lessonBlock` takes no minutes at all, which is what enforces it.
  */
-export const MIN_MINUTES = 5;
 
-/** Longer than a slot a tutor holds a single learner's attention for. */
-export const MAX_MINUTES = 10;
+/** Short, but still a conversation. Below this a cap would cut good lessons. */
+export const MIN_CAP_MINUTES = 5;
 
-/** What a new lesson opens at. The floor, so raising it is deliberate. */
-export const DEFAULT_MINUTES = MIN_MINUTES;
+/**
+ * Thirty, raised from ten, because twenty questions cannot happen in ten.
+ *
+ * A question asked properly — asked, answered in a full sentence, one follow-up,
+ * a remark about the answer — is a minute and a half at conversational pace, so
+ * a full list is about half an hour of talking. Ten was a fair ceiling when a
+ * lesson was six questions and the clock was the point. Against MAX_QUESTIONS
+ * it would be a guillotine through the middle of every long lesson, which is
+ * the one thing a backstop must never be.
+ */
+export const MAX_CAP_MINUTES = 30;
 
-/** The teacher's number, clamped. Absent, absurd and out-of-range all land here. */
-export function minutesOf(session: Pick<VocoSession, 'lengthMinutes'>): number {
-  const asked = session.lengthMinutes;
-  if (typeof asked !== 'number' || !Number.isFinite(asked)) return DEFAULT_MINUTES;
-  return Math.min(MAX_MINUTES, Math.max(MIN_MINUTES, Math.round(asked)));
+/**
+ * What a new lesson opens at.
+ *
+ * NOT THE FLOOR, unlike the length it replaces, and the inversion is the whole
+ * of it. A default set too low truncates lessons; a default set too high costs
+ * nothing, because a cap is only spent when it is actually reached and a lesson
+ * that finishes its questions ends long before. Fifteen covers about ten
+ * questions at pace, and a teacher writing a longer list is told to raise it.
+ */
+export const DEFAULT_CAP_MINUTES = 15;
+
+/**
+ * What one question really takes, asked properly.
+ *
+ * Used to warn a teacher and never to pace a tutor — see the note above on why
+ * no number resembling this one may reach the model. It is the same figure the
+ * MAX_CAP_MINUTES comment reasons with, named once so /teach's arithmetic and
+ * that argument cannot drift apart.
+ */
+export const MINUTES_A_QUESTION = 1.5;
+
+/**
+ * The teacher's cap, clamped. Absent, absurd and out-of-range all land here.
+ *
+ * `lengthMinutes` is what rows written before the cap existed carry, and
+ * reading it as a ceiling reinterprets it — it was a length. The
+ * reinterpretation is safe in the only direction it can move: an old ten-minute
+ * lesson now ends when its questions run out and still stops at ten if they
+ * never do, so nothing that used to fit stops fitting.
+ */
+export function capMinutesOf(
+  session: Pick<VocoSession, 'capMinutes' | 'lengthMinutes'>,
+): number {
+  const asked = session.capMinutes ?? session.lengthMinutes;
+  if (typeof asked !== 'number' || !Number.isFinite(asked)) return DEFAULT_CAP_MINUTES;
+  return Math.min(MAX_CAP_MINUTES, Math.max(MIN_CAP_MINUTES, Math.round(asked)));
+}
+
+/** True when the cap will land mid-list rather than after it. /teach says so. */
+export function capLooksTight(questionCount: number, capMinutes: number): boolean {
+  return questionCount > 0 && capMinutes < questionCount * MINUTES_A_QUESTION;
 }
 
 /** The tool the tutor reports progress through. See `lessonBlock`. */
 export const ANSWERED_TOOL = 'questionAnswered';
 
 /**
- * What the page says to the tutor when the lesson's minutes are up.
+ * The two ways a lesson ends, as the page says them into the conversation.
  *
- * A CONSTANT BECAUSE TWO PLACES HAVE TO AGREE. `lessonBlock` tells the tutor to
- * expect these exact words and the student page sends them; a rewording of
+ * CONSTANTS BECAUSE TWO PLACES HAVE TO AGREE. `lessonBlock` tells the tutor to
+ * expect these exact notes and the student page sends them; a rewording of
  * either alone is a tutor that never closes, which nothing would report — the
  * call would simply run to the idle timeout instead.
  *
- * Marked as a note rather than phrased as speech. It arrives through
+ * TWO NOTES AND NOT ONE, because the two closes are different conversations.
+ * Finishing the list is the lesson working, and the tutor has everything it
+ * needs to say something true about how the learner did. Reaching the cap with
+ * questions still outstanding is the lesson being cut short — and a tutor that
+ * signs off warmly there, as though the work were done, tells a learner they
+ * finished something they did not. The learner can see the list on their own
+ * screen, so it is a lie they can check.
+ *
+ * Marked as notes rather than phrased as speech. They arrive through
  * `clientContent`, whose only available role is `user`, so without the marker
- * it reads as the learner suddenly saying "the time is up" in English — and a
+ * they read as the learner suddenly saying "the time is up" in English — and a
  * tutor that believes that will answer it out loud.
  */
-export const TIME_UP_SIGNAL =
-  '[NOTE FROM THE SYSTEM, NOT FROM THE LEARNER — do not answer it or read it out] The time is up. Close the conversation now, exactly as described under HOW THIS ENDS.';
+const SYSTEM_NOTE =
+  '[NOTE FROM THE SYSTEM, NOT FROM THE LEARNER — do not answer it or read it out]';
+
+export const LESSON_DONE_SIGNAL = `${SYSTEM_NOTE} Every question on the list has been answered. Close the conversation now, exactly as described under HOW THIS ENDS.`;
+
+export const TIME_UP_SIGNAL = `${SYSTEM_NOTE} This session has run out of time with questions still unanswered. Close the conversation now, exactly as described under HOW THIS ENDS — and do not suggest the lesson was finished, because it was not.`;
 
 /**
  * More targets than one conversation can evidence.
@@ -285,11 +373,36 @@ export function looksLikeVocoSession(value: unknown): value is VocoSession {
  * until the learner has answered in at least a full sentence" is checkable
  * against the last turn; "make sure they answer properly" is not.
  *
+ * THE LIST IS THE LESSON, AND ITS END IS THE END. This block used to tell the
+ * tutor to keep inventing questions once the list ran out, because a clock had
+ * to be filled and only the tutor could fill it. That instruction is gone along
+ * with the clock — see the note above `MIN_CAP_MINUTES` — and what replaces it
+ * is its opposite, stated as a rule with a written exemption for follow-ups. A
+ * model asked merely to *prefer* the teacher's subjects will drift off them by
+ * the third turn, so the ban is explicit and the thing it does not ban is named
+ * beside it.
+ *
+ * NO MINUTES REACH THIS FUNCTION, which is why it does not take any. A model
+ * told how long it has paces to fill the time, and pacing to fill the time is
+ * the floor this change exists to remove. The one thing it is told about length
+ * is that there is no length — otherwise a model that has noticed it is in a
+ * lesson will invent a schedule for itself.
+ *
  * ORDERED, WITH ROOM TO MOVE. The list is walked in order, and the tutor is
  * told in as many words both to come back after a tangent and to re-ask the
  * question when it does. The failure mode is not abandoning the list — it is
  * drifting off it and resuming from a question the learner has forgotten was
  * asked, which reads to them as the tutor losing the thread.
+ *
+ * IT ASKS FOR THE LONGER ANSWER, and that is the one section here aimed at the
+ * report rather than at the conversation. A learner who answers "Ça va bien" has
+ * answered the question and used none of what they know; the same learner
+ * answering "Ça va, mais j'aurais voulu qu'il fasse plus beau" has given the
+ * scale something to read. Which of the two happens is decided by the tutor's
+ * next question and not by the learner's ambition, so the instruction is about
+ * what to ask rather than about what to want. It pairs with `ambition` in
+ * report.ts, which is what tells the learner afterwards that safety cost them
+ * something — an ask with no reward attached is one nobody repeats.
  *
  * THE TARGETS ARE STEERED TOWARDS, NEVER ANNOUNCED. The student has already
  * read the consigne on their own screen; a tutor that also says "now use the
@@ -306,25 +419,25 @@ export function looksLikeVocoSession(value: unknown): value is VocoSession {
  * reads to them as their own failure. The exemption is the closing turn, which
  * has to be exempt or the conversation cannot end at all.
  *
- * THE LIST RUNNING OUT IS NOT THE END. This block used to say "keep talking
- * about the same subjects instead of inventing new ones", which was written
- * when a conversation ended whenever the learner stopped it. There is a clock
- * now, and a tutor that has run out of list before it has run out of time has
- * to produce more conversation — so the instruction is reversed, with the
- * preference for subjects already raised kept as a preference.
- *
- * THE TIME IS GIVEN AS A BUDGET, NOT AS A CLOCK. A model cannot see elapsed
- * time and will invent it if asked to track it, so it is told how long it has
- * and roughly what that buys per question, which is a pacing instruction it can
- * follow. What it is never told is what time it is now. The client owns the
- * clock and says when to close — see Eleve.tsx.
- *
  * PROGRESS IS REPORTED THROUGH A TOOL, which is the only structured channel
  * this app has into a call. Nothing else could carry it: the transcript is
  * untyped text, and a spoken marker would be a marker the tutor eventually says
- * out loud. Under-reporting is the expected failure and is designed around
- * rather than prevented — the count never goes backwards, and the end-of-call
- * report reads the transcript and is the authority on what was really covered.
+ * out loud.
+ *
+ * THAT TOOL NOW ENDS THE LESSON, which is the one genuine risk this change
+ * takes and the reason its section is the longest here. The count used to be a
+ * countdown on a panel, where under-reporting cost a stale number; it is now
+ * what the page waits for, so the two errors have real and opposite costs. A
+ * number reported early closes the conversation on a question nobody answered.
+ * A number never reported leaves the learner talking past the end of their own
+ * lesson until the cap catches it. Both are named in the prose, in both
+ * directions, rather than left to a general instruction to be accurate.
+ *
+ * The asymmetry is still designed around rather than trusted away: the count
+ * never goes backwards, the cap ends any call the tool forgets about, and the
+ * end-of-call report reads the transcript and remains the authority on what was
+ * really covered. Nothing here is load-bearing for the *marking* — only for
+ * when the call hangs up.
  *
  * The brief is deliberately absent. See the header on who reads what.
  *
@@ -333,21 +446,10 @@ export function looksLikeVocoSession(value: unknown): value is VocoSession {
  * constraint held across a whole call survives longest, and a question list
  * held for a whole call is exactly that.
  */
-export function lessonBlock(
-  lesson: Pick<VocoSession, 'questions' | 'targets' | 'lengthMinutes'>,
-): string {
+export function lessonBlock(lesson: Pick<VocoSession, 'questions' | 'targets'>): string {
   const questions = lesson.questions
     .map((question, index) => `${index + 1}. ${question}`)
     .join('\n');
-
-  const minutes = minutesOf(lesson);
-
-  /*
-   * Rounded to half a minute and floored at one, because the number exists to
-   * set a pace rather than to be obeyed. "About 0.7 minutes each" is a false
-   * precision a model will try to honour by clipping answers short.
-   */
-  const each = Math.max(1, Math.round((minutes / Math.max(1, lesson.questions.length)) * 2) / 2);
 
   const targets = lesson.targets.length
     ? `
@@ -362,10 +464,13 @@ have already been told. If a turn does not invite one, let it go and carry on
 talking.`
     : '';
 
+  const count = lesson.questions.length;
+
   return `
 
 THE QUESTIONS FOR THIS CONVERSATION
-Work down this list in order, one at a time:
+Work down this list in order, one at a time. These are the whole lesson — all
+${count} of them, and nothing comes after the last one:
 
 ${questions}
 
@@ -378,44 +483,73 @@ If they open a subject of their own, follow it for a turn or two and then come
 back — and say the question again when you do, rather than assuming they
 remember which one it was.
 
+DO NOT ADD QUESTIONS OF YOUR OWN TO THE LIST
+Follow-ups about something the learner has just said are the conversation and
+are wanted — ask as many as the answer deserves. Starting a new subject of your
+own is different, and you must not do it. The learner prepared these questions,
+has the vocabulary for them and knows what they are about; one they have never
+seen tests whether they can understand you rather than what they can say, and
+that is not what this conversation is for. When the last question on the list
+has been dealt with, stop looking for something else to ask about.
+
+ASK FOR THE LONGER ANSWER
+A learner who says "Ça va bien" has answered the question and used almost
+nothing of what they know. Your next question is what decides whether the answer
+grows: ask why, ask what happened, ask what they would rather have done, ask
+what they thought about it. Be interested in the detail and never in the
+grammar — do not name a tense, do not ask them to use one, and do not tell them
+an answer was too short. Just leave them somewhere a longer sentence naturally
+goes. A conversation with a few ambitious answers in it is worth more than one
+of safe correct ones, and the questions you ask are what produce them.
+
 ALWAYS END YOUR TURN WITH A QUESTION
 Whatever else a turn contains, the last thing you say is something for the
 learner to answer. Keeping the conversation going is your job and not theirs —
 never hand them a silence to fill. The single exception is the closing turn
 described under HOW THIS ENDS.
 
-HOW LONG THIS LASTS
-This conversation runs for about ${minutes} minutes, over ${lesson.questions.length} question${lesson.questions.length === 1 ? '' : 's'} — roughly ${each} minute${each === 1 ? '' : 's'} on each if you spread them evenly. Do not rush to the end of the list. A
-learner who gets through half of the questions properly has done better than one
-hurried through all of them, and reaching the end early is not the goal.
-
-You cannot see a clock. Never guess how long you have been talking, never say
-how much time is left, and never mention the time at all.
-
-WHEN THE LIST RUNS OUT
-Keep going. Do not announce that the questions are finished and do not wind the
-conversation down — carry on asking questions of your own until you are told
-the time is up. Prefer to go deeper into subjects the learner has already
-raised, since those are the ones they have words for; a genuinely new subject is
-fine when the old ones are exhausted.
+THERE IS NO LENGTH TO FILL
+Give each question the time it needs and no more. Nothing is measuring how long
+this runs, there is no number of minutes to reach, and getting to the end of the
+list is not finishing early — it is finishing. Equally, do not hurry: a learner
+who works through half the list properly has done better than one rushed through
+all of it. You cannot see a clock. Never guess how long you have been talking,
+never say how much time is left, and never mention the time at all.
 
 HOW THIS ENDS
 A note will arrive in the conversation, marked as coming from the system rather
-than from the learner, saying that the time is up. It is not something the
-learner said: never answer it, never read it out, and never mention that it
-arrived. When it does, close in a turn or two — say something warm and specific
-about how they did, then say goodbye. That closing turn is the one turn that
-does not end with a question. Never end the conversation before that note
-arrives.
+than from the learner. It is not something the learner said: never answer it,
+never read it out, and never mention that it arrived. Never end the conversation
+before one arrives — not even when you are sure the last question is done.
+
+There are two of them, and they close differently.
+
+  EVERY QUESTION HAS BEEN ANSWERED — the lesson is complete. Close in a turn or
+  two: say something warm and specific about how they did, quote back one thing
+  they said well, and say goodbye.
+
+  OUT OF TIME WITH QUESTIONS UNANSWERED — the lesson was cut short. Close in a
+  turn or two, but do not imply it was finished: say plainly that you have to
+  stop there, say something warm and specific about the part you did get
+  through, and say goodbye.
+
+Either way, that closing turn is the one turn that does not end with a question.
 
 REPORTING PROGRESS
 Call the \`${ANSWERED_TOOL}\` tool with a question's number as soon as that
-question has been dealt with — the learner has answered it and you have talked
-about their answer. One call per question, in the order they are listed, and
-never for a question you have only just asked.
+question has been dealt with — the learner has answered it in at least a full
+sentence and you have talked about their answer. One call per question, in the
+order they are listed.
+
+THIS IS WHAT ENDS THE CONVERSATION, so it has to be honest in both directions.
+Do not call it for a question you have only just asked, for one the learner
+deflected, or for one they plainly did not understand: a number sent early ends
+the lesson on a question nobody answered. Do not withhold it either — a question
+genuinely dealt with and never reported leaves the learner talking on past the
+end of their own lesson. If you are unsure whether a question has been answered
+well enough, ask one more follow-up about it and then report it.
 
 This is bookkeeping and not conversation. Never mention the tool, never read a
 number out loud, never tell the learner how many questions are left, and carry
-straight on talking after the call. If you are unsure whether a question has
-been answered well enough, do not call it yet.${targets}`;
+straight on talking after the call.${targets}`;
 }

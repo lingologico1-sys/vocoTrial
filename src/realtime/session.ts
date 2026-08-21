@@ -185,18 +185,32 @@ export interface PublishedSetup extends PerformanceProfile {
   /** Asked in this order. Also inside `instructions`. */
   questions?: string[];
   /**
-   * How long the conversation runs, in minutes.
+   * The longest this conversation may run, in minutes.
    *
-   * Carried as well as baked into `instructions`, and the duplication is the
-   * same bargain the questions strike directly above: the tutor is told the
-   * budget in prose so it can pace itself, and the student page needs the
-   * number to run a clock and to decide when to tell the tutor to close. Prose
-   * cannot be read by a timer.
+   * A CEILING AND NOT A LENGTH, and unlike the questions it is NOT also baked
+   * into `instructions` — that asymmetry is the point rather than an oversight.
+   * The tutor is told the questions twice because it has to ask them and the
+   * student page has to list them. It is told the cap zero times, because a
+   * model handed a length paces to fill it and the floor this replaced is
+   * exactly what was being removed. See vocoSessions.ts above `MIN_CAP_MINUTES`.
    *
-   * Optional, and absent means DEFAULT_MINUTES — the mechanism `tiltSettle`
+   * So this number exists for one reader: the student page, which runs the
+   * clock and says into the conversation when it has run out. A timer cannot
+   * read prose, and in this case nothing else is allowed to.
+   *
+   * Optional, and absent means DEFAULT_CAP_MINUTES — the mechanism `tiltSettle`
    * documents above. Setups published before there was a clock keep opening,
-   * and get the floor rather than zero, which would be a call that ends the
+   * and get the default rather than zero, which would be a call that ends the
    * instant it connects.
+   */
+  capMinutes?: number;
+  /**
+   * What `capMinutes` was called when it was a length. Read, never written.
+   *
+   * Setups already in the bucket carry it, and `capMinutesOf` falls back to it
+   * so a code handed out last week keeps working. Nothing writes it any more.
+   *
+   * @deprecated Read through `capMinutesOf`. Never set this.
    */
   lengthMinutes?: number;
   /**
@@ -263,6 +277,7 @@ export function looksLikeSetup(value: unknown): value is PublishedSetup {
     (setup.brief === undefined || isString(setup.brief)) &&
     (setup.targets === undefined || isStringArray(setup.targets)) &&
     (setup.questions === undefined || isStringArray(setup.questions)) &&
+    (setup.capMinutes === undefined || typeof setup.capMinutes === 'number') &&
     (setup.lengthMinutes === undefined || typeof setup.lengthMinutes === 'number') &&
     (setup.vocoSessionId === undefined || isString(setup.vocoSessionId)) &&
     (setup.vocoSessionName === undefined || isString(setup.vocoSessionName)) &&

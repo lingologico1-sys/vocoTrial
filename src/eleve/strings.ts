@@ -53,10 +53,15 @@ export const FR = {
   questionsLeftMany: 'Il te reste {n} questions',
   questionsAllDone: 'Tu as répondu à toutes les questions',
   /*
-   * Said once the list is done, because the call does not end there and a
-   * learner who thinks it has will stop talking and wait.
+   * Said once the list is done, and it now says the opposite of what it used to.
+   *
+   * The old line was "keep talking until the end", written when a clock ran the
+   * conversation and finishing the questions changed nothing. Finishing them is
+   * the end now — the page tells the tutor to close — so a learner told to keep
+   * going would be talking against a tutor that is saying goodbye. What they
+   * need instead is a second of warning, so the goodbye is not abrupt.
    */
-  questionsKeepTalking: 'Continue à parler avec ton tuteur jusqu’à la fin.',
+  questionsKeepTalking: 'Ton tuteur va conclure la conversation.',
 
   // --- The call
   starting: 'Connexion…',
@@ -102,6 +107,22 @@ export const FR = {
   evalDuring: 'Parle avec ton tuteur. L’évaluation viendra après.',
   evalTooShort: 'Il faut parler au moins deux minutes pour être évalué.',
   evalRemaining: (text: string) => `Encore ${text} de conversation pour être évalué.`,
+  /*
+   * The same shortfall, said to somebody who did finish. It has to differ,
+   * because the plain line reads as "you did not do enough" to a learner who
+   * did everything they were set — the list was simply short. It names the real
+   * reason instead, which is that a minute of speech is not enough to read.
+   */
+  evalRemainingDone: (text: string) =>
+    `Tu as répondu à tout, mais très vite : encore ${text} de conversation pour être évalué.`,
+  /*
+   * Shown above the button after a short but finished lesson, so the reading
+   * that arrives is the one that was promised. A student who expected a level
+   * and got "pas assez d'éléments" reads the feature as broken; one who was
+   * told to expect their best sentences reads the same page as what it is.
+   */
+  evalShortSample:
+    'Conversation courte : tu auras surtout tes meilleures phrases et ta consigne.',
   evalButton: 'Évalue-moi',
   evalWorking: 'Je relis notre conversation…',
   evalFailed: 'L’évaluation n’a pas pu être écrite.',
@@ -128,6 +149,19 @@ export const FR = {
   evalTaskMissingNote: 'Cette structure n’est pas apparue dans la conversation.',
 
   evalBestTitle: 'Tes meilleures phrases',
+  /*
+   * The risk section, and the wording is doing real work.
+   *
+   * "Tes risques" would read as a warning. What it reports is the opposite: how
+   * far the learner reached past the easy answer, with a failed reach counting
+   * for more than a safe success. The heading has to carry that, because a
+   * learner who reads it as a fault column learns to play safer — which is the
+   * exact behaviour the section exists to undo.
+   */
+  evalAmbitionTitle: 'Tes prises de risque',
+  evalAmbitionStretched: 'Tu as osé des structures difficiles.',
+  evalAmbitionMixed: 'Tu as osé par moments.',
+  evalAmbitionSafe: 'Tu es resté sur des phrases sûres.',
   evalBestEmpty: 'Rien à citer cette fois — parle un peu plus la prochaine fois.',
   evalLevelTitle: 'Ton niveau',
   evalLadderTitle: 'Ce que tu as montré',

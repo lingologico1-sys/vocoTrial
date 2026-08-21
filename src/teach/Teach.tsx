@@ -9,16 +9,18 @@ import type { TutorStyle } from '../realtime/house';
 import { listPublished } from '../facekit/library';
 import type { PublishedFace } from '../facekit/published';
 import {
-  DEFAULT_MINUTES,
+  DEFAULT_CAP_MINUTES,
   DEFAULT_QUESTION_ROWS,
   MAX_BRIEF,
-  MAX_MINUTES,
+  MAX_CAP_MINUTES,
   MAX_QUESTIONS,
   MAX_TARGETS,
   MAX_VOCO_SESSION_NAME,
-  MIN_MINUTES,
+  MINUTES_A_QUESTION,
+  MIN_CAP_MINUTES,
+  capLooksTight,
+  capMinutesOf,
   joinLines,
-  minutesOf,
   newVocoSessionId,
   splitLines,
   type VocoSession,
@@ -146,7 +148,7 @@ export default function Teach() {
    * box must never do.
    */
   const [rows, setRows] = useState<string[]>(() => Array(DEFAULT_QUESTION_ROWS).fill(''));
-  const [minutes, setMinutes] = useState(DEFAULT_MINUTES);
+  const [capMinutes, setCapMinutes] = useState(DEFAULT_CAP_MINUTES);
 
   // The tutor.
   const [language, setLanguage] = useState(defaultLanguageCode);
@@ -243,7 +245,7 @@ export default function Teach() {
           )
         : Array(DEFAULT_QUESTION_ROWS).fill(''),
     );
-    setMinutes(minutesOf(source));
+    setCapMinutes(capMinutesOf(source));
     setLanguage(source.language || defaultLanguageCode());
     setStyleId(source.styleId ?? '');
     setFaceId(source.faceId ?? null);
@@ -258,6 +260,9 @@ export default function Teach() {
   // Blank rows dropped here rather than in state, and trimmed the way the save
   // route trims them, so the count under the panel is the count that is saved.
   const questions = rows.map((row) => row.trim()).filter(Boolean).slice(0, MAX_QUESTIONS);
+
+  /* Whether the cap will land mid-list. The one warning this page owes a teacher. */
+  const tightCap = capLooksTight(questions.length, capMinutes);
   const targets = splitLines(targetText, MAX_TARGETS);
 
   const setRow = (index: number, value: string) =>
@@ -293,7 +298,7 @@ export default function Teach() {
     brief: brief.trim(),
     targets,
     questions,
-    lengthMinutes: minutes,
+    capMinutes,
     language,
     styleId: style?.id ?? '',
     faceId,
@@ -349,6 +354,26 @@ export default function Teach() {
   const publish = async () => {
     if (!questions.length) {
       setPublishError('A Voco Session needs at least one question.');
+      return;
+    }
+    /*
+     * A face is required whenever there is one to require.
+     *
+     * `null` stays legal on the wire — published setups already carry it, and
+     * Eleve falls back to the shipped kit for a browser that can reach no
+     * library — but it stops being something a teacher can choose by not
+     * choosing. Unpicked used to publish the deployment's own face, with no
+     * persona, in whatever voice the provider defaulted to; that is the trap
+     * the voice dropdown was removed for, and leaving the face half of it in
+     * place would have been half a fix.
+     *
+     * The exception is the case where a pick is impossible. An empty grid means
+     * the library is empty or unreachable, and refusing to publish there would
+     * take a working fallback away from a teacher who cannot do anything about
+     * either cause.
+     */
+    if (faces.length > 0 && !faceId) {
+      setPublishError('Pick a face before handing this out.');
       return;
     }
     setPublishing(true);
@@ -528,43 +553,67 @@ export default function Teach() {
               </div>
 
               {/*
-                The clock. Beside the questions rather than in the tutor panel,
-                because the number a teacher reasons about is "how long, for how
-                many questions" — the two belong on one screen, and the line
-                underneath does that arithmetic out loud so nobody has to.
+                The cap, and it is a different control from the clock it
+                replaces even though it looks the same.
+
+                THE OLD SLIDER SET THE LESSON'S LENGTH. This one sets the point
+                at which an unfinished lesson is cut off, which is a thing a
+                teacher should be able to ignore most of the time and does not
+                have to reason about per question. So the arithmetic underneath
+                changed with it: it used to divide the minutes by the questions
+                to show a pace, and a pace is exactly the idea being removed.
+                What it says now is whether the cap is short enough to actually
+                land — the one case where the number matters — and otherwise it
+                says the questions are in charge.
+
+                It stays beside the questions rather than moving to the tutor
+                panel, because the warning is arithmetic over both.
               */}
               <div className="flex flex-col gap-1.5">
                 <div className="flex items-baseline justify-between">
-                  <label className={label} htmlFor="voco-minutes">
-                    How long
+                  <label className={label} htmlFor="voco-cap">
+                    Stop after
                   </label>
                   <span className="text-[11px] text-lingo-muted">
-                    {MIN_MINUTES}–{MAX_MINUTES} minutes
+                    {MIN_CAP_MINUTES}–{MAX_CAP_MINUTES} minutes
                   </span>
                 </div>
                 <div className="flex items-center gap-3">
                   <input
-                    id="voco-minutes"
+                    id="voco-cap"
                     type="range"
-                    min={MIN_MINUTES}
-                    max={MAX_MINUTES}
+                    min={MIN_CAP_MINUTES}
+                    max={MAX_CAP_MINUTES}
                     step={1}
-                    value={minutes}
-                    onChange={(event) => setMinutes(Number(event.target.value))}
+                    value={capMinutes}
+                    onChange={(event) => setCapMinutes(Number(event.target.value))}
                     disabled={busy}
                     className="h-1.5 flex-1 cursor-pointer appearance-none rounded-full bg-lingo-border-strong accent-lingo-accent disabled:opacity-40"
                   />
                   <span className="w-16 shrink-0 font-lingo-mono text-sm font-bold tabular-nums">
-                    {minutes} min
+                    {capMinutes} min
                   </span>
                 </div>
                 <p className="text-[11px] leading-relaxed text-lingo-muted">
-                  {questions.length
-                    ? `About ${Math.max(1, Math.round((minutes / questions.length) * 2) / 2)} minutes a question. `
-                    : ''}
-                  The tutor keeps the conversation going until the time is up — inventing its own
-                  questions once yours run out — and closes when it arrives.
+                  The conversation ends when your questions have been answered — the tutor asks
+                  nothing of its own once the list runs out. This is only the point at which one
+                  that has not finished is stopped and closed off, so it costs nothing when it is
+                  not reached.
                 </p>
+                {/*
+                  Said only when it is true, and it is the one thing on this
+                  page a teacher can get wrong now. Twenty questions under a
+                  ten-minute cap is a lesson that will be guillotined halfway,
+                  and nothing else on screen would say so — the clock used to
+                  make the trade-off visible by being the point of the control.
+                */}
+                {tightCap && (
+                  <p className="text-[11px] leading-relaxed text-lingo-accent-deep">
+                    {questions.length} questions is nearer{' '}
+                    {Math.round(questions.length * MINUTES_A_QUESTION)} minutes of conversation.
+                    At {capMinutes} the lesson will be cut off before the list is finished.
+                  </p>
+                )}
               </div>
 
               <div className="flex flex-col gap-1.5">
@@ -695,48 +744,62 @@ export default function Teach() {
                   a name only its author remembers; what a teacher is choosing
                   is a person to put in front of a class, and that choice is
                   made by looking.
+
+                  Every tile here is a library face, which it did not use to be.
+                  A "Default" tile sat first and pre-selected, standing for the
+                  kit checked into public/faces/ — the one face with no picture
+                  to look at, no name shown and no persona to carry, on a grid
+                  whose whole argument is the sentence above. It is an ordinary
+                  library face now; faceKit imports it once. See `seed` there.
                 */}
-                <div className="grid grid-cols-4 gap-2 sm:grid-cols-6">
-                  <button
-                    type="button"
-                    onClick={() => setFaceId(null)}
-                    disabled={busy}
-                    title="The face this deployment ships with"
-                    className={`aspect-square rounded-xl border-2 bg-lingo-cream text-[10px] leading-tight text-lingo-muted transition-colors ${
-                      faceId === null
-                        ? 'border-lingo-accent shadow-lingo-pop-sm'
-                        : 'border-lingo-border-strong hover:border-lingo-accent-light'
+                {faces.length > 0 ? (
+                  <div className="grid grid-cols-4 gap-2 sm:grid-cols-6">
+                    {faces.map((face) => (
+                      <button
+                        key={face.id}
+                        type="button"
+                        onClick={() => setFaceId(face.id)}
+                        disabled={busy}
+                        title={face.name}
+                        className={`aspect-square overflow-hidden rounded-xl border-2 transition-colors ${
+                          faceId === face.id
+                            ? 'border-lingo-accent shadow-lingo-pop-sm'
+                            : 'border-lingo-border-strong hover:border-lingo-accent-light'
+                        }`}
+                      >
+                        <img
+                          src={face.thumb}
+                          alt={face.name}
+                          className="h-full w-full object-cover"
+                        />
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  /*
+                    An empty grid is a box with nothing in it, which reads as
+                    broken rather than as empty. It has two causes and the
+                    teacher can act on neither, so this says who can.
+                  */
+                  <p className="rounded-2xl border-2 border-lingo-border-strong bg-lingo-cream px-4 py-3 text-[11px] leading-relaxed text-lingo-muted">
+                    No faces in the shared library — either none has been published yet, or
+                    the library cannot be reached from here. Ask an administrator. You can
+                    still hand this lesson out: it will wear the face the deployment ships
+                    with, which carries no voice of its own.
+                  </p>
+                )}
+                {faces.length > 0 && (
+                  <p
+                    className={`text-[11px] ${
+                      faceId === null ? 'text-lingo-error' : 'text-lingo-muted'
                     }`}
                   >
-                    Default
-                  </button>
-                  {faces.map((face) => (
-                    <button
-                      key={face.id}
-                      type="button"
-                      onClick={() => setFaceId(face.id)}
-                      disabled={busy}
-                      title={face.name}
-                      className={`aspect-square overflow-hidden rounded-xl border-2 transition-colors ${
-                        faceId === face.id
-                          ? 'border-lingo-accent shadow-lingo-pop-sm'
-                          : 'border-lingo-border-strong hover:border-lingo-accent-light'
-                      }`}
-                    >
-                      <img
-                        src={face.thumb}
-                        alt={face.name}
-                        className="h-full w-full object-cover"
-                      />
-                    </button>
-                  ))}
-                </div>
-                <p className="text-[11px] text-lingo-muted">
-                  {faceId === null
-                    ? 'The face this deployment ships with. It carries no voice of its own, so the provider picks one.'
-                    : (faces.find((face) => face.id === faceId)?.name ??
-                      'That face is no longer in the library — pick another.')}
-                </p>
+                    {faceId === null
+                      ? 'Pick a face before handing this out.'
+                      : (faces.find((face) => face.id === faceId)?.name ??
+                        'That face is no longer in the library — pick another.')}
+                  </p>
+                )}
                 {/*
                   Where the voice went, said once on the page that used to have
                   a dropdown for it. Not a name, because this page has no way to
@@ -819,7 +882,12 @@ export default function Teach() {
               <button
                 type="button"
                 onClick={() => void publish()}
-                disabled={publishing || !questions.length || !styles.length}
+                disabled={
+                  publishing ||
+                  !questions.length ||
+                  !styles.length ||
+                  (faces.length > 0 && !faceId)
+                }
                 className="flex items-center gap-2 rounded-3xl bg-lingo-accent px-7 py-3 font-lingo-brand text-lg text-lingo-paper shadow-lingo-pop transition-colors hover:bg-lingo-accent-deep active:translate-y-px disabled:opacity-40"
               >
                 {publishing && <Loader2 size={18} className="animate-spin" />}

@@ -141,6 +141,38 @@ export default function ReportPanel({ report, usd }: Props) {
         </section>
       )}
 
+      {/*
+        Here for the tuner rather than for the learner, and it is the one
+        section of this panel that reads the *tutor*. "Ask for the longer
+        answer" is an instruction in lessonBlock, and whether a style actually
+        produces reaching is otherwise invisible: a run of `played-safe` across
+        several learners is the prompt failing, not the class. `landed` is shown
+        because a style that produces ambitious wrong sentences is working and
+        one that produces none is not.
+      */}
+      {report.ambition && (
+        <section className="space-y-1.5">
+          <Heading>Reach</Heading>
+          <p className="text-sm text-slate-300">
+            <span className="font-mono text-xs uppercase tracking-wide text-sky-300">
+              {report.ambition.verdict}
+            </span>
+            <span className="text-slate-500"> — {report.ambition.note}</span>
+          </p>
+          {report.ambition.reaches.map((reach, index) => (
+            <div key={index} className="text-sm">
+              <p>
+                <Quote>{reach.quote}</Quote>
+                <span className={reach.landed ? 'text-emerald-400' : 'text-amber-400'}>
+                  {reach.landed ? ' ✓' : ' ✗'}
+                </span>
+              </p>
+              <p className="text-xs text-slate-500">{reach.reach}</p>
+            </div>
+          ))}
+        </section>
+      )}
+
       {report.errorPatterns.length > 0 && (
         <section className="space-y-2.5">
           <Heading>What to fix</Heading>

@@ -4,6 +4,7 @@ import DiagnosticsPanel from './DiagnosticsPanel';
 import Filmstrip from './Filmstrip';
 import MotionPreview from './MotionPreview';
 import PersonaPanel from './PersonaPanel';
+import { bundledId, inlineKit, loadBundledKit } from './bundled';
 import {
   composite,
   dataUrlToBlob,
@@ -414,6 +415,8 @@ export default function FaceKit() {
   const [saving, setSaving] = useState(false);
   /** Which library face is being fetched, if one is. Its id, so the strip can say so. */
   const [opening, setOpening] = useState<string | null>(null);
+  /** Whether the shipped face is on its way into the library. See `seed`. */
+  const [seeding, setSeeding] = useState(false);
 
   const refreshLibrary = useCallback(() => {
     listPublished()
@@ -422,6 +425,78 @@ export default function FaceKit() {
   }, []);
 
   useEffect(refreshLibrary, [refreshLibrary]);
+
+  /**
+   * Folds one entry into the listing, newest first.
+   *
+   * The entry handed back by a write is the authority — the far side just wrote
+   * it — so this is what both writers do instead of re-listing to be told what
+   * they already know.
+   */
+  const remember = useCallback((face: PublishedFace) => {
+    setPublished((current) =>
+      [face, ...current.filter((other) => other.id !== face.id)].sort(
+        (a, b) => b.createdAt - a.createdAt,
+      ),
+    );
+  }, []);
+
+  /**
+   * Whether the shipped face has already been imported.
+   *
+   * By id rather than by name, because the name is editable the moment the face
+   * is an ordinary library entry and somebody will rename it. `bundledId` is
+   * what makes this askable without fetching the manifest first.
+   */
+  const seeded = published.some((face) => face.id === bundledId());
+
+  /**
+   * Puts the face checked into public/faces/ in the library, once.
+   *
+   * WHY THIS BUTTON EXISTS. The shipped face was the one kit with a second
+   * home. Every other face lives in the bucket and nowhere else — saving is
+   * publishing, and that is what makes a face something a teacher can see,
+   * name, give a voice to and hand out. The shipped one lived in the repo, so
+   * it appeared in pickers as a tile with no picture and no persona: /teach
+   * offered it as "Default", pre-selected, and the ordinary path — write the
+   * questions, press Publish — handed a class a face the teacher had never
+   * looked at, speaking in whatever voice the provider felt like. Importing it
+   * makes it an ordinary face, and then there is no special case anywhere.
+   *
+   * It is deliberately not automatic. A seed that ran on load would rewrite an
+   * administrator's edits every time faceKit was opened — the id is stable, so
+   * publishing replaces — which is the one thing this must never do. The button
+   * only appears while the library holds no copy, and after that the face is
+   * reached like any other: through the strip below.
+   *
+   * Shown rather than a draft. It is what /teach fell back to a moment ago, so
+   * importing it should not take the deployment's only face out of the pickers
+   * that were already offering it. The persona is the part that still wants an
+   * administrator, and it is written where every other face's is — open it and
+   * fill in the panel.
+   */
+  const seed = async () => {
+    setError(null);
+    setSeeding(true);
+    try {
+      const shipped = await loadBundledKit();
+      if (!shipped) {
+        setError('This deployment ships no face in public/faces/, so there is nothing to import.');
+        return;
+      }
+      // `hasOriginal: false` is the truth rather than a shortcut. A bundled kit
+      // carries no portrait — `base` has already been neutralised — and calling
+      // it the original would make "start again from the original" a press that
+      // looks like it worked and changed nothing.
+      remember(await publishKit(await inlineKit(shipped), { ready: true, hasOriginal: false }));
+    } catch (cause) {
+      setError(
+        cause instanceof Error ? cause.message : 'The shipped face could not be imported',
+      );
+    } finally {
+      setSeeding(false);
+    }
+  };
 
   /**
    * Opens a library face for editing, on a browser that need not have authored it.
@@ -921,11 +996,7 @@ export default function FaceKit() {
         ready,
         hasOriginal: entry?.hasOriginal === true,
       });
-      setPublished((current) =>
-        [face, ...current.filter((other) => other.id !== face.id)].sort(
-          (a, b) => b.createdAt - a.createdAt,
-        ),
-      );
+      remember(face);
       setDirty(false);
       return true;
     } catch (cause) {
@@ -1596,7 +1667,7 @@ export default function FaceKit() {
           </>
         )}
 
-        {published.length > 0 && (
+        {(published.length > 0 || !seeded) && (
           <section className="space-y-2 border-t border-slate-800 pt-4">
             <h2 className="text-sm font-medium text-slate-300">Shared library</h2>
             <p className="max-w-prose text-xs text-slate-500">
@@ -1605,6 +1676,38 @@ export default function FaceKit() {
               on a laptop that never authored it. A face stays a draft, and out of
               studio&apos;s picker, until you show it.
             </p>
+
+            {/*
+              Only while the library has no copy. Pressing it twice would
+              overwrite whatever an administrator had since edited into the
+              shipped face — the id is stable, so a second import replaces —
+              and the honest guard against that is to stop offering it. See
+              `seed`.
+            */}
+            {!seeded && (
+              <div className="flex flex-wrap items-center gap-3 rounded-lg border border-slate-800 bg-slate-900/40 px-3 py-2.5">
+                <button
+                  type="button"
+                  onClick={() => void seed()}
+                  disabled={seeding}
+                  title="Copies public/faces/ into the library, where it becomes an ordinary face"
+                  className="rounded-lg border border-sky-800 px-3 py-1.5 text-sm text-sky-300 hover:border-sky-600 disabled:cursor-wait disabled:opacity-50"
+                >
+                  {seeding ? 'Importing…' : 'Import the shipped face'}
+                </button>
+                <p className="max-w-prose text-xs text-slate-500">
+                  The face checked into <code>public/faces/</code> is the only kit that is
+                  not in here, which is why pickers have had to offer it as an unnamed
+                  &ldquo;default&rdquo; tile with no persona behind it. Import it once and it
+                  becomes an ordinary face: visible in the strip, openable, and able to carry
+                  a voice and a biography like the rest. Nothing else changes — it is the
+                  same artwork, and it stays checked in as the fallback for a browser that
+                  can reach no library at all.
+                </p>
+              </div>
+            )}
+
+            {published.length > 0 && (
             <ul className="flex flex-wrap gap-3">
               {published.map((face) => {
                 const draft = face.ready === false;
@@ -1711,6 +1814,7 @@ export default function FaceKit() {
                 );
               })}
             </ul>
+            )}
           </section>
         )}
 

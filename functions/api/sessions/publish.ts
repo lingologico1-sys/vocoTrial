@@ -12,7 +12,7 @@ import {
   MAX_QUESTIONS,
   MAX_TARGETS,
   lessonBlock,
-  minutesOf,
+  capMinutesOf,
   type VocoSession,
 } from '../../../src/realtime/vocoSessions';
 import { kitKey } from '../../../src/facekit/published';
@@ -184,17 +184,21 @@ export async function onRequestPost(
 
   /*
    * Clamped here rather than trusted, the rule every id on this route follows.
-   * A hand-written POST asking for a four-hour lesson gets ten minutes, and one
-   * asking for zero gets the floor — `minutesOf` is the single place that
-   * decides, so the prose the tutor reads and the clock the student page runs
-   * cannot disagree about how long this is.
+   * A hand-written POST asking for a four-hour lesson gets MAX_CAP_MINUTES, and
+   * one asking for zero gets the floor — `capMinutesOf` is the single place
+   * that decides.
+   *
+   * It is NOT passed to `lessonBlock`, and that is deliberate rather than an
+   * oversight left over from the rename: the cap is the student page's alone,
+   * and a tutor told a length paces to fill it. See vocoSessions.ts above
+   * `MIN_CAP_MINUTES`. The composed prompt below therefore contains no number
+   * of minutes anywhere, which is the property to preserve when editing it.
    */
-  const lengthMinutes = minutesOf(incoming);
+  const capMinutes = capMinutesOf(incoming);
 
   const instructions = `${withPersona(style.text, persona)}${lessonBlock({
     questions,
     targets,
-    lengthMinutes,
   })}`;
 
   /*
@@ -266,7 +270,7 @@ export async function onRequestPost(
     brief: typeof incoming.brief === 'string' ? incoming.brief : '',
     targets,
     questions,
-    lengthMinutes,
+    capMinutes,
     vocoSessionId: typeof incoming.id === 'string' ? incoming.id : undefined,
     vocoSessionName: typeof incoming.name === 'string' ? incoming.name : undefined,
   };

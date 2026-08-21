@@ -4,7 +4,7 @@ import {
   MAX_QUESTIONS,
   MAX_TARGETS,
   MAX_VOCO_SESSION,
-  minutesOf,
+  capMinutesOf,
   type VocoSession,
   looksLikeVocoSession,
 } from '../../../src/realtime/vocoSessions';
@@ -106,7 +106,12 @@ export async function onRequestPost(
     // Clamped rather than carried, unlike the ids above it. Those name things
     // in other libraries and are resolved where they are spent; this one is a
     // number with a range, and the range is knowable here.
-    lengthMinutes: minutesOf(incoming),
+    //
+    // Written as `capMinutes` whatever arrived. `capMinutesOf` reads a legacy
+    // `lengthMinutes` off rows that predate the cap, so re-saving one migrates
+    // it — and the old key is simply not copied forward, which is how it
+    // drains. See vocoSessions.ts.
+    capMinutes: capMinutesOf(incoming),
     updatedAt: Date.now(),
   };
 
