@@ -30,10 +30,10 @@ import { SETTING_FIELDS, fieldsFor, type SessionSettings } from '../realtime/set
  * asking the same question twice is a question turn followed by one of three
  * different things: an `interrupted`, meaning its first asking was talked over
  * and never heard; a learner turn that came back empty, meaning nothing was
- * transcribed so the tutor never saw an answer; or an `answered` line repeating
- * a number already past, meaning the tutor believes it is further down the list
- * than it is. Three bugs, three fixes, and the transcript alone cannot tell
- * them apart.
+ * transcribed so the tutor never saw an answer; or a `complete` line, meaning
+ * the tutor called its tool and was restarted into a turn it had already
+ * spoken. Three bugs, three fixes, and the transcript alone cannot tell them
+ * apart.
  *
  * NOTHING IS REDACTED, INCLUDING THE PROMPT. This is taken deliberately, by a
  * gesture nobody finds by accident, for the person who published the lesson —
@@ -71,7 +71,7 @@ export interface DiagnosticInput {
   events: CallEvent[];
   connectedAt: number | null;
   lastCallMs: number | null;
-  answered: number;
+  complete: boolean;
 
   // --- What the page made of all of it.
   /** The cap the page is running, in minutes. Null when no setup is open. */
@@ -358,9 +358,10 @@ export function buildDiagnostic(input: DiagnosticInput): string {
   );
   put(
     field(
-      'Questions done',
-      `${input.answered} of ${setup?.questions?.length ?? 0}` +
-        " — the tutor's own claim through its tool, and a floor rather than a count",
+      'List finished',
+      input.complete
+        ? `yes — the tutor said so through its tool, once, at the end of ${setup?.questions?.length ?? 0}`
+        : `not reported — the tutor has not said it reached the end of ${setup?.questions?.length ?? 0}`,
     ),
   );
   put(field('Page says done', input.lessonDone ? 'yes — a closing note is due or sent' : 'no'));

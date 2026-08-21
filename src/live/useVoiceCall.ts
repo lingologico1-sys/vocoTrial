@@ -75,7 +75,7 @@ export interface Turn {
  * Everything a call does that is not words.
  *
  * WHY A TRANSCRIPT IS NOT ENOUGH. The turns say what was said; they cannot say
- * that the tutor's tool reported question three twice, that the learner talked
+ * that the tutor's tool reported the list finished twice, that the learner talked
  * over the answer, that the page injected a closing note, or that the socket
  * dropped and came back. Every one of those produces a conversation that reads
  * oddly on the page and reads as nothing at all in the transcript — so the
@@ -97,8 +97,8 @@ export interface CallEvent {
     | 'status'
     /** The page said something to the tutor as the learner. See `say`. */
     | 'note'
-    /** The tutor's tool reported a question done. Raw, repeats included. */
-    | 'answered'
+    /** The tutor's tool reported the question list finished. Repeats included. */
+    | 'complete'
     /** The learner talked over the tutor and unheard words were dropped. */
     | 'interrupted'
     /** Something asked for the call to stop, and said why. */
@@ -203,19 +203,22 @@ export interface VoiceCall {
   /** How long the call that just ended ran, in ms. Null before the first one. */
   lastCallMs: number | null;
   /**
-   * How many of the lesson's questions the tutor says are done.
+   * Whether the tutor says it has reached the end of its question list.
    *
-   * A FLOOR, NOT A COUNT, and the page showing it must treat it as one. It is
-   * whatever the tutor has reported through its tool, and a model under-reports
-   * far more readily than it over-reports — so this only ever goes up, resets
-   * between calls, and is never the thing that decides whether a lesson was
-   * completed. The end-of-call report reads the transcript and is what knows.
+   * THE TUTOR'S CLAIM AND NOT A FACT. It is one tool call, made once, and a
+   * model can make it early or never make it at all — so this decides when the
+   * closing note goes out and nothing else. It is never the thing that decides
+   * whether a lesson was *done well*: the end-of-call report reads the whole
+   * transcript and is what knows.
    *
-   * Zero when there is no lesson, which is also zero when there is one and the
-   * tutor has not got anywhere yet. Nothing downstream needs to tell those
-   * apart: a page with no questions does not draw a counter.
+   * It used to be a count, ticking up question by question, which is what drew
+   * the countdown on the consigne. That cost the learner every question being
+   * asked twice — see COMPLETE_TOOL in vocoSessions.ts for the whole account.
+   *
+   * Latches true for the rest of the call and resets between calls, so a
+   * repeated call cannot un-finish a lesson.
    */
-  answered: number;
+  complete: boolean;
   /**
    * What happened, in order, for the diagnostic to print beside the turns.
    *
@@ -280,7 +283,7 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
   const [tap, setTap] = useState<AudioTap | null>(null);
   const [connectedAt, setConnectedAt] = useState<number | null>(null);
   const [lastCallMs, setLastCallMs] = useState<number | null>(null);
-  const [answered, setAnswered] = useState(0);
+  const [complete, setComplete] = useState(false);
   const [events, setEvents] = useState<CallEvent[]>([]);
 
   /**
@@ -302,14 +305,14 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
   }, []);
 
   /**
-   * `answered` as a plain value, for the two readers that cannot wait a render.
+   * `complete` as a plain value, for the reader that cannot wait a render.
    *
-   * The log line has to say whether a reported number moved the count forward
-   * or repeated one already past, and that comparison needs the value as it is
-   * *now* — state would be a render behind, and reading it inside the updater
-   * would put the logging side effect somewhere StrictMode runs twice.
+   * The log line has to say whether this is the first report or a repeat, and
+   * that comparison needs the value as it is *now* — state would be a render
+   * behind, and reading it inside the updater would put the logging side effect
+   * somewhere StrictMode runs twice.
    */
-  const answeredFar = useRef(0);
+  const completed = useRef(false);
 
   /**
    * The last thing that happened worth leaning at.
@@ -559,43 +562,31 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
         queue.current.discard();
       },
       /*
-       * Monotonic, and deliberately not a tally of calls received.
+       * Latching, and logged raw so a repeat is visible.
        *
-       * The tutor reports a question's *number*, so the highest number seen is
-       * the honest reading of how far down the list it has got — a repeated
-       * call does not double-count, and one arriving out of order cannot make
-       * the counter go backwards under a learner who is watching it. A tutor
-       * that skips question three and reports four has, as far as anyone
-       * watching a countdown is concerned, dealt with four of them.
+       * The prompt asks for exactly one call and a prompt is not a guarantee, so
+       * a second one must not un-finish anything — but it must still show up in
+       * the account, because a tutor calling this twice is a tutor that has lost
+       * its place, and that is worth seeing in a diagnostic.
        */
-      onQuestionAnswered: (number: number) => {
-        /*
-         * Logged raw, and that is the point of logging it here rather than
-         * reading the counter afterwards. `Math.max` is what makes the number
-         * safe to show and is also what destroys the evidence: a tutor that
-         * reports question three, wanders off and reports it again produces a
-         * count that never moved and a lesson that feels like it is being
-         * asked twice. The account keeps both reports; the counter keeps the
-         * floor.
-         */
-        const far = answeredFar.current;
+      onLessonComplete: () => {
         record(
-          'answered',
-          number > far
-            ? `question ${number} reported done`
-            : `question ${number} reported done again — the count was already at ${far}`,
+          'complete',
+          completed.current
+            ? 'list reported finished again — it was already finished'
+            : 'list reported finished',
         );
-        answeredFar.current = Math.max(far, number);
-        setAnswered(answeredFar.current);
+        completed.current = true;
+        setComplete(true);
       },
     };
 
     try {
       lastActivity.current = Date.now();
       // A new call is a new pass down the list. Reset here rather than on hang
-      // up, so the count stays readable on the summary of the call that ended.
-      answeredFar.current = 0;
-      setAnswered(0);
+      // up, so the state stays readable on the summary of the call that ended.
+      completed.current = false;
+      setComplete(false);
       const { modelKey, language: code, instructions, settings } = latest.current;
       const started = await startGeminiSession(handlers, modelKey, code, {
         instructions,
@@ -651,7 +642,7 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
     busy: status === 'connecting',
     connectedAt,
     lastCallMs,
-    answered,
+    complete,
     events,
     connect,
     hangUp,

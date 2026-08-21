@@ -80,19 +80,23 @@ export interface SessionHandlers {
    */
   onUsage?: (usage: UsageTotals) => void;
   /**
-   * The tutor reported that one of its numbered questions is done.
+   * The tutor reported that it has reached the end of its question list.
    *
-   * One-based, matching the list the tutor was given. The only structured thing
-   * a call ever says about its own progress — see _setup.ts on why it is a tool
-   * rather than something read out of the transcript.
+   * The only structured thing a call ever says about its own progress, and it
+   * says it once — see _setup.ts on why it is a tool rather than something read
+   * out of the transcript, and COMPLETE_TOOL in vocoSessions.ts on why there is
+   * one signal at the end rather than one per question.
    *
-   * TREAT IT AS A FLOOR AND NOT A COUNT. A model under-reports far more often
-   * than it over-reports, and it may report out of order or twice. Whatever
-   * consumes this should move forward and never backward, and should not
-   * present the number as authoritative — the end-of-call report reads the
-   * whole transcript and is what actually knows.
+   * THE TUTOR'S CLAIM AND NOT A FACT. A model can reach this early, on a
+   * question the learner deflected, or never reach it at all. What follows from
+   * it is when the closing note goes out, and nothing else; the cap is
+   * underneath for the calls where it never arrives, and the end-of-call report
+   * reads the whole transcript and is what actually knows.
+   *
+   * May fire more than once — the prompt asks for a single call, and a prompt
+   * is not a guarantee. Consumers should be idempotent.
    */
-  onQuestionAnswered?: (number: number) => void;
+  onLessonComplete?: () => void;
 }
 
 /**

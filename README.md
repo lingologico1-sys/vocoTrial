@@ -281,26 +281,30 @@ reverse or constrain what a model would do left alone:
   preferred — and never about grammar, which the tutor may not name out loud.
   It pairs with `ambition` in the report: an ask with no reward attached is one
   nobody repeats.
-- **Progress comes back through a tool, and now ends the call.**
-  `questionAnswered(n)` is the only structured channel this app has into a live
+- **The end of the list comes back through a tool, and ends the call.**
+  `lessonComplete()` is the only structured channel this app has into a live
   call, declared in the setup frame the relay composes. Nothing else could carry
   it: the transcript is untyped text, and a spoken marker is one the tutor
   eventually says out loud.
 
-  Promoting a soft counter to a terminator is the one real risk here, and it is
-  designed around rather than trusted away. The count never goes backwards; the
-  cap ends any call the tool forgets about; and the report reads the transcript
-  and stays the authority on what was covered. The prompt names both errors —
-  reporting early ends a lesson on a question nobody answered, withholding
-  leaves the learner talking past the end of their own — because the incentive
-  flipped with the bound: when finishing the list ends the session, the shortest
-  path to done is accepting one-word answers and marching.
+  Promoting a soft signal to a terminator is the one real risk here, and it is
+  designed around rather than trusted away. The cap ends any call the tool
+  forgets about, and the report reads the transcript and stays the authority on
+  what was covered. The prompt names both errors — calling early ends a lesson
+  on a question nobody answered, withholding leaves the learner talking past the
+  end of their own — because the incentive flipped with the bound: when
+  finishing the list ends the session, the shortest path to done is accepting
+  one-word answers and marching.
 
-**The countdown is a floor, not a count.** A model under-reports far more
-readily than it over-reports, so `answered` only ever moves forward, the
-student page shows what is *left* rather than a score, and the end-of-call
-report — which reads the whole transcript — is the authority on what was really
-covered.
+**One call, at the end, because Vertex leaves no other option.** This was
+`questionAnswered(n)`, called per question, driving a live countdown on the
+student's consigne. On Vertex every tool call is blocking, and answering one
+restarts the model into a fresh turn on top of the turn it just spoke — so the
+learner heard each question twice, and the second telling wandered off the list
+looking for something to say. Two diagnostics put the correlation at fourteen
+out of fourteen. `behavior: 'NON_BLOCKING'` is the documented fix and is a
+Gemini Developer API feature: Vertex ignores it, and the doubling did not move
+when it was tried. The countdown went; the tutor stopped repeating itself.
 
 At either ending the tutor is told to close and the page hangs up
 `CLOSING_GRACE_MS` later, so the conversation ends on a goodbye rather than
@@ -816,7 +820,7 @@ npm run lint
 | `/api/voco-sessions/*` | **untested since the rename** — the read side accepts both the old `sheets` field and the new `sessions` one, and the first save rewrites the object under the new one |
 | `/api/sessions/publish`, composing the prompt server-side | **untested** — the three-layer composition (style → persona → lesson), the code mint-and-retry, and the house profile merge all need a browser and the buckets |
 | `/eleve` code entry | **untested** — the `?token=` path and the typed path share one function, but neither has been run |
-| `questionAnswered` tool calls | **untested, and the least certain thing here** — the declaration, the `toolResponse` handshake and the countdown all typecheck and build, but whether the model calls it reliably mid-conversation can only be found out on a real call. Under-reporting is designed around; silence is not |
+| `lessonComplete` tool call | **partly tested** — the per-question ancestor was run twice on real calls and the model called it readily, so the handshake and the plumbing are proven. What is untested is the single end-of-list call: whether a model asked for one call at the bottom of the list makes it as willingly as it made five along the way. Silence here means the call runs to the cap |
 | The lesson's two closes | **untested** — `capMinutesOf` clamping is verified (`99 → 30`, `NaN → 15`, `3 → 5`, legacy `lengthMinutes` read through), and the prompt renders with no number of minutes in it, but both signal round trips need a real call. The one to watch is whether the tutor stops cleanly when the list ends rather than reaching for a new subject |
 | Gemini handshake | **working** — 2.5 native audio on Vertex, 3.1 Flash Live on AI Studio |
 | Gemini audio in a browser | untested; needs a mic |

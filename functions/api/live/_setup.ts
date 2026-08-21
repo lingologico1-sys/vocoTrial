@@ -19,55 +19,45 @@
  */
 
 import type { SessionSettings } from '../../../src/realtime/settings';
-import { ANSWERED_TOOL } from '../../../src/realtime/vocoSessions';
+import { COMPLETE_TOOL } from '../../../src/realtime/vocoSessions';
 
 /**
  * The one tool a tutor has, and the only structured channel into a live call.
  *
- * WHY A TOOL AND NOT THE TRANSCRIPT. The student page shows how many questions
- * are left, and nothing else could tell it. The transcript is untyped text, so
- * counting from it means guessing; a spoken marker is a marker the tutor
+ * WHY A TOOL AND NOT THE TRANSCRIPT. The student page has to know when the
+ * lesson is over, and nothing else could tell it. The transcript is untyped
+ * text, so reading it means guessing; a spoken marker is a marker the tutor
  * eventually says out loud. A function call is the only thing the model can
  * emit that is addressed to the program rather than to the learner.
  *
  * DECLARED ON EVERY CALL, including the ones with no lesson. The alternative is
  * plumbing a question count from the browser through _resolve.ts to here, to
  * save a few dozen tokens on the minority of calls that are the workshop trying
- * a voice. A tutor with no question list has nothing to report and never calls
+ * a voice. A tutor with no question list has no list to finish and never calls
  * it.
  *
- * INTEGER, NOT STRING, and required. A model handed an optional argument omits
- * it, and a model handed a string sends "the second one".
+ * NO ARGUMENTS, AND CALLED ONCE. It used to take the number of the question
+ * just finished and be called all through the lesson; that is what made the
+ * tutor repeat itself, because on Vertex every tool call is blocking and being
+ * unblocked is a fresh turn spoken on top of the last one. COMPLETE_TOOL in
+ * src/realtime/vocoSessions.ts carries the evidence and what it cost to change.
+ * An argument would only invite the model to call it early to report progress,
+ * which is the habit being removed.
  *
- * NON_BLOCKING, AND THAT IS THE WHOLE POINT OF IT. A tool declared the default
- * way is blocking: the model stops generating when it calls one and waits for
- * the result, and the result arriving is what starts it up again. For a tool
- * whose result is genuinely wanted that is the correct trade. This one's result
- * is `{ ok: true }` — the model has nothing to learn from it, and the restart it
- * buys is a fresh turn generated on top of a turn already spoken. That is what
- * made the tutor ask the same question twice: it said "qu'est-ce qui te met de
- * si bonne humeur ?", reported the question done, and was handed a reason to
- * speak again, so it said it a second time and ran on into the next question.
- * Non-blocking means the call never pauses generation, so nothing has to be
- * restarted and there is no second turn to collide with the first. See the
- * matching `scheduling: 'SILENT'` on the response in src/realtime/gemini.ts —
- * the two halves only work together, and either one alone still doubles.
+ * NO `behavior: 'NON_BLOCKING'`, WHICH WOULD BE THE OBVIOUS FIX AND DOES NOT
+ * WORK HERE. It is a Gemini Developer API feature. Vertex — which is the
+ * surface this model is served from, see models.ts — does not implement it:
+ * Google's own SDK refuses the field with "behavior parameter is not supported
+ * in Vertex AI", and the raw socket used here quietly ignores it instead, which
+ * is worse, because it looks like a fix and changes nothing. It was tried, it
+ * was measured, and the doubling did not move. Do not add it back without
+ * moving the model to the AI Studio surface first.
  */
-const ANSWERED_DECLARATION = {
-  name: ANSWERED_TOOL,
-  behavior: 'NON_BLOCKING',
+const COMPLETE_DECLARATION = {
+  name: COMPLETE_TOOL,
   description:
-    'Record that one of the numbered questions in the system instructions has been answered by the learner and discussed. Bookkeeping only: it is never spoken about and produces no reply to read out.',
-  parameters: {
-    type: 'OBJECT',
-    properties: {
-      number: {
-        type: 'INTEGER',
-        description: "The question's position in the list, counting from 1.",
-      },
-    },
-    required: ['number'],
-  },
+    'Record that the last question in the system instructions has now been answered by the learner and discussed, so the whole list is finished. Call once per conversation, at the end. Bookkeeping only: it is never spoken about and produces no reply to read out.',
+  parameters: { type: 'OBJECT', properties: {} },
 };
 
 /** Drops undefined entries so an object literal can be built conditionally. */
@@ -119,7 +109,7 @@ export function geminiSetup(
       speechConfig,
     }),
     systemInstruction: { parts: [{ text: instructions }] },
-    tools: [{ functionDeclarations: [ANSWERED_DECLARATION] }],
+    tools: [{ functionDeclarations: [COMPLETE_DECLARATION] }],
     inputAudioTranscription: {},
     outputAudioTranscription: {},
     ...compact({

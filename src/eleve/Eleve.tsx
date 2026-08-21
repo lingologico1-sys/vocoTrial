@@ -60,22 +60,35 @@ import type { VocabItem } from './vocab';
 const CLOSING_GRACE_MS = 45_000;
 
 /**
- * How long the closing note will wait for a gap before going anyway.
+ * The beat the closing note waits before it will even look for a gap.
+ *
+ * Answering the completion tool restarts the model into a turn it was not going
+ * to take, and nothing on this side can stop that — see COMPLETE_TOOL in
+ * vocoSessions.ts. That turn is the last thing the learner hears before the
+ * goodbye, and it takes about half a second to start.
+ *
+ * Which is the problem this constant solves. The tutor reports the list
+ * finished just after the learner has stopped talking, so at that exact moment
+ * nobody is speaking — `speaking` is false, the gap test passes, and the note
+ * goes out straight into the turn that is about to begin and cuts it off. Two
+ * seconds is long enough for that turn to have started and be visible as
+ * speech, and short enough that nobody is left waiting on a goodbye.
+ */
+const CLOSING_SETTLE_MIN_MS = 2_000;
+
+/**
+ * How long the closing note will then wait for a gap before going anyway.
  *
  * The note is sent as `clientContent`, and clientContent arriving while the
- * tutor is mid-sentence interrupts it — the learner hears the answer to their
- * last question stop dead, and then a goodbye. The completion note is the one
- * most exposed to this, because what makes the lesson complete is the tutor
- * reporting the final question, which it does *while* talking about the answer
- * it has just been given. Sent on that tick it cuts off the sentence that
- * earned it.
+ * tutor is mid-sentence interrupts it — the learner hears the sentence stop
+ * dead, and then a goodbye. So the note waits for the tutor to stop speaking.
  *
- * So the note waits for the tutor to stop speaking. This is the ceiling on that
- * wait, and it exists because `speaking` is a claim about an audio queue: a
- * dropped socket or a stalled player leaves it true with nothing coming, and a
- * lesson that has finished must still be allowed to end. Twelve seconds is
- * longer than the turns this tutor takes — the diagnostic's were three to six —
- * and short enough that waiting through a stuck flag is not a hang.
+ * This is the ceiling on that wait, and it exists because `speaking` is a claim
+ * about an audio queue: a dropped socket or a stalled player leaves it true
+ * with nothing coming, and a lesson that has finished must still be allowed to
+ * end. Twelve seconds is longer than the turns this tutor takes — the
+ * diagnostics' were three to seven — and short enough that waiting through a
+ * stuck flag is not a hang.
  *
  * Only the completion note waits. The cap is a cost bound, and a call held past
  * it by a tutor that will not stop talking is the thing the cap is for.
@@ -379,18 +392,20 @@ export default function Eleve() {
    * Whether the tutor says it has been through the whole list.
    *
    * THE TUTOR'S CLAIM AND NOT A FACT, which is why it is named for what it is.
-   * `answered` is a tool count the model volunteers — see `onQuestionAnswered`
-   * in useVoiceCall — and it under-reports more readily than it over-reports.
-   * What follows from it here is when the call hangs up, and nothing else: the
-   * report reads the transcript afterwards and is the authority on what was
-   * actually covered.
+   * `complete` is one tool call the model volunteers — see `onLessonComplete`
+   * in useVoiceCall — and it can come early, or never come at all. What follows
+   * from it here is when the call hangs up, and nothing else: the report reads
+   * the transcript afterwards and is the authority on what was actually
+   * covered.
    *
    * Absent questions means no lesson — a setup published before there were any,
    * or a bench call — and such a conversation can never complete. It runs to the
-   * cap, which is what it did before this existed.
+   * cap, which is what it did before this existed. The tutor is given no list to
+   * finish on those calls and so has nothing to report, but the guard stays: a
+   * stray call to the tool must not end a conversation that had no lesson in it.
    */
   const total = session?.questions?.length ?? 0;
-  const lessonDone = total > 0 && call.answered >= total;
+  const lessonDone = total > 0 && call.complete;
 
   /**
    * The two ways a lesson ends, and the close each one triggers.
@@ -438,13 +453,18 @@ export default function Eleve() {
       if (lessonDone) {
         if (doneSince.current === null) doneSince.current = Date.now();
         /*
-         * Held until the tutor stops talking, because the note interrupts.
-         * The tutor reports the last question in the middle of discussing the
-         * answer to it, so this moment is almost always mid-sentence — and the
-         * sentence being cut off is one the learner is owed. See
-         * CLOSING_SETTLE_MS for why the wait has a ceiling at all.
+         * Held, in two stages, because the note interrupts whatever is being
+         * said when it lands and there is always something about to be said.
+         *
+         * First a fixed beat, so the turn that answering the tool provokes has
+         * time to start; then until the tutor is actually quiet, with a ceiling
+         * on the waiting. Both halves are needed: without the beat the gap test
+         * passes in the silence right before that turn begins, and without the
+         * gap test the note lands in the middle of it. See CLOSING_SETTLE_MIN_MS.
          */
-        if (call.speaking && Date.now() - doneSince.current < CLOSING_SETTLE_MS) return;
+        const waited = Date.now() - doneSince.current;
+        if (waited < CLOSING_SETTLE_MIN_MS) return;
+        if (call.speaking && waited < CLOSING_SETTLE_MS) return;
         closedAt.current = Date.now();
         // Labelled, because the two closes are indistinguishable in a log
         // otherwise — both notes open on the same sixty characters of marker,
@@ -758,7 +778,7 @@ export default function Eleve() {
                 ) : (
                   <>
                     {consigne && session && (
-                      <ConsignePanel session={session} answered={call.answered} />
+                      <ConsignePanel session={session} complete={call.complete} />
                     )}
                     <EvaluationGate
                       live={call.live}
@@ -812,7 +832,7 @@ export default function Eleve() {
             events: call.events,
             connectedAt: call.connectedAt,
             lastCallMs: call.lastCallMs,
-            answered: call.answered,
+            complete: call.complete,
             capMinutes: session ? capMinutesOf(session) : null,
             lessonDone,
             report,

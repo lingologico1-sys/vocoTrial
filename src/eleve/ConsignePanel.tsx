@@ -31,24 +31,25 @@ import { FR } from './strings';
 interface ConsignePanelProps {
   session: PublishedSetup;
   /**
-   * How many questions the tutor says are done. See `answered` in useVoiceCall.
+   * Whether the tutor says the whole list is finished. See `complete` in
+   * useVoiceCall.
    *
-   * A FLOOR AND NOT A SCORE, which decides how it is drawn. The tutor reports
-   * this through a tool and under-reports more readily than it over-reports, so
-   * the panel shows what is *left to do* rather than what has been achieved —
-   * a number that lags reads as "still to come", where a lagging score reads as
-   * a learner being marked down for work they have done.
+   * A LINE AND NOT A COUNTDOWN, and not by choice. This used to be a number
+   * ticking down question by question, which needed the tutor to report each
+   * one through a tool — and on Vertex every tool call makes the tutor say its
+   * turn twice. The countdown was costing the learner a repeated question
+   * apiece, so it went. See COMPLETE_TOOL in vocoSessions.ts.
+   *
+   * What is left says the list is done, once, at the end. The numbered list
+   * below is what a student who has lost their place reads in the meantime, and
+   * it was always the more useful half.
    */
-  answered?: number;
+  complete?: boolean;
 }
 
-export default function ConsignePanel({ session, answered }: ConsignePanelProps) {
+export default function ConsignePanel({ session, complete }: ConsignePanelProps) {
   const questions = session.questions ?? [];
   if (!questions.length) return null;
-
-  // Clamped, because the tutor reports a question's number and a model that
-  // miscounts its own list can name one past the end of it.
-  const left = Math.max(0, questions.length - Math.min(answered ?? 0, questions.length));
 
   const brief = session.brief?.trim();
 
@@ -72,17 +73,13 @@ export default function ConsignePanel({ session, answered }: ConsignePanelProps)
       */}
       <ol className="space-y-2">
         {/*
-          Only while there is something to count. Before a call it would be a
-          countdown at full, which says nothing, and the list underneath already
-          says how many there are.
+          Only once the tutor says so. There is nothing to draw before that: the
+          list underneath already says how many there are, and a tutor part-way
+          down it has no way to tell this panel where it has got to.
         */}
-        {typeof answered === 'number' && answered > 0 && (
+        {complete && (
           <p className="mb-2 text-xs font-semibold text-lingo-accent-deep">
-            {left > 0
-              ? left === 1
-                ? FR.questionsLeftOne
-                : FR.questionsLeftMany.replace('{n}', String(left))
-              : `${FR.questionsAllDone} · ${FR.questionsKeepTalking}`}
+            {`${FR.questionsAllDone} · ${FR.questionsKeepTalking}`}
           </p>
         )}
         {questions.map((question, index) => (

@@ -2,7 +2,7 @@ import { MicCapture, PcmPlayer, decodeBase64, encodeBase64 } from './audio';
 import { addUsage, emptyUsage, totalTokens, type UsageTotals } from './cost';
 import { UnauthorizedError, checkSession, reportExpired } from './auth';
 import type { SessionConfig, SessionHandlers, VoiceSession } from './types';
-import { ANSWERED_TOOL } from './vocoSessions';
+import { COMPLETE_TOOL } from './vocoSessions';
 
 /**
  * Gemini Live, through our own Worker.
@@ -257,11 +257,16 @@ export async function startGeminiSession(
        * Tool calls, answered first and interpreted second.
        *
        * The response goes back whatever happens — an unknown tool name, a
-       * missing argument, a handler that throws — because a blocking call
-       * leaves the model waiting until it arrives. The one tool we declare is
-       * non-blocking and so is not waiting on anything, but the ordering is
-       * kept: it costs nothing, and it is what would save a future blocking
-       * tool from a tutor that goes quiet mid-lesson.
+       * handler that throws — because on Vertex every call is blocking and the
+       * model is stopped until it arrives. A tutor silently going quiet
+       * mid-lesson is a far worse failure than a miscounted lesson, and this is
+       * the ordering that makes the second one impossible to cause.
+       *
+       * Sending it does restart the model into a fresh turn, and nothing here
+       * can prevent that — `scheduling: 'SILENT'` is the field for it and Vertex
+       * does not implement it. That restart is why the one tool left is called
+       * once, at the end, where the turn it produces is followed by the closing
+       * note anyway. See COMPLETE_TOOL in vocoSessions.ts.
        */
       if (message.toolCall?.functionCalls?.length) {
         const calls = message.toolCall.functionCalls;
@@ -272,35 +277,17 @@ export async function startGeminiSession(
                 functionResponses: calls.map((call) => ({
                   id: call.id,
                   name: call.name,
-                  /*
-                   * Acknowledged, with nothing to say and no invitation to say
-                   * it. The tutor is told in the prompt that this produces no
-                   * reply to read out; an object with prose in it is prose a
-                   * model will sometimes speak.
-                   *
-                   * `scheduling` rides inside `response` rather than beside it
-                   * — Google's own samples put it there, and placed as a
-                   * sibling it is simply ignored, which fails silently as a
-                   * tutor that still repeats itself. SILENT is the value that
-                   * means "fold this into the context and generate nothing for
-                   * it": the alternatives are WHEN_IDLE, which speaks once the
-                   * current turn ends, and INTERRUPT, which speaks over it.
-                   * Both of those are the bug. It only applies to a tool
-                   * declared NON_BLOCKING — see ANSWERED_DECLARATION in
-                   * functions/api/live/_setup.ts, which is the other half.
-                   */
-                  response: { ok: true, scheduling: 'SILENT' },
+                  // Acknowledged, with nothing to say. The tutor is told in the
+                  // prompt that this produces no reply to read out; an object
+                  // with prose in it is prose a model will sometimes speak.
+                  response: { ok: true },
                 })),
               },
             }),
           );
         }
 
-        for (const call of calls) {
-          if (call.name !== ANSWERED_TOOL) continue;
-          const number = Number(call.args?.number);
-          if (Number.isFinite(number)) handlers.onQuestionAnswered?.(Math.trunc(number));
-        }
+        if (calls.some((call) => call.name === COMPLETE_TOOL)) handlers.onLessonComplete?.();
         return;
       }
 

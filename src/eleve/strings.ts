@@ -44,13 +44,13 @@ export const FR = {
    */
   consigneNoBrief: 'Réponds à ces questions en parlant avec ton tuteur.',
   /*
-   * THE COUNTDOWN COUNTS DOWN, not up. "Il te reste 3 questions" is a thing to
-   * finish; "3 sur 8 répondues" is a score, and a learner mid-conversation who
-   * reads a score reads it as a mark. Same number, and only one of them is
-   * about the lesson rather than about them.
+   * THERE WAS A COUNTDOWN HERE — "Il te reste 3 questions", counting down
+   * rather than up, because a learner mid-conversation who reads "3 sur 8" is
+   * reading a mark. It is gone, and not for a better idea: it needed the tutor
+   * to report each question through a tool, and on Vertex a tool call makes the
+   * tutor say its turn twice. See COMPLETE_TOOL in vocoSessions.ts. Restoring
+   * the wording is easy; restoring the number it needs is not.
    */
-  questionsLeftOne: 'Il te reste 1 question',
-  questionsLeftMany: 'Il te reste {n} questions',
   questionsAllDone: 'Tu as répondu à toutes les questions',
   /*
    * Said once the list is done, and it now says the opposite of what it used to.

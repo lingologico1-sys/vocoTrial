@@ -274,8 +274,33 @@ export function capLooksTight(questionCount: number, capMinutes: number): boolea
   return questionCount > 0 && capMinutes < questionCount * MINUTES_A_QUESTION;
 }
 
-/** The tool the tutor reports progress through. See `lessonBlock`. */
-export const ANSWERED_TOOL = 'questionAnswered';
+/**
+ * The tool the tutor ends the lesson through. See `lessonBlock`.
+ *
+ * ONE CALL, AT THE END, AND THAT IS FORCED ON US. This was `questionAnswered`,
+ * called once per question with its number, which drove a live countdown on the
+ * student's consigne. It cost the lesson far more than it bought.
+ *
+ * Vertex does not support non-blocking tools — Google's own SDK raises
+ * `ValueError: behavior parameter is not supported in Vertex AI`, and the raw
+ * socket we use simply ignores the field instead. So every tool call on this
+ * surface is blocking: the model stops generating, waits for the result, and
+ * the result arriving starts it up again — as a fresh turn, on top of the turn
+ * it had already spoken. The learner heard the question twice, and the second
+ * telling, having nothing new to say, wandered off the list for a subject.
+ *
+ * Two diagnostics ran the correlation to fourteen out of fourteen: every turn
+ * that followed a tool call was doubled, every turn that did not was single.
+ * Nothing on the client can suppress the resume, so the only fix left is to
+ * stop calling tools while the lesson is being taught.
+ *
+ * WHAT IT COSTS. The countdown no longer ticks — the consigne learns the lesson
+ * is over at the same moment the tutor does. And a single call is all-or-
+ * nothing where a stream of them was self-correcting: a missed number used to
+ * be repaired by the next one, and a missed `lessonComplete` is a lesson that
+ * runs to the cap instead. That is the cap's job and it is why it stays.
+ */
+export const COMPLETE_TOOL = 'lessonComplete';
 
 /**
  * How anything this app has to say reaches a conversation it is not part of.
@@ -636,21 +661,25 @@ There are two of these closing notes, and they close differently.
 
 Either way, that closing turn is the one turn that does not end with a question.
 
-REPORTING PROGRESS
-Call the \`${ANSWERED_TOOL}\` tool with a question's number as soon as that
-question has been dealt with — the learner has answered it in at least a full
-sentence and you have talked about their answer. One call per question, in the
-order they are listed.
+SAYING WHEN THE LIST IS DONE
+Call the \`${COMPLETE_TOOL}\` tool once, and only once, at the moment the last
+question on the list has been dealt with — the learner has answered it in at
+least a full sentence and you have talked about their answer, the same standard
+as every other question. Call it for no other reason. There is nothing to
+report along the way and no tool to report it with: work down the list, and
+reach for this only at the bottom of it.
 
 THIS IS WHAT ENDS THE CONVERSATION, so it has to be honest in both directions.
-Do not call it for a question you have only just asked, for one the learner
-deflected, or for one they plainly did not understand: a number sent early ends
-the lesson on a question nobody answered. Do not withhold it either — a question
-genuinely dealt with and never reported leaves the learner talking on past the
-end of their own lesson. If you are unsure whether a question has been answered
-well enough, ask one more follow-up about it and then report it.
+Do not call it while any question is still outstanding, nor for a last question
+you have only just asked, one the learner deflected, or one they plainly did not
+understand: called early it ends the lesson on a question nobody answered.
+Do not withhold it either — a list genuinely finished and never reported leaves
+the learner talking on past the end of their own lesson. If you are unsure
+whether the last question has been answered well enough, ask one more follow-up
+about it and then call it.
 
-This is bookkeeping and not conversation. Never mention the tool, never read a
-number out loud, never tell the learner how many questions are left, and carry
-straight on talking after the call.${targets}`;
+This is bookkeeping and not conversation. Never mention the tool, never say that
+you are finishing, never tell the learner how many questions are left, and carry
+straight on talking after the call — the note described under HOW THIS ENDS is
+what tells you to close, and it has not arrived yet.${targets}`;
 }
