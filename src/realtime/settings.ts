@@ -93,22 +93,83 @@ export type SettingField = FieldBase &
 const isNativeAudio = (model: ModelChoice) => model.key === 'gemini-native-audio';
 
 /**
- * NO speechConfig.languageCode, ON EITHER MODEL
+ * Whether this model takes `speechConfig.languageCode`.
  *
- * It is a real field and the half-cascade model does accept it, so its absence
- * is a decision rather than an oversight. Two reasons:
+ * IT USED TO BE SENT ON NEITHER, and the note that stood here explained why:
+ * native audio does not accept the field at all, and languages.ts stored
+ * ISO-639-1 where the API wants BCP-47 with a region, which cannot be derived
+ * — `fr` -> `fr-FR` is right a dozen times and wrong for en, pt, zh, ar and
+ * hi, and a guessed region fails at connect.
  *
- *  - The native-audio model does not accept it at all; Google documents those
- *    models as choosing the language from the conversation. A knob that breaks
- *    one of the two models offered here is not a knob worth having.
- *  - It takes BCP-47 with a region ("fr-FR"), and languages.ts stores ISO-639-1
- *    ("fr"). There is no safe derivation: the obvious `fr` -> `fr-FR` doubling
- *    is right for a dozen entries and wrong for en, zh, ar, hi, pt and more.
- *    Guessing a region code produces a call that fails at connect.
+ * Both halves have been answered rather than argued away. The second is a
+ * `liveCode` on the language, filled in only where Google publishes a
+ * spelling and left blank everywhere else, so nothing is ever guessed. The
+ * first is this function: the half-cascade model takes the field, native audio
+ * does not, and a knob that breaks one of two models is fine as long as it is
+ * never handed to that one.
  *
- * Adding it properly means a `bcp47` field on every LanguageChoice, checked
- * against Google's supported list. Worth doing; not worth guessing.
+ * WHAT IT BUYS is the transcript rather than the speech. Half-cascade audio
+ * goes through a real ASR stage, and an ASR stage told which language it is
+ * listening to stops writing Arabic script into French. See `liveCode` in
+ * languages.ts for the run that made the case.
  */
+export const acceptsLanguageCode = (model: ModelChoice): boolean => !isNativeAudio(model);
+
+/**
+ * How long the tutor waits before deciding the learner has finished.
+ *
+ * A TEACHER'S WORD FOR TWO PROVIDER KNOBS. `endSensitivity` and
+ * `silenceDurationMs` are the two settings that decide whether a learner
+ * pausing mid-clause to assemble the rest of it gets answered over, and they
+ * are exactly the sort of thing /teach must not put in front of a teacher as
+ * milliseconds. So the lesson carries one of these words and the publish route
+ * spends it. See `patience` on VocoSession.
+ *
+ * STANDARD SENDS NOTHING, which is not the same as sending a value that happens
+ * to match the default — the distinction SessionSettings is built around. It is
+ * what every lesson published before this control existed did, and it is what
+ * they go on doing.
+ *
+ * THE NUMBERS ARE A FIRST GUESS AND SHOULD BE TUNED BY EAR. Google publishes no
+ * default for `silenceDurationMs`, so there is nothing to reason from — these
+ * are the settings panel's own range (200–4000ms) at two points that sounded
+ * right for a beginner and a very hesitant beginner. The panel in studio is
+ * where a better pair gets found.
+ */
+export type Patience = 'standard' | 'patient' | 'very-patient';
+
+export const PATIENCE: Array<{
+  key: Patience;
+  label: string;
+  hint: string;
+  settings: Pick<SessionSettings, 'endSensitivity' | 'silenceDurationMs'>;
+}> = [
+  {
+    key: 'standard',
+    label: 'Standard',
+    hint: "Google's own endpointing. What every lesson used before this control existed.",
+    settings: {},
+  },
+  {
+    key: 'patient',
+    label: 'Patient',
+    hint: 'Waits about a second longer. The setting for a class that pauses mid-sentence.',
+    settings: { endSensitivity: 'END_SENSITIVITY_LOW', silenceDurationMs: 1200 },
+  },
+  {
+    key: 'very-patient',
+    label: 'Very patient',
+    hint: 'Waits two seconds. Beginners assembling a sentence a word at a time.',
+    settings: { endSensitivity: 'END_SENSITIVITY_LOW', silenceDurationMs: 2200 },
+  },
+];
+
+/** The turn-taking a lesson's patience asks for. Unknown reads as standard. */
+export function patienceSettings(
+  patience: string | undefined,
+): Pick<SessionSettings, 'endSensitivity' | 'silenceDurationMs'> {
+  return (PATIENCE.find((entry) => entry.key === patience) ?? PATIENCE[0]).settings;
+}
 
 /**
  * Gemini's prebuilt Live voices. The full catalogue is longer for the

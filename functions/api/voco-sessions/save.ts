@@ -8,6 +8,8 @@ import {
   type VocoSession,
   looksLikeVocoSession,
 } from '../../../src/realtime/vocoSessions';
+import { PATIENCE } from '../../../src/realtime/settings';
+import type { Patience } from '../../../src/realtime/settings';
 import { type VocoSessionEnv, readVocoSessions, writeVocoSessions } from './_library';
 
 /**
@@ -91,6 +93,14 @@ export async function onRequestPost(
   }
 
   const isText = (value: unknown) => typeof value === 'string';
+  /*
+   * Checked against the table rather than merely carried, unlike the ids above
+   * it. Those name things in libraries this route cannot read, so carrying them
+   * is the only option; this one is a closed vocabulary that lives in a file
+   * this route already imports. An unrecognised word is dropped, and an absent
+   * patience is spent as 'standard' — see patienceSettings.
+   */
+  const isPatience = (value: unknown) => PATIENCE.some((entry) => entry.key === value);
 
   const session: VocoSession = {
     id: incoming.id,
@@ -103,6 +113,7 @@ export async function onRequestPost(
     styleId: carried<string>(incoming.styleId, isText),
     faceId: incoming.faceId === null ? null : carried<string>(incoming.faceId, isText),
     evaluatorId: carried<string>(incoming.evaluatorId, isText),
+    patience: carried<Patience>(incoming.patience, isPatience),
     // Clamped rather than carried, unlike the ids above it. Those name things
     // in other libraries and are resolved where they are spent; this one is a
     // number with a range, and the range is knowable here.

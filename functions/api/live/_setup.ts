@@ -18,47 +18,58 @@
  * SessionSettings for why that distinction is load-bearing.
  */
 
-import type { SessionSettings } from '../../../src/realtime/settings';
-import { COMPLETE_TOOL } from '../../../src/realtime/vocoSessions';
+import { acceptsLanguageCode, type SessionSettings } from '../../../src/realtime/settings';
+import type { LanguageChoice } from '../../../src/realtime/languages';
+import type { ModelChoice } from '../../../src/realtime/models';
+import { PROGRESS_TOOL } from '../../../src/realtime/tutorPrompt';
 
 /**
  * The one tool a tutor has, and the only structured channel into a live call.
  *
- * WHY A TOOL AND NOT THE TRANSCRIPT. The student page has to know when the
- * lesson is over, and nothing else could tell it. The transcript is untyped
- * text, so reading it means guessing; a spoken marker is a marker the tutor
- * eventually says out loud. A function call is the only thing the model can
- * emit that is addressed to the program rather than to the learner.
+ * WHY A TOOL AND NOT THE TRANSCRIPT, and why one call per question rather than
+ * one at the end: see PROGRESS_TOOL in tutorPrompt.ts, beside the prompt that
+ * tells the model this exists.
+ *
+ * THE DESCRIPTION CARRIES THE STANDARD, and that is deliberate placement rather
+ * than convenience. "Answered in a full sentence and talked about" used to be a
+ * rule in the prompt, held for the whole call and applied at the moment a
+ * question ended; a model three questions in had stopped applying it. Here it
+ * is read at the moment the model is deciding whether to call, which is the
+ * only moment it decides anything.
  *
  * DECLARED ON EVERY CALL, including the ones with no lesson. The alternative is
  * plumbing a question count from the browser through _resolve.ts to here, to
  * save a few dozen tokens on the minority of calls that are the workshop trying
- * a voice. A tutor with no question list has no list to finish and never calls
- * it.
+ * a voice. A tutor with no question list has no list to report against.
  *
- * NO ARGUMENTS, AND CALLED ONCE. It used to take the number of the question
- * just finished and be called all through the lesson; that is what made the
- * tutor repeat itself, because on Vertex every tool call is blocking and being
- * unblocked is a fresh turn spoken on top of the last one. COMPLETE_TOOL in
- * src/realtime/vocoSessions.ts carries the evidence and what it cost to change.
- * An argument would only invite the model to call it early to report progress,
- * which is the habit being removed.
- *
- * NO `behavior: 'NON_BLOCKING'`, WHICH WOULD BE THE OBVIOUS FIX AND DOES NOT
- * WORK HERE. It is a Gemini Developer API feature. Vertex — which is the
- * surface this model is served from, see models.ts — does not implement it:
- * Google's own SDK refuses the field with "behavior parameter is not supported
- * in Vertex AI", and the raw socket used here quietly ignores it instead, which
- * is worse, because it looks like a fix and changes nothing. It was tried, it
- * was measured, and the doubling did not move. Do not add it back without
- * moving the model to the AI Studio surface first.
+ * NON-BLOCKING, AND ONLY WHERE THAT MEANS ANYTHING. Without it the model stops
+ * generating until the result arrives, and being unblocked is a fresh turn
+ * spoken on top of the one it had already spoken — fourteen doubled turns out
+ * of fourteen tool calls, when this was measured. It is a Gemini Developer API
+ * feature: AI Studio implements it, Vertex does not, and Vertex does not refuse
+ * the field either — it ignores it, which is worse, because it looks like a fix
+ * and changes nothing. So it is sent to the surface that honours it and not to
+ * the one that would lie about it, and the student page runs on the former.
+ * See models.ts, where the surface travels with the model.
  */
-const COMPLETE_DECLARATION = {
-  name: COMPLETE_TOOL,
-  description:
-    'Record that the last question in the system instructions has now been answered by the learner and discussed, so the whole list is finished. Call once per conversation, at the end. Bookkeeping only: it is never spoken about and produces no reply to read out.',
-  parameters: { type: 'OBJECT', properties: {} },
-};
+function progressDeclaration(model: ModelChoice) {
+  return {
+    name: PROGRESS_TOOL,
+    description:
+      "Record that one question from the system instructions is finished: the learner has answered it in at least a full sentence and you have talked about their answer. Pass that question's number in the list, counting from 1, and call this once per question as you go. Bookkeeping only: it is never spoken about and produces no reply to read out.",
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        number: {
+          type: 'INTEGER',
+          description: 'Which question in the list has been answered, counting from 1.',
+        },
+      },
+      required: ['number'],
+    },
+    ...(model.surface === 'aistudio' ? { behavior: 'NON_BLOCKING' } : {}),
+  };
+}
 
 /** Drops undefined entries so an object literal can be built conditionally. */
 function compact<T extends Record<string, unknown>>(object: T): Partial<T> {
@@ -76,22 +87,42 @@ function present(object: Record<string, unknown>): boolean {
  * Builds the `setup` frame for Gemini Live.
  *
  * The model arrives as a full resource name, not a bare id: on Vertex that is
- * `publishers/google/models/<id>`, and the relay builds it from the allowlisted
- * choice (see _vertex.ts). Resolving the name upstream keeps the one field that
- * decides which meter is spent out of reach of both this file and the browser,
- * which is the same reason the key is attached by the relay rather than here.
+ * `publishers/google/models/<id>`, and on AI Studio `models/<id>`. The relay
+ * builds it from the allowlisted choice (see _vertex.ts and _aistudio.ts).
+ * Resolving the name upstream keeps the one field that decides which meter is
+ * spent out of reach of both this file and the browser, which is the same
+ * reason the key is attached by the relay rather than here.
  *
- * No speechConfig.languageCode is sent, on either model — settings.ts explains
- * at length why that field is absent rather than forgotten.
+ * THE CHOICE ITSELF IS PASSED IN ALONGSIDE THE PATH, because two fields below
+ * now depend on which model this is rather than on what the caller asked for: a
+ * tool behaviour one surface implements, and a language code one model accepts.
+ * Both are facts about the model, so both are read from it.
  */
 export function geminiSetup(
+  model: ModelChoice,
   modelPath: string,
+  language: LanguageChoice,
   instructions: string,
   settings: SessionSettings,
 ): Record<string, unknown> {
-  const speechConfig = settings.voice
-    ? { voiceConfig: { prebuiltVoiceConfig: { voiceName: settings.voice } } }
-    : undefined;
+  /*
+   * The language, where the model takes one and the language has a spelling.
+   *
+   * Both halves are conditional and neither is guessed. Native audio takes no
+   * language code at all; a language whose BCP-47 spelling nobody has confirmed
+   * carries no `liveCode`, and an unconfirmed spelling is a call that fails at
+   * connect rather than one that mishears a word. Absent on either count means
+   * the field is not sent, which is what every call did before this existed.
+   * See languages.ts and acceptsLanguageCode in settings.ts.
+   */
+  const languageCode = acceptsLanguageCode(model) ? language.liveCode : undefined;
+
+  const speechConfig = compact({
+    voiceConfig: settings.voice
+      ? { prebuiltVoiceConfig: { voiceName: settings.voice } }
+      : undefined,
+    languageCode,
+  });
 
   const activityDetection = compact({
     startOfSpeechSensitivity: settings.startSensitivity,
@@ -106,10 +137,10 @@ export function geminiSetup(
       responseModalities: ['AUDIO'],
       temperature: settings.temperature,
       maxOutputTokens: settings.maxOutputTokens,
-      speechConfig,
+      speechConfig: present(speechConfig) ? speechConfig : undefined,
     }),
     systemInstruction: { parts: [{ text: instructions }] },
-    tools: [{ functionDeclarations: [COMPLETE_DECLARATION] }],
+    tools: [{ functionDeclarations: [progressDeclaration(model)] }],
     inputAudioTranscription: {},
     outputAudioTranscription: {},
     ...compact({

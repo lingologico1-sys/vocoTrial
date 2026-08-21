@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { startGeminiSession } from '../realtime/gemini';
 import type { SessionSettings } from '../realtime/settings';
-import { COMPLETE_TOOL } from '../realtime/vocoSessions';
+import { PROGRESS_TOOL } from '../realtime/tutorPrompt';
 import type {
   AudioTap,
   SessionStatus,
@@ -108,8 +108,15 @@ export interface CallEvent {
      * the gap between these two.
      */
     | 'tool'
-    /** The tutor's tool reported the question list finished. Repeats included. */
-    | 'complete'
+    /**
+     * The page's verdict on a progress report: taken, or refused and why.
+     *
+     * Every report gets one of these, including the refused ones — a tutor
+     * reporting a question the learner never answered is the failure this
+     * whole layer exists for, and it has to be visible as a line rather than
+     * as an absence.
+     */
+    | 'progress'
     /** The learner talked over the tutor and unheard words were dropped. */
     | 'interrupted'
     /** Something asked for the call to stop, and said why. */
@@ -179,6 +186,16 @@ export interface VoiceCallOptions {
   /** Voice and turn-taking. Absent fields are not sent — see settings.ts. */
   settings?: SessionSettings;
   /**
+   * How many questions this lesson has, if it is a lesson at all.
+   *
+   * What it buys is a bound on the tutor's own claims: a report for question 9
+   * of a list of 5 is not a lesson three-quarters done, it is a model that has
+   * lost its place, and without a total there is no way to say so. Absent means
+   * no lesson — a workshop call trying a voice — and every report is refused,
+   * because a conversation with no list cannot have got to the end of one.
+   */
+  questionCount?: number;
+  /**
    * How long everyone can be silent before the call is dropped.
    *
    * A page-level decision rather than a constant, because the same silence
@@ -214,22 +231,23 @@ export interface VoiceCall {
   /** How long the call that just ended ran, in ms. Null before the first one. */
   lastCallMs: number | null;
   /**
-   * Whether the tutor says it has reached the end of its question list.
+   * Which questions the page believes have been answered, in the order it came
+   * to believe it.
    *
-   * THE TUTOR'S CLAIM AND NOT A FACT. It is one tool call, made once, and a
-   * model can make it early or never make it at all — so this decides when the
-   * closing note goes out and nothing else. It is never the thing that decides
-   * whether a lesson was *done well*: the end-of-call report reads the whole
-   * transcript and is what knows.
+   * NOT WHAT THE TUTOR REPORTED. The tutor's reports arrive raw on
+   * `onQuestionDone` and are filtered here — see `acceptProgress`. This is
+   * what survived that, and it is what the page acts on: the consigne ticks
+   * these, and the lesson closes when there are as many of them as there are
+   * questions.
    *
-   * It used to be a count, ticking up question by question, which is what drew
-   * the countdown on the consigne. That cost the learner every question being
-   * asked twice — see COMPLETE_TOOL in vocoSessions.ts for the whole account.
+   * IT IS STILL NOT A FACT ABOUT THE LEARNING. It decides when the call hangs
+   * up and nothing else. Whether a question was answered *well* is read off the
+   * transcript afterwards by the end-of-call report, which is the authority on
+   * everything a teacher would care about.
    *
-   * Latches true for the rest of the call and resets between calls, so a
-   * repeated call cannot un-finish a lesson.
+   * Never shrinks during a call, and resets between calls.
    */
-  complete: boolean;
+  answered: number[];
   /**
    * What happened, in order, for the diagnostic to print beside the turns.
    *
@@ -312,7 +330,7 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
   const [tap, setTap] = useState<AudioTap | null>(null);
   const [connectedAt, setConnectedAt] = useState<number | null>(null);
   const [lastCallMs, setLastCallMs] = useState<number | null>(null);
-  const [complete, setComplete] = useState(false);
+  const [answered, setAnswered] = useState<number[]>([]);
   const [events, setEvents] = useState<CallEvent[]>([]);
 
   /**
@@ -333,15 +351,38 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
     });
   }, []);
 
-  /**
-   * `complete` as a plain value, for the reader that cannot wait a render.
+/**
+   * The accepted numbers as a plain value, for the reader that cannot wait a
+   * render.
    *
-   * The log line has to say whether this is the first report or a repeat, and
-   * that comparison needs the value as it is *now* — state would be a render
-   * behind, and reading it inside the updater would put the logging side effect
-   * somewhere StrictMode runs twice.
+   * Every decision below compares against what has been accepted *now* —
+   * whether this number is a repeat, whether the learner has spoken since the
+   * last one — and state is a render behind. Reading it inside an updater would
+   * put the deciding somewhere StrictMode runs twice, which is the same rule
+   * `record` and `toggleMute` follow.
    */
-  const completed = useRef(false);
+  const accepted = useRef<number[]>([]);
+
+  /**
+   * How many turns the learner has finished, and how many they had finished
+   * when the last report was believed.
+   *
+   * THE WHOLE GUARD, AND IT IS DELIBERATELY THIS CHEAP. A tutor is allowed to
+   * say a question is done; it is not allowed to say two are done without the
+   * learner having said anything in between. That one test is what the run this
+   * was written for would have failed: the report arrived on a one-word answer
+   * to question three with questions four and five never asked, and a page that
+   * had asked "has the learner spoken since?" would have refused the calls that
+   * followed it.
+   *
+   * It is not a test of whether the answer was any good, and nothing here
+   * should grow into one. Reading the text would mean the call layer deciding
+   * what a full sentence is in twenty-eight languages, on a transcript of a
+   * hesitant beginner — see the report for who is allowed to make that
+   * judgement, and on what evidence.
+   */
+  const learnerTurns = useRef(0);
+  const turnsAtLastAccept = useRef(0);
 
   /**
    * The last thing that happened worth leaning at.
@@ -425,6 +466,73 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
     });
   }, []);
 
+  /**
+   * What the page does with a progress report, which is mostly refuse it.
+   *
+   * THE MODEL REPORTS AND THE PAGE COUNTS. That division is the fix this file
+   * carries. A tutor used to make one claim that the lesson was over and the
+   * page acted on it unexamined, which is exactly as reliable as it sounds: the
+   * claim arrived after question three of five, on a one-word answer, and two
+   * questions were never asked. Nothing here can tell whether an answer was any
+   * good — but it can tell that nobody answered anything, and that is the
+   * failure that was actually happening.
+   *
+   * FOUR TESTS, ALL OF THEM CHEAP AND NONE OF THEM ABOUT LANGUAGE. Is there a
+   * list at all; is this a question on it; has it already been reported; has
+   * the learner spoken since the last one that was believed. A report that
+   * passes all four is believed, and a report that fails any of them is written
+   * into the account with the reason, because a refused report is evidence
+   * about the tutor and an invisible one is not.
+   *
+   * AN UNNUMBERED CALL IS STILL A REPORT. The tool declares `number` as
+   * required and a model will occasionally call it without one anyway. Refusing
+   * those would throw away a real signal over a missing field, so it is read as
+   * the next question not yet reported — which is what "in order" means, and is
+   * self-correcting in the same way the numbered reports are.
+   */
+  const acceptProgress = useCallback(
+    (reported: number | undefined) => {
+      const total = latest.current.questionCount ?? 0;
+      const seen = accepted.current;
+      const named = reported === undefined ? '(unnumbered)' : String(reported);
+      const refuse = (why: string) => record('progress', `question ${named} refused — ${why}`);
+
+      if (!total) {
+        refuse('this call has no question list');
+        return;
+      }
+
+      // The lowest question nobody has reported yet, for the unnumbered case.
+      let number = reported;
+      if (number === undefined) {
+        number = 1;
+        while (number <= total && seen.includes(number)) number += 1;
+      }
+
+      if (!Number.isInteger(number) || number < 1 || number > total) {
+        refuse(`there is no question ${number} on a list of ${total}`);
+        return;
+      }
+      if (seen.includes(number)) {
+        refuse('it was reported already');
+        return;
+      }
+      if (learnerTurns.current <= turnsAtLastAccept.current) {
+        refuse('the learner has not finished a turn since the last one was taken');
+        return;
+      }
+
+      seen.push(number);
+      turnsAtLastAccept.current = learnerTurns.current;
+      setAnswered([...seen]);
+      record(
+        'progress',
+        `question ${named} answered${reported === undefined ? ` — read as ${number}` : ''} — ${seen.length} of ${total}`,
+      );
+    },
+    [record],
+  );
+
   const onTranscript = useCallback(
     (delta: TranscriptDelta) => {
       lastActivity.current = Date.now();
@@ -432,6 +540,9 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
       // The user's own transcript lags their speech rather than leading it, so
       // there is nothing to hold it back for.
       if (delta.role === 'user') {
+        // A finished utterance, which is the unit the progress guard counts in.
+        // Partials arrive on the way to it and must not each count as a turn.
+        if (delta.done) learnerTurns.current += 1;
         append('user', delta.text, delta.done);
         return;
       }
@@ -595,7 +706,7 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
        * Every tool call, named, with what it carried and what became of it.
        *
        * THE ANNOTATION IS A CLAIM ABOUT THIS FILE AND NOT ABOUT THE DECLARATIONS.
-       * `COMPLETE_TOOL` is the one name anything here tests; everything else is
+       * `PROGRESS_TOOL` is the one name anything here tests; everything else is
        * answered on the socket and then dropped on the floor. So "not a tool
        * this page knows" is true by construction and stays true — a second tool
        * declared server-side and handled nowhere is still, accurately, one this
@@ -606,7 +717,9 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
        * WHY THE UNKNOWN CASE SHOUTS. It is the signature of a setup published
        * against an older protocol, and its symptom — the tutor asking every
        * question twice — looks exactly like a model ignoring its prompt. That
-       * cost a full diagnosis to find once. See PROMPT_COMPOSER_VERSION.
+       * cost a full diagnosis to find once — one of the reasons the prompt is
+       * composed at dial time now, where it cannot describe a protocol this
+       * build does not implement. See composeTutorPrompt.
        *
        * The arguments are printed because they are what tell two calls of the
        * same tool apart, which is the whole question when one is arriving after
@@ -617,8 +730,8 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
           args && Object.keys(args).length ? ` ${oneLine(JSON.stringify(args), 80)}` : '';
         record(
           'tool',
-          name === COMPLETE_TOOL
-            ? `${name}${carried} — the signal this page waits for`
+          name === PROGRESS_TOOL
+            ? `${name}${carried} — the signal this page counts`
             : `${name}${carried} — NOT A TOOL THIS PAGE KNOWS; answered on the socket, then ignored`,
         );
       },
@@ -629,32 +742,19 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
         record('interrupted', 'the learner talked over the tutor; unheard words were dropped');
         queue.current.discard();
       },
-      /*
-       * Latching, and logged raw so a repeat is visible.
-       *
-       * The prompt asks for exactly one call and a prompt is not a guarantee, so
-       * a second one must not un-finish anything — but it must still show up in
-       * the account, because a tutor calling this twice is a tutor that has lost
-       * its place, and that is worth seeing in a diagnostic.
-       */
-      onLessonComplete: () => {
-        record(
-          'complete',
-          completed.current
-            ? 'list reported finished again — it was already finished'
-            : 'list reported finished',
-        );
-        completed.current = true;
-        setComplete(true);
-      },
+      // Every report, unexamined, straight to the one place allowed to
+      // examine it. See `acceptProgress`.
+      onQuestionDone: acceptProgress,
     };
 
     try {
       lastActivity.current = Date.now();
       // A new call is a new pass down the list. Reset here rather than on hang
       // up, so the state stays readable on the summary of the call that ended.
-      completed.current = false;
-      setComplete(false);
+      accepted.current = [];
+      setAnswered([]);
+      learnerTurns.current = 0;
+      turnsAtLastAccept.current = 0;
       const { modelKey, language: code, instructions, settings } = latest.current;
       const started = await startGeminiSession(handlers, modelKey, code, {
         instructions,
@@ -670,7 +770,7 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
       setStatus('error');
       setDetail(error instanceof Error ? error.message : 'Could not start the session');
     }
-  }, [append, cue, onTranscript, record]);
+  }, [acceptProgress, append, cue, onTranscript, record]);
 
   const say = useCallback(
     (text: string, label?: string) => {
@@ -710,7 +810,7 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
     busy: status === 'connecting',
     connectedAt,
     lastCallMs,
-    complete,
+    answered,
     events,
     connect,
     hangUp,

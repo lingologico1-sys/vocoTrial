@@ -31,25 +31,25 @@ import { FR } from './strings';
 interface ConsignePanelProps {
   session: PublishedSetup;
   /**
-   * Whether the tutor says the whole list is finished. See `complete` in
-   * useVoiceCall.
+   * Which questions the page has counted as answered. See `answered` in
+   * useVoiceCall for why that is the page's count and not the tutor's claim.
    *
-   * A LINE AND NOT A COUNTDOWN, and not by choice. This used to be a number
-   * ticking down question by question, which needed the tutor to report each
-   * one through a tool — and on Vertex every tool call makes the tutor say its
-   * turn twice. The countdown was costing the learner a repeated question
-   * apiece, so it went. See COMPLETE_TOOL in vocoSessions.ts.
-   *
-   * What is left says the list is done, once, at the end. The numbered list
-   * below is what a student who has lost their place reads in the meantime, and
-   * it was always the more useful half.
+   * IT TICKS AGAIN, AND IT COULD NOT FOR A WHILE. This was a live count until
+   * per-question reporting had to be given up: on Vertex, answering any tool
+   * call restarts the model into a turn spoken on top of the last one, so the
+   * countdown was costing the learner a repeated question apiece. It came back
+   * with the move to a surface that implements non-blocking calls, and it is
+   * the half of this panel a learner who has lost their place actually reads.
    */
-  complete?: boolean;
+  answered?: number[];
 }
 
-export default function ConsignePanel({ session, complete }: ConsignePanelProps) {
+export default function ConsignePanel({ session, answered }: ConsignePanelProps) {
   const questions = session.questions ?? [];
   if (!questions.length) return null;
+
+  const done = new Set(answered ?? []);
+  const complete = done.size >= questions.length;
 
   const brief = session.brief?.trim();
 
@@ -73,26 +73,43 @@ export default function ConsignePanel({ session, complete }: ConsignePanelProps)
       */}
       <ol className="space-y-2">
         {/*
-          Only once the tutor says so. There is nothing to draw before that: the
-          list underneath already says how many there are, and a tutor part-way
-          down it has no way to tell this panel where it has got to.
+          Only when every question has been counted. Part-way through, the ticks
+          on the list below say where the conversation has got to, which is the
+          thing a student wants to know and this line never was.
         */}
         {complete && (
           <p className="mb-2 text-xs font-semibold text-lingo-accent-deep">
             {`${FR.questionsAllDone} · ${FR.questionsKeepTalking}`}
           </p>
         )}
-        {questions.map((question, index) => (
-          <li key={index} className="flex gap-2.5 text-sm leading-relaxed text-lingo-ink">
-            <span
-              aria-hidden="true"
-              className="shrink-0 font-lingo-mono text-xs font-semibold tabular-nums text-lingo-muted"
+        {questions.map((question, index) => {
+          /*
+            Answered questions dim rather than disappear or strike through. A
+            student rereads the one they are on and glances at the ones they
+            have done; a line through the text makes the second harder without
+            making the first easier, and removing them would leave a learner
+            who lost the thread with nothing to count against.
+          */
+          const answeredHere = done.has(index + 1);
+          return (
+            <li
+              key={index}
+              className={`flex gap-2.5 text-sm leading-relaxed transition-colors ${
+                answeredHere ? 'text-lingo-muted' : 'text-lingo-ink'
+              }`}
             >
-              {index + 1}.
-            </span>
-            <span className="min-w-0 flex-1">{question}</span>
-          </li>
-        ))}
+              <span
+                aria-hidden="true"
+                className={`shrink-0 font-lingo-mono text-xs font-semibold tabular-nums ${
+                  answeredHere ? 'text-lingo-accent' : 'text-lingo-muted'
+                }`}
+              >
+                {answeredHere ? '✓' : `${index + 1}.`}
+              </span>
+              <span className="min-w-0 flex-1">{question}</span>
+            </li>
+          );
+        })}
       </ol>
     </div>
   );

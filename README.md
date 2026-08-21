@@ -90,23 +90,35 @@ road faces and evaluators already took.
 ```
 
 **What goes out is not what comes back.** A publish sends ids and the lesson as
-the teacher typed it; the route composes the prompt, flattens the house profile
-in and mints the code. All of that needs buckets a teacher's browser has no
-business reading.
+the teacher typed it; the route resolves those ids against buckets a teacher's
+browser has no business reading, flattens the house profile in and mints the
+code. What it does **not** do any more is compose the prompt.
 
 ```
-tutor style  ─┐
-face persona ─┼─► instructions  (composed in the publish route)
-lesson block ─┘
-face persona ───► voice         (the other half of the same kit)
+tutor style  ─┐                        ┌─► style   ─┐
+face persona ─┼─► resolved at publish ─┼─► persona ─┼─► the prompt,
+lesson        ┘                        └─► lesson  ─┘   composed when
+                                                        the student dials
+face persona ───► voice                 (the other half of the same kit)
 ```
 
 Three things worth knowing about what is published:
 
-- **The prompt travels as rendered text, not as ids.** A style lives in the
-  house library and the persona is megabytes away in the face bucket. Composing
-  at publish also means editing either afterwards cannot change a conversation
-  already handed out.
+- **The pieces travel as text, not as ids — but the prompt is built at dial
+  time.** A style lives in the house library and the persona is megabytes away
+  in the face bucket, so both are copied into the setup at publish and editing
+  either afterwards cannot change a conversation already handed out. Composing
+  them, though, happens in the student's browser when the call starts.
+
+  That split is a fix rather than a refactor. A stored prompt froze an agreement
+  only one side of which could be frozen: the setup never changes and the build
+  that answers it ships every week, so a release that changed which tools a call
+  declares left every code handed out before it describing a protocol nothing
+  implemented — and the conversation went wrong in a way that read entirely as
+  the model misbehaving. `PROMPT_COMPOSER_VERSION`, the stale badges on
+  `/teach` and the "republish this one" row in the diagnostic all existed to
+  make that legible. They are gone, along with the fault. See
+  [src/realtime/tutorPrompt.ts](src/realtime/tutorPrompt.ts).
 - **Publishing is a snapshot.** The student gets the setup as it stood when the
   button was pressed. Publishing again mints a *new* code; the old one keeps
   working, because changing what a code resolves to after it has been read off a
@@ -175,8 +187,8 @@ the change removes, for three reasons that compound:
 - Nobody chose it. It existed because a clock had to be filled and only the
   tutor could fill it.
 
-`lessonBlock` now bans new subjects outright and says so as a rule with one
-written exemption for follow-ups, because a model asked merely to *prefer* the
+The prompt bans new subjects outright and names follow-ups beside the ban as
+the thing it does not cover, because a model asked merely to *prefer* the
 teacher's subjects drifts off them by the third turn.
 
 **The cap is a cost bound and nothing else.** The teacher sets 5–30 minutes,
@@ -196,8 +208,8 @@ clock used to make that trade-off visible by being the point of the control.
 **The tutor is never told the cap.** A model handed a length paces to fill it —
 told it has twenty minutes it will stretch eight questions across twenty rather
 than ask eight questions and stop — which is the floor coming back in prose
-through the back door. `lessonBlock` takes no minutes argument at all, which is
-what enforces it, and the composed prompt contains no number of minutes
+through the back door. `composeTutorPrompt` takes no minutes argument at all,
+which is what enforces it, and the composed prompt contains no number of minutes
 anywhere. What the tutor is told is that there is *no* length to fill, because a
 model that has worked out it is in a lesson will otherwise invent a schedule.
 
@@ -238,8 +250,12 @@ consigne back with no machinery of its own.
 
 ### How the tutor is steered, and what it reports back
 
-Six instructions in `lessonBlock` are worth knowing about, because most of them
-reverse or constrain what a model would do left alone:
+**The prompt is about 2,900 characters, down from 7,760.** The one it replaces argued
+with itself: nine headed sections, several justifying a rule to a reader who
+cannot be persuaded, and two describing bookkeeping the program is now
+responsible for. Where a rule can be checked in code — has this question been
+answered, has the lesson run too long — it is checked in code and not asked for.
+What survives is the part a model can act on:
 
 - **The tutor speaks first, and it takes a note to make that happen.** Live only
   ever answers — nothing is generated until something arrives — so a tutor told
@@ -281,30 +297,46 @@ reverse or constrain what a model would do left alone:
   preferred — and never about grammar, which the tutor may not name out loud.
   It pairs with `ambition` in the report: an ask with no reward attached is one
   nobody repeats.
-- **The end of the list comes back through a tool, and ends the call.**
-  `lessonComplete()` is the only structured channel this app has into a live
-  call, declared in the setup frame the relay composes. Nothing else could carry
-  it: the transcript is untyped text, and a spoken marker is one the tutor
-  eventually says out loud.
+- **Progress comes back through a tool, one call per question, and the page
+  counts them.** `questionDone(n)` is the only structured channel this app has
+  into a live call, declared in the setup frame the relay composes. Nothing else
+  could carry it: the transcript is untyped text, and a spoken marker is one the
+  tutor eventually says out loud.
 
-  Promoting a soft signal to a terminator is the one real risk here, and it is
-  designed around rather than trusted away. The cap ends any call the tool
-  forgets about, and the report reads the transcript and stays the authority on
-  what was covered. The prompt names both errors — calling early ends a lesson
-  on a question nobody answered, withholding leaves the learner talking past the
-  end of their own — because the incentive flipped with the bound: when
-  finishing the list ends the session, the shortest path to done is accepting
-  one-word answers and marching.
+  **The model reports and the page decides.** Every report is checked before it
+  is believed — is there a list, is this a question on it, was it reported
+  already, and has the learner finished a turn since the last one that was
+  taken. A report that fails any of those is written into the account with the
+  reason rather than silently dropped, because a tutor reporting a question
+  nobody answered is the failure this layer exists for. See `acceptProgress` in
+  [src/live/useVoiceCall.ts](src/live/useVoiceCall.ts).
 
-**One call, at the end, because Vertex leaves no other option.** This was
-`questionAnswered(n)`, called per question, driving a live countdown on the
-student's consigne. On Vertex every tool call is blocking, and answering one
-restarts the model into a fresh turn on top of the turn it just spoke — so the
-learner heard each question twice, and the second telling wandered off the list
-looking for something to say. Two diagnostics put the correlation at fourteen
-out of fourteen. `behavior: 'NON_BLOCKING'` is the documented fix and is a
-Gemini Developer API feature: Vertex ignores it, and the doubling did not move
-when it was tried. The countdown went; the tutor stopped repeating itself.
+  That last test is the whole of the guard, and it is deliberately that cheap.
+  It does not read the answer: judging whether a hesitant beginner's sentence
+  was good enough, in twenty-eight languages, off a transcript, is the report's
+  job and is made afterwards on the whole conversation. What the page can tell
+  is that nobody said anything, which is precisely what was going wrong.
+
+**One call per question, which is a reversal — and the model switch is what
+allows it.** This was `questionAnswered(n)` and had to become a single
+`lessonComplete()` at the end, because on Vertex every tool call is blocking:
+answering one restarts the model into a fresh turn on top of the turn it just
+spoke, so the learner heard each question twice and the second telling wandered
+off the list. Two diagnostics put that correlation at fourteen out of fourteen.
+`behavior: 'NON_BLOCKING'` is the documented fix and is a Gemini Developer API
+feature — Vertex ignores it in silence, which is worse than refusing it, because
+it looks like a fix and changes nothing.
+
+And a single unverifiable claim is what one turned out to cost. The run that
+prompted this rewrite ended a five-question lesson at question three: the tool
+arrived on a one-word answer, the page took it at face value, and the tutor
+signed off praising an answer to a question it had never asked. The learner
+could see the two unasked questions on their own screen.
+
+So the student page moved to the surface that implements the field — see the
+model note below — and the reporting moved back to one call per question, with
+the counting done where it can be checked. `scheduling: 'SILENT'` on the
+response is the other half, and is sent only to the surface that honours it.
 
 At either ending the tutor is told to close and the page hangs up
 `CLOSING_GRACE_MS` later, so the conversation ends on a goodbye rather than
@@ -460,9 +492,19 @@ surface is a property of each model in
 
 | model | surface | why |
 | --- | --- | --- |
-| `gemini-live-2.5-flash-native-audio` | Vertex (GCP billing) | GA there; the native-audio dialect |
-| `gemini-3.1-flash-live-preview` | AI Studio | **no Vertex build in any region** |
+| `gemini-3.1-flash-live-preview` | AI Studio | **no Vertex build in any region.** The default, and what every student lesson dials |
+| `gemini-live-2.5-flash-native-audio` | Vertex (GCP billing) | GA there; the native-audio dialect. Kept for comparison in studio |
 | `gemini-3-pro-image` (face kit) | Vertex | confirmed generating; on the **global** endpoint only |
+
+**The student page dials 3.1, and that is two properties of the surface rather
+than a preference.** A lesson counts its progress from tool calls made while it
+runs, which is only survivable where `NON_BLOCKING` is honoured. And `/eleve`
+shows the learner their own words, feeds them to a vocabulary list and marks
+them in a report — all from a transcript. A half-cascade model produces that
+through a real ASR stage which can be told the language; native audio
+transcribes its own input with no such stage, and wrote Arabic script into a
+French lesson where the learner had said *"oui"*. What 3.1 gives up is affective
+dialog and proactivity, which `settings.ts` already refuses it.
 
 Vertex runs in **express mode**, which is what makes it usable from a Worker at
 all: it takes an API key and infers the project, with no OAuth exchange to sign.
@@ -515,6 +557,8 @@ the key private at the cost of a latency leg and some billed Worker time.
 | [functions/api/_vertex.ts](functions/api/_vertex.ts) | Vertex host, key pair, region and express-mode model naming |
 | [functions/api/live/regions.ts](functions/api/live/regions.ts) | Asks every region which models it serves, and whether it has capacity — free, and the A/B behind the quota question |
 | [functions/api/_aistudio.ts](functions/api/_aistudio.ts) | The same three facts for AI Studio, for models Vertex has no build of |
+| [src/realtime/tutorPrompt.ts](src/realtime/tutorPrompt.ts) | Everything the tutor is told and everything the page says into a call: the composer, the tool name, the three system notes |
+| [scripts/probe.ts](scripts/probe.ts) | Runs a whole scripted lesson against the live model and asserts the protocol. `npm run probe` |
 | [src/realtime/instructions.ts](src/realtime/instructions.ts) | The five built-in prompts, and the default the server falls back to |
 | [src/realtime/presets.ts](src/realtime/presets.ts) | Those plus your saved ones, and the last-used pick. Browser only |
 | [src/realtime/settings.ts](src/realtime/settings.ts) | Which knobs exist, which models take them, and the sanitiser |
@@ -818,9 +862,10 @@ npm run lint
 | `/api/faces/*`, the shared library | **untested** — typechecks, lints and builds; the save → list → wear round trip, the save → get + original → edit → save one, and the `ready` flag reaching the face grid, all need a browser and a created bucket |
 | `/api/house/*`, tutor styles and the profile | **untested** — typechecks, lints and builds; needs a browser and `vocotrial-house` |
 | `/api/voco-sessions/*` | **untested since the rename** — the read side accepts both the old `sheets` field and the new `sessions` one, and the first save rewrites the object under the new one |
-| `/api/sessions/publish`, composing the prompt server-side | **untested** — the three-layer composition (style → persona → lesson), the code mint-and-retry, and the house profile merge all need a browser and the buckets |
+| `/api/sessions/publish`, storing the lesson as data | **untested** — the style and persona resolution, the code mint-and-retry, the house profile merge and the lesson's patience overriding it all need a browser and the buckets |
 | `/eleve` code entry | **untested** — the `?token=` path and the typed path share one function, but neither has been run |
-| `lessonComplete` tool call | **partly tested** — the per-question ancestor was run twice on real calls and the model called it readily, so the handshake and the plumbing are proven. What is untested is the single end-of-list call: whether a model asked for one call at the bottom of the list makes it as willingly as it made five along the way. Silence here means the call runs to the cap |
+| `questionDone` per question, and the page's guard | **untested against the model** — `npm run probe` exists to test exactly this and has never reached the API: the `GOOGLE_API_KEY` in `.dev.vars` is refused with `1007 API key not valid`. The prompt, the setup frame and the tool declaration are confirmed by `npm run probe -- --dry`; whether 3.1 calls the tool per question, whether `NON_BLOCKING` stops the doubling, and whether `scheduling: 'SILENT'` is honoured are all unmeasured |
+| `speechConfig.languageCode` on the half-cascade model | **untested** — `fr-FR` is now sent on 3.1 and not on native audio. Seventeen languages carry a `liveCode`; the other eleven are blank rather than guessed and send nothing, exactly as before. `npm run probe -- --languages` fills those in against the surface, and needs a working key |
 | The lesson's two closes | **untested** — `capMinutesOf` clamping is verified (`99 → 30`, `NaN → 15`, `3 → 5`, legacy `lengthMinutes` read through), and the prompt renders with no number of minutes in it, but both signal round trips need a real call. The one to watch is whether the tutor stops cleanly when the list ends rather than reaching for a new subject |
 | Gemini handshake | **working** — 2.5 native audio on Vertex, 3.1 Flash Live on AI Studio |
 | Gemini audio in a browser | untested; needs a mic |

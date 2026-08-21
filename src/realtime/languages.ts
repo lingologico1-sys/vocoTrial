@@ -17,6 +17,37 @@ export interface LanguageChoice {
   /** The language's own name for itself, which is what the picker shows. */
   endonym: string;
   /**
+   * How Google's Live API spells this language, where it publishes a spelling.
+   *
+   * ISO-639-1 is what this app stores and what a prompt is built from. The Live
+   * API's `speechConfig.languageCode` takes BCP-47 with a region, and there is
+   * no safe derivation between the two: the obvious `fr` -> `fr-FR` doubling
+   * is right for a dozen entries here and wrong for en, pt, zh, ar and hi,
+   * where a guessed region is a call that fails at connect rather than a call
+   * that mishears a word.
+   *
+   * ABSENT MEANS DO NOT SEND IT, which is what every language did before this
+   * field existed. That is why it is optional rather than filled in everywhere:
+   * a language whose spelling nobody has confirmed goes on working exactly as
+   * it does today, and the failure a wrong guess would cause never happens.
+   *
+   * ONLY THE HALF-CASCADE MODEL IS SENT ONE. Native audio takes no language
+   * code at all and picks the language up from the conversation. See
+   * `acceptsLanguageCode` in settings.ts, which is what decides.
+   *
+   * WHY IT IS WORTH SENDING AT ALL. A half-cascade model transcribes through a
+   * real ASR stage, and an ASR stage that has not been told the language is
+   * what put Arabic script into a French transcript where the learner had said
+   * "oui". The tutor hears audio and was unaffected; the speech bubble, the
+   * vocabulary list and the end-of-call report all read that text and were not.
+   *
+   * These are the entries Google's supported-languages table publishes for
+   * Live. The rest are blank rather than guessed — `npm run probe -- --languages`
+   * opens one setup per candidate and reports which the surface accepts, which
+   * is how this list is meant to grow.
+   */
+  liveCode?: string;
+  /**
    * A sample of well-formed text in the language.
    *
    * NOTHING READS THIS TODAY. It was handed to whisper-1 as `prompt`, which
@@ -59,6 +90,7 @@ export interface LanguageChoice {
 export const LANGUAGES: LanguageChoice[] = [
   {
     code: 'fr',
+    liveCode: 'fr-FR',
     label: 'French',
     endonym: 'Français',
     sample:
@@ -66,6 +98,7 @@ export const LANGUAGES: LanguageChoice[] = [
   },
   {
     code: 'es',
+    liveCode: 'es-ES',
     label: 'Spanish',
     endonym: 'Español',
     sample:
@@ -73,6 +106,7 @@ export const LANGUAGES: LanguageChoice[] = [
   },
   {
     code: 'de',
+    liveCode: 'de-DE',
     label: 'German',
     endonym: 'Deutsch',
     sample:
@@ -80,6 +114,7 @@ export const LANGUAGES: LanguageChoice[] = [
   },
   {
     code: 'it',
+    liveCode: 'it-IT',
     label: 'Italian',
     endonym: 'Italiano',
     sample:
@@ -87,6 +122,7 @@ export const LANGUAGES: LanguageChoice[] = [
   },
   {
     code: 'pt',
+    liveCode: 'pt-BR',
     label: 'Portuguese',
     endonym: 'Português',
     sample:
@@ -94,6 +130,7 @@ export const LANGUAGES: LanguageChoice[] = [
   },
   {
     code: 'nl',
+    liveCode: 'nl-NL',
     label: 'Dutch',
     endonym: 'Nederlands',
     sample:
@@ -129,6 +166,7 @@ export const LANGUAGES: LanguageChoice[] = [
   },
   {
     code: 'pl',
+    liveCode: 'pl-PL',
     label: 'Polish',
     endonym: 'Polski',
     sample:
@@ -143,6 +181,7 @@ export const LANGUAGES: LanguageChoice[] = [
   },
   {
     code: 'ru',
+    liveCode: 'ru-RU',
     label: 'Russian',
     endonym: 'Русский',
     sample:
@@ -180,6 +219,7 @@ export const LANGUAGES: LanguageChoice[] = [
   },
   {
     code: 'tr',
+    liveCode: 'tr-TR',
     label: 'Turkish',
     endonym: 'Türkçe',
     sample:
@@ -190,6 +230,7 @@ export const LANGUAGES: LanguageChoice[] = [
     // speaking Egyptian or Levantine will transcribe worse than this sample
     // suggests — the model has far less dialect audio behind it.
     code: 'ar',
+    liveCode: 'ar-XA',
     label: 'Arabic',
     endonym: 'العربية',
     sample: 'مرحباً، اسمي ليلى. اليوم أود أن أتحدث عن رحلتي إلى القاهرة، حيث كان الجو حاراً جداً.',
@@ -202,6 +243,7 @@ export const LANGUAGES: LanguageChoice[] = [
   },
   {
     code: 'hi',
+    liveCode: 'hi-IN',
     label: 'Hindi',
     endonym: 'हिन्दी',
     sample:
@@ -209,6 +251,7 @@ export const LANGUAGES: LanguageChoice[] = [
   },
   {
     code: 'id',
+    liveCode: 'id-ID',
     label: 'Indonesian',
     endonym: 'Bahasa Indonesia',
     sample:
@@ -216,6 +259,7 @@ export const LANGUAGES: LanguageChoice[] = [
   },
   {
     code: 'vi',
+    liveCode: 'vi-VN',
     label: 'Vietnamese',
     endonym: 'Tiếng Việt',
     sample:
@@ -223,6 +267,7 @@ export const LANGUAGES: LanguageChoice[] = [
   },
   {
     code: 'th',
+    liveCode: 'th-TH',
     label: 'Thai',
     endonym: 'ไทย',
     sample:
@@ -230,6 +275,7 @@ export const LANGUAGES: LanguageChoice[] = [
   },
   {
     code: 'ja',
+    liveCode: 'ja-JP',
     label: 'Japanese',
     endonym: '日本語',
     sample: 'こんにちは、田中と申します。今日は京都への旅行について話したいと思います。',
@@ -242,12 +288,14 @@ export const LANGUAGES: LanguageChoice[] = [
   },
   {
     code: 'ko',
+    liveCode: 'ko-KR',
     label: 'Korean',
     endonym: '한국어',
     sample: '안녕하세요, 저는 김민수입니다. 오늘은 제주도 여행에 대해 이야기하고 싶습니다.',
   },
   {
     code: 'en',
+    liveCode: 'en-US',
     label: 'English',
     endonym: 'English',
     sample:

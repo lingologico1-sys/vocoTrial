@@ -5,7 +5,8 @@ import { findModel } from '../realtime/models';
 import type { SessionReport } from '../realtime/report';
 import type { PublishedSetup } from '../realtime/session';
 import { SETTING_FIELDS, fieldsFor, type SessionSettings } from '../realtime/settings';
-import { PROMPT_COMPOSER_VERSION, promptIsStale } from '../realtime/vocoSessions';
+import { composeTutorPrompt } from '../realtime/tutorPrompt';
+import { defaultInstructions } from '../realtime/instructions';
 
 /**
  * One conversation, written out so it can be handed to somebody who was not in
@@ -31,11 +32,12 @@ import { PROMPT_COMPOSER_VERSION, promptIsStale } from '../realtime/vocoSessions
  * asking the same question twice is a question turn followed by one of four
  * different things: an `interrupted`, meaning its first asking was talked over
  * and never heard; a learner turn that came back empty, meaning nothing was
- * transcribed so the tutor never saw an answer; a `complete` line, meaning the
- * tutor called its tool and was restarted into a turn it had already spoken; or
- * a `tool` line naming something this build does not implement, which is the
- * same restart arriving from a prompt published before the tools changed. Four
- * bugs, four fixes, and the transcript alone cannot tell them apart.
+ * transcribed so the tutor never saw an answer; a `tool` line, meaning the
+ * tutor reported its progress and was restarted into a turn it had already
+ * spoken, which is what happens on a surface that ignores `NON_BLOCKING`; or a
+ * `progress` line saying a report was refused, meaning the tutor believes it is
+ * somewhere the page does not. Four bugs, four fixes, and the transcript alone
+ * cannot tell them apart.
  *
  * THE FOURTH ONE IS WHY THE `tool` LINES EXIST AT ALL. They were added after a
  * real conversation where the tutor repeated every question and drifted off the
@@ -81,7 +83,15 @@ export interface DiagnosticInput {
   events: CallEvent[];
   connectedAt: number | null;
   lastCallMs: number | null;
-  complete: boolean;
+  /**
+   * Which questions the page counted as answered, in the order it counted them.
+   *
+   * NOT WHAT THE TUTOR REPORTED — that is in the timeline, as `progress` lines,
+   * including the reports that were refused and why. Reading the two together
+   * is what separates a tutor that has lost its place from a learner who has
+   * gone quiet, and they used to be the same single fact. See useVoiceCall.
+   */
+  answered: number[];
 
   // --- What the page made of all of it.
   /** The cap the page is running, in minutes. Null when no setup is open. */
@@ -106,18 +116,6 @@ const GUTTER = 18;
 function field(name: string, value: string | number | null | undefined): string {
   const shown = value === null || value === undefined || value === '' ? '—' : String(value);
   return `${name.padEnd(GUTTER)}${shown}`;
-}
-
-/**
- * More lines under a field, indented to sit in its value column.
- *
- * For the handful of findings that need a sentence rather than a value. Putting
- * that sentence *in* the value would be one 200-character line in a document
- * whose every other line fits in eighty — which wraps wherever the reader's
- * window happens to end and stops looking like the same document.
- */
-function under(...lines: string[]): string[] {
-  return lines.map((line) => `${' '.repeat(GUTTER)}${line}`);
 }
 
 /** `+M:SS.s` from the origin, which is whenever the account starts. */
@@ -331,40 +329,35 @@ export function buildDiagnostic(input: DiagnosticInput): string {
     );
     put(field('Published', `${stamp(setup.updatedAt)}  (${age(now - setup.updatedAt)})`));
     /*
-     * The line that answers "why is this tutor behaving like that" before
-     * anybody reads the timeline.
+     * WHAT USED TO BE HERE was a protocol version, and a warning to republish.
+     * A published prompt was frozen and the build that ran it was not, so a code
+     * handed out before a protocol change taught a conversation that went wrong
+     * in ways nothing else in this document explained. The prompt is composed
+     * when the student dials now — see composeTutorPrompt — so a setup cannot be
+     * out of step with the build reading it, and the row went with the fault.
      *
-     * A published prompt is frozen and the build that runs it is not, so a code
-     * handed out before a protocol change is a conversation that will go wrong
-     * in ways nothing else here explains — the questions repeat, the tutor
-     * wanders off the list, and every other section of this document looks
-     * correct. Directly under the publish date because the date is the other
-     * half of the same thought: it is the age of the snapshot that matters, not
-     * the age of the lesson.
+     * What replaces it is which halves of the prompt this particular setup
+     * carries, because that is what still varies: a code published before the
+     * composer moved has a lesson and no style, and gets the built-in one.
      */
-    const stale = promptIsStale(setup.composerVersion);
     put(
       field(
-        'Prompt protocol',
-        stale
-          ? `v${setup.composerVersion ?? '?'} — STALE. This build composes v${PROMPT_COMPOSER_VERSION}.`
-          : `v${setup.composerVersion} — current`,
+        'Prompt parts',
+        setup.style
+          ? 'style and lesson, both stored; composed by this build at dial time'
+          : `lesson only, so the built-in style was used${
+              setup.instructions ? ' (published before the composer moved)' : ''
+            }`,
       ),
     );
-    if (stale) {
-      put(
-        ...under(
-          'Publish this lesson again and hand out the new code.',
-          'A prompt composed against an older protocol asks the tutor',
-          'for tools this build no longer declares. It calls them, every',
-          'call is answered because an unanswered one leaves a tutor',
-          'silent, and each answer restarts it into the turn it has just',
-          'spoken — which is heard as the same question twice, and as the',
-          'tutor wandering off the list. Look for `tool` lines below',
-          'saying NOT A TOOL THIS PAGE KNOWS.',
-        ),
-      );
-    }
+    put(
+      field(
+        'Persona',
+        setup.persona?.fullName
+          ? `${setup.persona.fullName} — the name and one sentence reach the tutor`
+          : 'none stored',
+      ),
+    );
     put(field('Language', language ? `${setup.language} — ${language.label}` : setup.language));
     put(field('Voice', setup.voice || "the provider's own default"));
     put(field('Face', setup.faceId ?? "the deployment's own"));
@@ -416,12 +409,17 @@ export function buildDiagnostic(input: DiagnosticInput): string {
   put(
     field('Last call ran', input.lastCallMs === null ? 'none has finished yet' : length(input.lastCallMs)),
   );
+  /*
+   * The count the page kept, which is worth reading beside the `progress` lines
+   * in the timeline rather than instead of them. This says where the lesson got
+   * to; those say what the tutor claimed and which of its claims were refused,
+   * and the gap between them is the whole diagnosis when a lesson ends early.
+   */
   put(
     field(
-      'List finished',
-      input.complete
-        ? `yes — the tutor said so through its tool, once, at the end of ${setup?.questions?.length ?? 0}`
-        : `not reported — the tutor has not said it reached the end of ${setup?.questions?.length ?? 0}`,
+      'Questions counted',
+      `${input.answered.length} of ${setup?.questions?.length ?? 0}` +
+        (input.answered.length ? ` — ${input.answered.join(', ')}` : ''),
     ),
   );
   put(field('Page says done', input.lessonDone ? 'yes — a closing note is due or sent' : 'no'));
@@ -440,13 +438,29 @@ export function buildDiagnostic(input: DiagnosticInput): string {
   put(head('THE COMPOSED PROMPT'));
   if (!setup) {
     put('  — no setup is open.');
+  } else if (!setup.questions?.length || !language) {
+    put('  — this setup carries no lesson, so there is no prompt to compose.');
   } else {
+    /*
+     * Composed here rather than read out of the setup, because composing is
+     * what the page does — see Eleve.tsx. Same pure function, same frozen
+     * fields, so this is the text that was sent rather than a description of
+     * it. Were the two able to differ, this section would be quietly describing
+     * a call that never happened, which is the failure the whole document
+     * exists to make impossible.
+     */
+    const composed = composeTutorPrompt({
+      style: setup.style?.trim() || defaultInstructions(language),
+      persona: setup.persona,
+      questions: setup.questions,
+      targets: setup.targets,
+    });
     put(
-      `${setup.instructions.length} characters, exactly as published and exactly as sent.`,
-      'The style, the persona wrap and the lesson block, already composed — a student',
-      'browser never resolves any of the three.',
+      `${composed.length} characters, composed by this build at the moment of dialling.`,
+      "The style and the persona were frozen at publish; the protocol around them —",
+      'the tools, the notes, the order — is this build\'s, and moves with it.',
       '',
-      setup.instructions,
+      composed,
     );
   }
 

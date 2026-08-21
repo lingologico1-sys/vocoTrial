@@ -9,6 +9,7 @@
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
+    "probe": "esbuild scripts/probe.ts --bundle --platform=node --format=esm --outfile=node_modules/.cache/voco-probe.mjs --log-level=warning && node node_modules/.cache/voco-probe.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.app.json",
     "typecheck:functions": "tsc --noEmit -p tsconfig.functions.json"
   },

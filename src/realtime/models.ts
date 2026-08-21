@@ -51,8 +51,44 @@ export interface ModelChoice {
   unverified?: boolean;
 }
 
-// First entry is the default.
+/**
+ * First entry is the default, and it is the half-cascade model rather than the
+ * native-audio one. That order was the other way round until a student lesson
+ * was watched end to end on 2.5, and the two things that went wrong there are
+ * both properties of the surface rather than of the prompt:
+ *
+ *  - EVERY TOOL CALL ON VERTEX IS BLOCKING. `behavior: 'NON_BLOCKING'` is a
+ *    Gemini Developer API feature that Vertex ignores in silence, so a tutor
+ *    that reports its progress is a tutor that speaks its turn twice. That is
+ *    what forced the one-call-at-the-end protocol, and one unverifiable call
+ *    is what ended a five-question lesson at question three.
+ *  - NATIVE AUDIO TRANSCRIBES ITS OWN INPUT, with no ASR stage to tell a
+ *    language to. It wrote Arabic script into a French transcript where the
+ *    learner had said "oui", and the bubble, the vocabulary list and the report
+ *    all read that text.
+ *
+ * The half-cascade model has an answer to each: non-blocking tools, so progress
+ * can be reported per question without the doubling, and a real ASR stage that
+ * takes `speechConfig.languageCode`. What it gives up is affective dialog and
+ * proactivity, which settings.ts refuses it — see `isNativeAudio` there.
+ *
+ * Native audio stays second rather than being removed. Studio is where the two
+ * are compared, and everything measured on it so far is measured on that model.
+ */
 export const MODELS: ModelChoice[] = [
+  {
+    key: 'gemini-flash-31',
+    label: 'Gemini 3.1 Flash Live',
+    id: 'gemini-3.1-flash-live-preview',
+    surface: 'aistudio',
+    // AI Studio only, and not for want of looking: sixteen spellings across
+    // four Vertex regions all closed 1008, and Google's own answer is that this
+    // model has no Vertex build in any region. So it is here on the surface
+    // that carries it, billed to the AI Studio account rather than GCP.
+    //
+    // Half-cascade rather than native audio, which is why settings.ts refuses
+    // it affectiveDialog and proactivity — those are native-audio dialects.
+  },
   {
     key: 'gemini-native-audio',
     label: 'Gemini 2.5 Flash Native Audio',
@@ -72,19 +108,6 @@ export const MODELS: ModelChoice[] = [
     // Which is not the same as permanent. Vertex serves no Gemini 3 or 3.1 Live
     // model under any spelling tried, so there is nothing here to migrate *to*
     // if that changes — re-probe with /api/live/models rather than assume.
-  },
-  {
-    key: 'gemini-flash-31',
-    label: 'Gemini 3.1 Flash Live',
-    id: 'gemini-3.1-flash-live-preview',
-    surface: 'aistudio',
-    // AI Studio only, and not for want of looking: sixteen spellings across
-    // four Vertex regions all closed 1008, and Google's own answer is that this
-    // model has no Vertex build in any region. So it is here on the surface
-    // that carries it, billed to the AI Studio account rather than GCP.
-    //
-    // Half-cascade rather than native audio, which is why settings.ts refuses
-    // it affectiveDialog and proactivity — those are native-audio dialects.
   },
 ];
 

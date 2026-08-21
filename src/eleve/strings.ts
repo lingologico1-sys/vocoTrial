@@ -46,10 +46,10 @@ export const FR = {
   /*
    * THERE WAS A COUNTDOWN HERE — "Il te reste 3 questions", counting down
    * rather than up, because a learner mid-conversation who reads "3 sur 8" is
-   * reading a mark. It is gone, and not for a better idea: it needed the tutor
-   * to report each question through a tool, and on Vertex a tool call makes the
-   * tutor say its turn twice. See COMPLETE_TOOL in vocoSessions.ts. Restoring
-   * the wording is easy; restoring the number it needs is not.
+   * reading a mark. It went when per-question reporting had to go, and it has
+   * not come back with it: the questions tick on the consigne itself now, which
+   * says the same thing without putting a number in front of a learner. See
+   * ConsignePanel.
    */
   questionsAllDone: 'Tu as répondu à toutes les questions',
   /*

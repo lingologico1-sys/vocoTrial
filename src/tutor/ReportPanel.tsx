@@ -144,7 +144,7 @@ export default function ReportPanel({ report, usd }: Props) {
       {/*
         Here for the tuner rather than for the learner, and it is the one
         section of this panel that reads the *tutor*. "Ask for the longer
-        answer" is an instruction in lessonBlock, and whether a style actually
+        answer" is an instruction in composeTutorPrompt, and whether a style actually
         produces reaching is otherwise invisible: a run of `played-safe` across
         several learners is the prompt failing, not the class. `landed` is shown
         because a style that produces ambitious wrong sentences is working and

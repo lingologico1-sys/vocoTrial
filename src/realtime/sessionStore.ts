@@ -52,15 +52,6 @@ export interface PublishedRow {
   label: string;
   lesson: string;
   updatedAt: number;
-  /**
-   * Which tutor protocol this code's prompt was composed against, if it says.
-   *
-   * Off the object's R2 metadata rather than out of the setup — the listing
-   * deliberately never reads a setup body, see listSetups — which is why it can
-   * be absent for two different reasons and is read as stale for both. See
-   * PROMPT_COMPOSER_VERSION in vocoSessions.ts.
-   */
-  composerVersion?: number;
 }
 
 async function post<T>(path: string, body: unknown): Promise<T> {

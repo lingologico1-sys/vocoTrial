@@ -2,7 +2,8 @@ import { MicCapture, PcmPlayer, decodeBase64, encodeBase64 } from './audio';
 import { addUsage, emptyUsage, totalTokens, type UsageTotals } from './cost';
 import { UnauthorizedError, checkSession, reportExpired } from './auth';
 import type { SessionConfig, SessionHandlers, VoiceSession } from './types';
-import { COMPLETE_TOOL } from './vocoSessions';
+import { findModel } from './models';
+import { PROGRESS_TOOL } from './tutorPrompt';
 
 /**
  * Gemini Live, through our own Worker.
@@ -112,6 +113,13 @@ export async function startGeminiSession(
   config: SessionConfig = {},
 ): Promise<VoiceSession> {
   handlers.onStatus('connecting');
+
+  /*
+   * Whether this model's surface implements `scheduling` on a tool response.
+   * See the tool-call handling below. Unknown keys resolve to false, which is
+   * the reading that sends nothing rather than the one that hopes.
+   */
+  const silentResponses = findModel(modelKey)?.surface === 'aistudio';
 
   const mic = new MicCapture();
   const player = new PcmPlayer();
@@ -257,16 +265,20 @@ export async function startGeminiSession(
        * Tool calls, answered first and interpreted second.
        *
        * The response goes back whatever happens — an unknown tool name, a
-       * handler that throws — because on Vertex every call is blocking and the
-       * model is stopped until it arrives. A tutor silently going quiet
-       * mid-lesson is a far worse failure than a miscounted lesson, and this is
-       * the ordering that makes the second one impossible to cause.
+       * handler that throws — because a blocking call leaves the model stopped
+       * until it arrives. A tutor silently going quiet mid-lesson is a far
+       * worse failure than a miscounted lesson, and this is the ordering that
+       * makes the second one impossible to cause.
        *
-       * Sending it does restart the model into a fresh turn, and nothing here
-       * can prevent that — `scheduling: 'SILENT'` is the field for it and Vertex
-       * does not implement it. That restart is why the one tool left is called
-       * once, at the end, where the turn it produces is followed by the closing
-       * note anyway. See COMPLETE_TOOL in vocoSessions.ts.
+       * `scheduling: 'SILENT'` is what keeps answering a call from becoming a
+       * turn. Without it the result restarts the model, and the restart is a
+       * fresh turn spoken on top of the one it had already spoken — which is
+       * what made a tutor ask every question twice for as long as progress was
+       * reported per question. It is a Gemini Developer API field: AI Studio
+       * honours it, Vertex ignores it in silence. Sent only to the surface that
+       * implements it, for the reason _setup.ts sends `behavior` only there —
+       * a field the far end drops is a claim this file would otherwise be
+       * making falsely about how the next turn will behave.
        */
       if (message.toolCall?.functionCalls?.length) {
         const calls = message.toolCall.functionCalls;
@@ -280,7 +292,7 @@ export async function startGeminiSession(
                   // Acknowledged, with nothing to say. The tutor is told in the
                   // prompt that this produces no reply to read out; an object
                   // with prose in it is prose a model will sometimes speak.
-                  response: { ok: true },
+                  response: silentResponses ? { ok: true, scheduling: 'SILENT' } : { ok: true },
                 })),
               },
             }),
@@ -293,7 +305,18 @@ export async function startGeminiSession(
         // wrecks a conversation, because answering it is what restarts the model
         // into a turn it has already spoken. See onToolCall in types.ts.
         for (const call of calls) handlers.onToolCall?.(call.name ?? '(unnamed)', call.args);
-        if (calls.some((call) => call.name === COMPLETE_TOOL)) handlers.onLessonComplete?.();
+        /*
+         * Passed on one at a time and exactly as they arrived, including the
+         * numbers that make no sense. Five calls in one frame is five reports,
+         * because five reports is what the model sent, and a layer that quietly
+         * collapsed them would be deciding something it has no evidence for.
+         * The believing happens in useVoiceCall.
+         */
+        for (const call of calls) {
+          if (call.name !== PROGRESS_TOOL) continue;
+          const number = (call.args as { number?: unknown } | undefined)?.number;
+          handlers.onQuestionDone?.(typeof number === 'number' ? number : undefined);
+        }
         return;
       }
 

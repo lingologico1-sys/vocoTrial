@@ -7,12 +7,15 @@ import { L1_CHOICES, resolveL1 } from '../realtime/l1';
 import type { SessionReport } from '../realtime/report';
 import { LESSON_CODE_LENGTH, normaliseLessonCode } from '../realtime/lessonCodes';
 import { hasLesson, type PublishedSetup } from '../realtime/session';
+import { capMinutesOf } from '../realtime/vocoSessions';
 import {
   LESSON_DONE_SIGNAL,
   TIME_UP_SIGNAL,
-  capMinutesOf,
+  composeTutorPrompt,
   openingSignal,
-} from '../realtime/vocoSessions';
+} from '../realtime/tutorPrompt';
+import { defaultInstructions } from '../realtime/instructions';
+import { findLanguage, defaultLanguageCode } from '../realtime/languages';
 import { codeFromUrl, fetchSetup } from '../realtime/sessionStore';
 import type { SessionSettings } from '../realtime/settings';
 import { useVoiceCall } from '../live/useVoiceCall';
@@ -66,9 +69,9 @@ const CLOSING_GRACE_MS = 45_000;
  * THE GRACE ABOVE IS A CEILING AND THIS IS THE ORDINARY WAY A LESSON ENDS. A
  * flat forty-five seconds assumed the goodbye always comes *after* the note, so
  * the only question was how long to allow for it. It does not always come after.
- * Answering the completion tool restarts the model into a turn nothing on this
- * side asked for — see COMPLETE_TOOL — and a tutor which spends that turn on its
- * goodbye has said everything it has to say before the note even goes out. The
+ * A tutor can reach its own goodbye before the note goes out — the last
+ * progress report and the page's closing note are a beat apart, and a tutor
+ * that has just finished the last question often uses that beat to wrap up. The
  * note then lands on a tutor with nothing left, and the call sits in dead air
  * for the rest of the grace period with the learner looking at a face that has
  * already waved. That is what a real diagnostic showed, and hanging up on quiet
@@ -90,10 +93,11 @@ const CLOSING_QUIET_MS = 6_000;
 /**
  * The beat the closing note waits before it will even look for a gap.
  *
- * Answering the completion tool restarts the model into a turn it was not going
- * to take, and nothing on this side can stop that — see COMPLETE_TOOL in
- * vocoSessions.ts. That turn is the last thing the learner hears before the
- * goodbye, and it takes about half a second to start.
+ * The last question being answered and the page deciding to close are two
+ * different moments, and the tutor is mid-turn between them: it has just heard
+ * an answer and is replying to it, which is what it was told to do. That reply
+ * is the last thing the learner hears before the goodbye, and it takes about
+ * half a second to start.
  *
  * Which is the problem this constant solves. The tutor reports the list
  * finished just after the learner has stopped talking, so at that exact moment
@@ -127,14 +131,26 @@ const CLOSING_SETTLE_MS = 12_000;
 const L1_KEY = 'vocotrial.eleve.l1';
 
 /**
- * The one model a student ever meets.
+ * The one model a student ever meets, and it is not the one studio defaults to
+ * for the sake of comparison — it is the one a lesson needs.
+ *
+ * TWO PROPERTIES OF THE SURFACE, NOT PREFERENCES. This page counts a lesson's
+ * progress from tool calls the tutor makes as it goes, and per-question
+ * reporting is only survivable where `behavior: 'NON_BLOCKING'` is honoured:
+ * Vertex ignores the field, and answering a blocking call restarts the model
+ * into a turn spoken on top of the last one, so the learner hears every
+ * question twice. And this page shows the learner their own words, feeds them
+ * to a vocabulary list and marks them in a report — all from a transcript that
+ * a half-cascade model produces through a real ASR stage, told which language
+ * it is listening to. Native audio transcribes its own input with no such stage
+ * and wrote Arabic script into a French lesson.
  *
  * A constant rather than a literal in the `useVoiceCall` call because two
- * readers now need it: the call that dials it, and the diagnostic that reports
- * what was dialled. A diagnostic naming a different model from the one in use
- * is worse than one naming none.
+ * readers need it: the call that dials it, and the diagnostic that reports what
+ * was dialled. A diagnostic naming a different model from the one in use is
+ * worse than one naming none.
  */
-const MODEL_KEY = 'gemini-native-audio';
+const MODEL_KEY = 'gemini-flash-31';
 
 type Tab = 'evaluation' | 'dictionary' | 'vocab';
 
@@ -222,10 +238,56 @@ export default function Eleve() {
     };
   }, [session]);
 
+  /**
+   * The system prompt, composed at the moment this page is about to send it.
+   *
+   * NOT READ OUT OF THE SETUP, which is the change that makes a code handed out
+   * last term safe to open today. A published setup carries the lesson as data
+   * — the questions, the targets, the style prose, the persona — and this is
+   * where those become a prompt, using whatever composer this build ships. What
+   * the teacher decided is still frozen; what is really an agreement between
+   * the prompt and the tools a call declares travels with the code that
+   * declares them. See session.ts and composeTutorPrompt.
+   *
+   * A SETUP WITH NO STYLE FALLS BACK TO THE BUILT-IN, and that is what every
+   * setup published before this change has. Those rows carry a composed
+   * `instructions` string whose first section was very nearly this same text,
+   * so an old code opens onto a tutor of the same manner with its own questions
+   * and its own targets, on today's protocol. Nothing is stranded and nothing
+   * needs republishing.
+   */
+  const instructions = useMemo(() => {
+    if (!session) return '';
+    /*
+     * A setup with no questions is a conversation rather than a lesson, which
+     * is the shape of everything published before lessons existed. There is
+     * nothing to compose — no list, no targets, no protocol to describe — so
+     * the prompt it was published with is still exactly the right one, and it
+     * is the only thing that still reads that stored text. Composing a lesson
+     * prompt with an empty list would be worse than useless: it would tell the
+     * tutor to work down nothing and report progress against it.
+     */
+    if (!session.questions?.length) return session.instructions ?? '';
+    const language =
+      findLanguage(session.language) ?? findLanguage(defaultLanguageCode())!;
+    return composeTutorPrompt({
+      style: session.style?.trim() || defaultInstructions(language),
+      persona: session.persona,
+      questions: session.questions,
+      targets: session.targets,
+    });
+  }, [session]);
+
   const call = useVoiceCall({
     modelKey: MODEL_KEY,
     language: session?.language ?? 'fr',
-    instructions: session?.instructions ?? '',
+    instructions,
+    /*
+     * The list this call is counted against. Absent means no lesson, and every
+     * progress report a tutor makes on such a call is refused — see
+     * `acceptProgress` in useVoiceCall.
+     */
+    questionCount: session?.questions?.length,
     /*
      * Thirty seconds of nobody talking ends the call, where the workshop pages
      * allow ninety.
@@ -417,23 +479,21 @@ export default function Eleve() {
   const elapsedMs = call.connectedAt === null ? null : now - call.connectedAt;
 
   /**
-   * Whether the tutor says it has been through the whole list.
+   * Whether every question on the list has been answered.
    *
-   * THE TUTOR'S CLAIM AND NOT A FACT, which is why it is named for what it is.
-   * `complete` is one tool call the model volunteers — see `onLessonComplete`
-   * in useVoiceCall — and it can come early, or never come at all. What follows
-   * from it here is when the call hangs up, and nothing else: the report reads
-   * the transcript afterwards and is the authority on what was actually
-   * covered.
+   * THE PAGE'S COUNT, NOT THE TUTOR'S CLAIM. The tutor reports one question at
+   * a time and `acceptProgress` in useVoiceCall decides which of those reports
+   * to believe — a report with no learner turn behind it is refused, and a
+   * lesson cannot end on questions nobody was asked. What follows from this is
+   * when the call hangs up, and nothing else: the report reads the transcript
+   * afterwards and is the authority on what was actually covered.
    *
-   * Absent questions means no lesson — a setup published before there were any,
-   * or a bench call — and such a conversation can never complete. It runs to the
-   * cap, which is what it did before this existed. The tutor is given no list to
-   * finish on those calls and so has nothing to report, but the guard stays: a
-   * stray call to the tool must not end a conversation that had no lesson in it.
+   * Absent questions means no lesson — a setup published before there were any
+   * — and such a conversation can never complete. It runs to the cap, which is
+   * what it did before any of this existed.
    */
   const total = session?.questions?.length ?? 0;
-  const lessonDone = total > 0 && call.complete;
+  const lessonDone = total > 0 && call.answered.length >= total;
 
   /**
    * The two ways a lesson ends, and the close each one triggers.
@@ -846,7 +906,7 @@ export default function Eleve() {
                 ) : (
                   <>
                     {consigne && session && (
-                      <ConsignePanel session={session} complete={call.complete} />
+                      <ConsignePanel session={session} answered={call.answered} />
                     )}
                     <EvaluationGate
                       live={call.live}
@@ -900,7 +960,7 @@ export default function Eleve() {
             events: call.events,
             connectedAt: call.connectedAt,
             lastCallMs: call.lastCallMs,
-            complete: call.complete,
+            answered: call.answered,
             capMinutes: session ? capMinutesOf(session) : null,
             lessonDone,
             report,

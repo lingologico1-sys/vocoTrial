@@ -531,7 +531,7 @@ export default function Studio() {
    * lesson belongs to the teacher who wrote it — so what a call on this page
    * runs is the manner and the face, which is exactly what this page is for
    * tuning. The publish route does the same composition with the lesson added;
-   * see `lessonBlock`.
+   * see `composeTutorPrompt` in tutorPrompt.ts.
    */
   const composed = useMemo(
     () =>

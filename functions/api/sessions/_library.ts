@@ -123,11 +123,11 @@ export function writeSetup(bucket: R2Bucket, setup: PublishedSetup): Promise<unk
     customMetadata: {
       label: encodeMeta(setup.label ?? ''),
       lesson: encodeMeta(setup.vocoSessionName ?? ''),
-      // Up here with the name for exactly the same reason, and it is the one
-      // piece of metadata the teacher's list needs that is not decoration: a
-      // row that cannot say it was composed against an older protocol is a code
-      // somebody goes on handing out. Digits only, so no encoding is involved.
-      composer: setup.composerVersion === undefined ? '' : String(setup.composerVersion),
+      // A protocol version used to be stamped here too, so the teacher's list
+      // could say which codes had gone stale. Nothing goes stale now — the
+      // prompt is composed when the student dials, not when the teacher
+      // publishes — so the stamp went with the thing it warned about. Rows
+      // written before this still carry theirs; nothing reads it.
     },
   });
 }
@@ -157,7 +157,6 @@ export async function listSetups(
     label: string;
     lesson: string;
     updatedAt: number;
-    composerVersion?: number;
   }>
 > {
   const listed = await bucket.list({ prefix: 'sessions/', limit, include: ['customMetadata'] });
@@ -166,16 +165,11 @@ export async function listSetups(
     .map((object) => {
       const code = object.key.slice('sessions/'.length, -'.json'.length);
       const meta = object.customMetadata ?? {};
-      // Undefined rather than zero for anything unreadable, because zero is a
-      // version and this is the absence of one. Every object written before the
-      // stamp existed lands here, which is the case the field is for.
-      const composer = Number(meta.composer);
       return {
         code,
         label: decodeMeta(meta.label),
         lesson: decodeMeta(meta.lesson),
         updatedAt: object.uploaded.getTime(),
-        composerVersion: meta.composer && Number.isFinite(composer) ? composer : undefined,
       };
     })
     .filter((entry) => LESSON_CODE.test(entry.code))

@@ -22,7 +22,6 @@ import {
   capMinutesOf,
   joinLines,
   newVocoSessionId,
-  promptIsStale,
   splitLines,
   type VocoSession,
 } from '../realtime/vocoSessions';
@@ -34,6 +33,7 @@ import {
   saveVocoSession,
 } from '../realtime/vocoSessionStore';
 import { listPublishedSetups, publishVocoSession, type PublishedRow } from '../realtime/sessionStore';
+import { PATIENCE, type Patience } from '../realtime/settings';
 import type { PublishedSetup } from '../realtime/session';
 
 /**
@@ -97,7 +97,7 @@ import type { PublishedSetup } from '../realtime/session';
  * A LESSON IS A LENGTH AS WELL AS A LIST. The clock is the teacher's, set here
  * and spent in three places — the tutor is told its budget in prose so it can
  * pace, the student page runs the countdown, and the page tells the tutor to
- * close when it runs out. See lessonBlock and Eleve.tsx.
+ * close when it runs out. See composeTutorPrompt and Eleve.tsx.
  */
 
 /** A blank session, so "New" has something to open. */
@@ -110,6 +110,10 @@ function empty(): VocoSession {
     targets: [],
     questions: [],
     language: defaultLanguageCode(),
+    // A new lesson has no behaviour to preserve, so it gets the setting a class
+    // of learners actually wants. An existing one shows whatever it was saved
+    // with, and absent means 'standard' — see `patience` on VocoSession.
+    patience: 'patient',
     styleId: '',
     faceId: null,
     evaluatorId: BUILTIN_EVALUATOR_ID,
@@ -150,6 +154,7 @@ export default function Teach() {
    */
   const [rows, setRows] = useState<string[]>(() => Array(DEFAULT_QUESTION_ROWS).fill(''));
   const [capMinutes, setCapMinutes] = useState(DEFAULT_CAP_MINUTES);
+  const [patience, setPatience] = useState<Patience>('patient');
 
   // The tutor.
   const [language, setLanguage] = useState(defaultLanguageCode);
@@ -247,6 +252,10 @@ export default function Teach() {
         : Array(DEFAULT_QUESTION_ROWS).fill(''),
     );
     setCapMinutes(capMinutesOf(source));
+    // Absent reads as 'standard' rather than as the default a new lesson gets:
+    // a lesson saved before this control existed sent nothing, and opening it
+    // must not quietly change how it behaves.
+    setPatience(source.patience ?? 'standard');
     setLanguage(source.language || defaultLanguageCode());
     setStyleId(source.styleId ?? '');
     setFaceId(source.faceId ?? null);
@@ -300,6 +309,7 @@ export default function Teach() {
     targets,
     questions,
     capMinutes,
+    patience,
     language,
     styleId: style?.id ?? '',
     faceId,
@@ -615,6 +625,41 @@ export default function Teach() {
                     At {capMinutes} the lesson will be cut off before the list is finished.
                   </p>
                 )}
+              </div>
+
+              {/*
+                THE ONE PROVIDER SETTING A TEACHER TOUCHES, and it is here
+                rather than in studio because it is the only one that belongs
+                to the class rather than to the deployment. How long the tutor
+                waits before deciding a learner has finished is the difference
+                between a beginner getting to the end of their sentence and
+                being answered over in the middle of it, and which of those a
+                class needs is something the person who teaches them knows.
+
+                Beside the cap because both are about the shape of the
+                conversation rather than its content, and the questions above
+                are the content.
+              */}
+              <div className="flex flex-col gap-1.5">
+                <label className={label} htmlFor="voco-patience">
+                  Waiting for the learner
+                </label>
+                <select
+                  id="voco-patience"
+                  value={patience}
+                  onChange={(event) => setPatience(event.target.value as Patience)}
+                  disabled={busy}
+                  className={`${field} cursor-pointer`}
+                >
+                  {PATIENCE.map((entry) => (
+                    <option key={entry.key} value={entry.key}>
+                      {entry.label}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-[11px] leading-relaxed text-lingo-muted">
+                  {PATIENCE.find((entry) => entry.key === patience)?.hint}
+                </p>
               </div>
 
               <div className="flex flex-col gap-1.5">
@@ -945,28 +990,6 @@ export default function Teach() {
             {handedOut.length > 0 && (
               <div className="flex flex-col gap-1.5">
                 <p className={label}>Already handed out</p>
-                {/*
-                  THE ONE THING THIS LIST CAN SAY THAT THE TEACHER CANNOT WORK
-                  OUT. A code goes out and its prompt is frozen from that moment
-                  — see session.ts — while the app it runs against ships again
-                  every week. When a release changes the protocol the two halves
-                  share, the older codes go on opening and start teaching badly:
-                  the tutor repeats every question and wanders off the list. See
-                  PROMPT_COMPOSER_VERSION.
-
-                  Said once above the list rather than on every affected row,
-                  because it is one explanation for however many badges are
-                  below it, and the row has a code and a name to fit already.
-                  Absent entirely when nothing is stale, which is the ordinary
-                  case and deserves no paragraph.
-                */}
-                {handedOut.slice(0, 8).some((row) => promptIsStale(row.composerVersion)) && (
-                  <p className="text-[13px] leading-relaxed text-lingo-error">
-                    Some of these were published before the tutor changed, and will ask every
-                    question twice. Open the lesson and publish it again to get a code that
-                    behaves — the old code keeps working, so hand out the new one.
-                  </p>
-                )}
                 <ul className="flex flex-col divide-y divide-lingo-border-light overflow-hidden rounded-2xl border-2 border-lingo-border-light">
                   {handedOut.slice(0, 8).map((row) => (
                     <li
@@ -979,11 +1002,6 @@ export default function Teach() {
                       <span className="flex-1 truncate text-lingo-muted">
                         {row.label || row.lesson || 'Untitled'}
                       </span>
-                      {promptIsStale(row.composerVersion) && (
-                        <span className="rounded-md bg-lingo-error-bg px-1.5 py-0.5 text-[11px] font-semibold text-lingo-error">
-                          republish
-                        </span>
-                      )}
                       <span className="text-[11px] text-lingo-muted">
                         {new Date(row.updatedAt).toLocaleDateString()}
                       </span>

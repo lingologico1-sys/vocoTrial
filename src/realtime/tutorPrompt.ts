@@ -1,0 +1,299 @@
+/**
+ * Everything the tutor is told, and everything the page says into a call.
+ *
+ * ONE FILE BECAUSE IT IS ONE AGREEMENT. The prompt tells the tutor that a tool
+ * exists and that notes will arrive; the tool is declared server-side and the
+ * notes are sent by the student page. Those three used to live in three files,
+ * and the failure that produced is documented at length in the git history: a
+ * prompt describing a tool the running build no longer declared, which from the
+ * outside was indistinguishable from a model ignoring its instructions. Keeping
+ * the sentence and the thing it describes in one file is what makes that
+ * mistake visible in review.
+ *
+ * COMPOSED WHEN THE STUDENT DIALS, NOT WHEN THE TEACHER PUBLISHES, which is the
+ * other half of the same fix. A published setup snapshots the lesson — the
+ * questions, the targets, the style prose, the persona — and the prompt is
+ * built from that snapshot at the moment a call starts, by whatever build is
+ * running. A teacher editing next week's questions still cannot touch a lesson
+ * being taught right now, because the data is frozen; but a protocol change can
+ * no longer strand codes that were handed out before it, because no composed
+ * text is stored anywhere. `PROMPT_COMPOSER_VERSION` and the stale-code
+ * reporting around it existed to make that stranding legible, and are gone with
+ * the thing they described.
+ *
+ * SHORT ON PURPOSE. The prompt this replaces was 7,760 characters and argued
+ * with itself: nine headed sections, several of them justifying a rule to a
+ * reader who cannot be persuaded, and two of them describing bookkeeping the
+ * program is now responsible for. What is left is the part a model can act on,
+ * and the rules the page cannot enforce for it. Where a rule can be checked in
+ * code — has this question been answered, has the lesson run too long — it is
+ * checked in code and not asked for here.
+ *
+ * WRITTEN AS TESTS, NOT AS JUDGEMENTS, which is the one habit worth keeping
+ * from the old text. "Never open a subject of your own" is checkable against
+ * the turn being composed; "keep the conversation focused" is not.
+ *
+ * ONE SENTENCE HERE IS AIMED AT THE REPORT RATHER THAN THE CONVERSATION. "Ask
+ * for the detail" was a headed section of its own and is now a clause, but it
+ * could not simply go: a learner who answers "Ça va bien" has answered the
+ * question and used almost nothing of what they know, and which of those two
+ * happens is decided by the tutor's next question rather than by the learner's
+ * ambition. It pairs with `ambition` in report.ts, which is what tells the
+ * learner afterwards that playing safe cost them something — and an ask with no
+ * reward attached is one nobody repeats.
+ *
+ * Deliberately free of imports beyond one type: functions/ compiles against
+ * workers-types with no DOM lib, and the publish route reads this file to
+ * measure a prompt before it stores a lesson.
+ */
+
+import type { Persona } from '../facekit/persona';
+
+/**
+ * The one tool a tutor has, and the only structured channel into a live call.
+ *
+ * WHY A TOOL AND NOT THE TRANSCRIPT. The student page has to know how far down
+ * the list the conversation has got, and nothing else could tell it: the
+ * transcript is untyped text, so reading it means guessing, and a spoken marker
+ * is a marker the tutor eventually says out loud. A function call is the only
+ * thing a model can emit that is addressed to the program rather than to the
+ * learner.
+ *
+ * ONE CALL PER QUESTION, WHICH IS A REVERSAL. This was `questionAnswered`, per
+ * question, and it had to become a single `lessonComplete` at the end because
+ * on Vertex every tool call blocks: the model stops, waits for the result, and
+ * the result arriving restarts it as a fresh turn spoken on top of the last —
+ * so the learner heard every question twice. That constraint is a property of
+ * the surface and not of the idea. `behavior: 'NON_BLOCKING'` is the field that
+ * fixes it, Vertex ignores it in silence, and AI Studio implements it, so
+ * moving the student page to the model AI Studio carries is what makes per
+ * question reporting available again. See _setup.ts, which declares it, and
+ * models.ts on why the surface travels with the model.
+ *
+ * WHAT IT BUYS IS THAT THE PAGE COUNTS RATHER THAN THE MODEL DECIDING. A single
+ * end-of-list call is one unverifiable claim that ends the lesson, and the run
+ * that prompted this rewrite is what that costs: the tool arrived after
+ * question three of five, on a one-word answer, and the page closed a lesson
+ * with two questions never asked. Numbered calls are checkable one at a time —
+ * against the list, against each other, and against whether the learner has
+ * said anything since the last one. See `acceptProgress` in useVoiceCall.ts,
+ * which is where the believing happens.
+ *
+ * THE ASYMMETRY IS DELIBERATE AND IT IS NOT FREE. A report that is missed or
+ * refused is never repaired: the count never reaches the length of the list, no
+ * warm close is sent, and the cap ends the call instead — which tells a learner
+ * who answered everything that time ran out. That is the wrong ending, and it
+ * is the cheaper wrong ending. The other one closes a lesson on questions
+ * nobody was asked, and the learner can see those questions on their own
+ * screen. Both are visible in the diagnostic: refused reports are logged with
+ * the reason beside the count that ignored them.
+ */
+export const PROGRESS_TOOL = 'questionDone';
+
+/**
+ * How anything this app has to say reaches a conversation it is not part of.
+ *
+ * Marked as notes rather than phrased as speech. They arrive through
+ * `clientContent`, whose only available role is `user`, so without the marker
+ * they read as the learner suddenly saying "the time is up" in English — and a
+ * tutor that believes that will answer it out loud.
+ */
+const NOT_THE_LEARNER = '[NOTE FROM THE SYSTEM, NOT FROM THE LEARNER';
+
+const SYSTEM_NOTE = `${NOT_THE_LEARNER} — do not answer it or read it out]`;
+
+/**
+ * The same marker, minus the half that would silence the opening note.
+ *
+ * "Do not answer it" is right for a note that arrives mid-conversation: it says
+ * the sentence you have just been handed is not something the learner said, so
+ * do not reply to it as though it were. Handed to a tutor that has not spoken
+ * yet, at the one moment its whole job is to produce speech, the same clause is
+ * a coin toss — and the side it lands on half the time is the silence this note
+ * exists to end. So the opening note asks to be acted on and keeps the rest.
+ */
+const OPENING_NOTE = `${NOT_THE_LEARNER} — act on it, but do not read it out]`;
+
+/**
+ * The two ways a lesson ends, as the page says them into the conversation.
+ *
+ * SELF-CONTAINED, WHICH THEY DID NOT USED TO BE. These notes used to say "close
+ * the conversation exactly as described under HOW THIS ENDS", and the prompt
+ * carried a section describing both closes — a rule the model had to hold for
+ * the whole call in order to obey a sentence at the end of it. The instruction
+ * now travels with the note, which is the moment it is read and the only moment
+ * it matters. That is a section of prompt deleted rather than moved.
+ *
+ * TWO NOTES AND NOT ONE, because the two closes are different conversations.
+ * Finishing the list is the lesson working, and the tutor has everything it
+ * needs to say something true about how the learner did. Reaching the cap with
+ * questions still outstanding is the lesson being cut short — and a tutor that
+ * signs off warmly there, as though the work were done, tells a learner they
+ * finished something they did not. The learner can see the list on their own
+ * screen, so it is a lie they can check.
+ */
+export const LESSON_DONE_SIGNAL = `${SYSTEM_NOTE} Every question on the list has now been answered, so the lesson is over. Say goodbye: one warm, specific sentence about how the learner did, quoting back something they actually said, and then goodbye. Do not ask another question.`;
+
+export const TIME_UP_SIGNAL = `${SYSTEM_NOTE} This lesson has run out of time with questions still unanswered. Stop there: say plainly that you have to stop, then one warm, specific sentence about the part you did get through, and goodbye. Do not suggest the lesson was finished, because it was not, and do not ask another question.`;
+
+/**
+ * Which greeting the hour has earned, on the clock of whoever is talking.
+ *
+ * `getHours` reads the browser's own zone, and the browser is in the room with
+ * the learner — which is the only clock that can be right here, since the
+ * lesson was published from a staffroom that may be three time zones away.
+ *
+ * Evening runs from six in the evening through to five in the morning. One in
+ * the morning is an odd hour to be practising, but "bonsoir" is still what a
+ * person says at it, and the alternative — a fourth part of the day for the
+ * night — buys a greeting most languages do not have.
+ */
+export type DayPart = 'morning' | 'afternoon' | 'evening';
+
+export function dayPartAt(when: Date = new Date()): DayPart {
+  const hour = when.getHours();
+  if (hour < 5 || hour >= 18) return 'evening';
+  if (hour < 12) return 'morning';
+  return 'afternoon';
+}
+
+/**
+ * The note that opens the conversation, and the one here that is not about a
+ * lesson.
+ *
+ * IT EXISTS BECAUSE LIVE ONLY ANSWERS. Nothing is generated until something
+ * arrives, so a tutor told in its own instructions to greet the learner still
+ * sits there. Every conversation therefore opened on the learner having to say
+ * "bonjour" into a silence to find out whether the thing was working — which
+ * is the app asking the beginner to go first, at the exact moment they are
+ * least sure of themselves. The note is the something that arrives.
+ *
+ * THE PART OF THE DAY AND NEVER THE TIME. The tutor is told in the prompt that
+ * it cannot see a clock and must never mention one. "It is the evening" is what
+ * a greeting needs and is not a clock; an hour would be, so no hour goes.
+ *
+ * THE GREETING ITSELF IS THE TUTOR'S WORD, not ours. Sending "bonsoir" would
+ * send French to a page that publishes Spanish and German lessons too, and it
+ * would get the afternoon wrong in the very language it was written for: the
+ * French for a two o'clock hello is still "bonjour", and "bonne après-midi" is
+ * how you leave rather than how you arrive. A model that speaks the language
+ * knows that. What it cannot do is look out of the window, so that is the one
+ * thing it is told.
+ */
+export function openingSignal(part: DayPart = dayPartAt()): string {
+  return `${OPENING_NOTE} The learner has just connected and is waiting for you to speak first. Greet them now, in the language you are speaking, with the greeting a person would use in the ${part}, and then ask the first question on your list. Never say what the time is: the part of the day is here so that your greeting fits it, and for nothing else. This note does not end the conversation — it begins it.`;
+}
+
+/**
+ * The persona, cut down to what a tutor can carry without performing it.
+ *
+ * A NAME AND ONE SENTENCE, where this used to be a whole biography plus a block
+ * of rules about when to use it. The rules were the tell: a model handed a life
+ * wants to tell you about it, so the old wrap spent three sentences forbidding
+ * what the paragraph above them invited — and it still leaked. A tutor two
+ * questions into a lesson volunteered "J'habite à Lyon, personnellement" to a
+ * learner who had asked nothing about it. Less material is a better fix than
+ * more prohibition, and one sentence is enough for a face to have someone
+ * behind it.
+ *
+ * THE FIRST SENTENCE OF THE BIO, mechanically. Kits are authored in the first
+ * person and open on an introduction — "My name is Théo Dubois, and I'm 24" —
+ * so the first sentence is reliably the one a person would lead with. It is a
+ * heuristic and it is allowed to be: a wrong cut costs one odd-sounding line of
+ * background, and the alternative is asking every kit author to write a second,
+ * shorter bio nobody would keep up to date.
+ */
+function firstSentence(text: string): string {
+  const trimmed = text.trim();
+  const stop = trimmed.search(/[.!?](\s|$)/);
+  return stop === -1 ? trimmed : trimmed.slice(0, stop + 1);
+}
+
+export function personaBlock(persona: Persona | undefined): string {
+  const name = persona?.fullName?.trim() ?? '';
+  const line = persona?.bio ? firstSentence(persona.bio) : '';
+  if (!name && !line) return '';
+
+  return `WHO YOU ARE
+${[name ? `You are ${name}.` : '', line].filter(Boolean).join(' ')}
+Talk about your own life only when the learner asks about it: one sentence, then back to them.
+
+`;
+}
+
+/** Everything a composed prompt is built from. All of it is snapshot data. */
+export interface TutorPromptParts {
+  /**
+   * The admin-authored tutor style: what sort of tutor this is.
+   *
+   * Carries the manner rules — speak the language, short sentences, no
+   * markdown, stop when interrupted — which is why nothing below repeats them.
+   * See the house library, and instructions.ts for the built-in that stands in
+   * when a setup carries no style of its own.
+   */
+  style: string;
+  persona?: Persona;
+  questions: string[];
+  targets?: string[];
+}
+
+/**
+ * The whole system instruction, in the order the model reads it.
+ *
+ * THE ORDER IS THE DESIGN, and it is the one thing kept unchanged from the
+ * prompt this replaces. Identity first, because it is background to be read
+ * before the instructions rather than performed. The job second. The lesson
+ * last, because a constraint that has to hold for a whole call survives longest
+ * at the end of the prompt, and a question list held for a whole call is
+ * exactly that.
+ *
+ * WHAT IS NOT HERE, AND WHY. No cap and no length: a model told how long it has
+ * paces to fill the time, so the number lives on the student page, which owns
+ * the clock. No consigne: the learner reads that on their own screen, and a
+ * tutor that also recites it turns a conversation into an exercise. No standard
+ * for what counts as a finished question either — that sentence is in the tool
+ * declaration, where the model reads it at the moment it is deciding, rather
+ * than here, where it would have to be remembered for five minutes.
+ */
+export function composeTutorPrompt(parts: TutorPromptParts): string {
+  const questions = parts.questions.map((question, index) => `${index + 1}. ${question}`);
+  const count = parts.questions.length;
+
+  const targets = parts.targets?.length
+    ? `\nSteer towards ${parts.targets.join(', ')} where a turn invites it, by asking something whose natural answer uses one. Never name a grammatical structure out loud, and let a turn that does not invite one go.\n`
+    : '';
+
+  return `${personaBlock(parts.persona)}YOUR JOB
+${parts.style.trim()}
+
+THE LESSON
+These ${count} questions are the whole lesson. Ask them in order, one at a time:
+
+${questions.join('\n')}
+
+Ask one, listen, and talk about the answer the way a friend would before you go
+on to the next. Follow-up questions about what the learner has just said are the
+conversation — ask as many as the answer is worth. Ask for the detail: why, what
+happened, what they thought of it. Whether an answer grows past its safe first
+sentence is decided by what you ask next, so be interested in what they say and
+never in their grammar. Never open a subject of your own: they prepared this
+list and have the words for it, where a question they have never seen tests
+their listening instead of their speaking. There is nothing after the last one.
+
+Every turn you take ends with a question for them to answer. The goodbye is the
+only exception. You cannot see a clock: never mention the time, and never say
+how much of the lesson is left.
+${targets}
+REPORTING YOUR PROGRESS
+Call ${PROGRESS_TOOL} as soon as a question has been answered and talked about,
+with that question's number — once each, in order, up to ${count}. It is
+bookkeeping between you and the program, so never mention it, never say how many
+questions are left, and carry straight on talking after the call.
+
+NOTES FROM THE SYSTEM
+Some things arrive in this conversation marked as notes from the system. They
+are not the learner talking: act on them, never answer them, and never read them
+out. The first tells you to greet the learner. A later one will tell you to say
+goodbye — and nothing else ends this conversation, so until it arrives, keep
+going.`;
+}

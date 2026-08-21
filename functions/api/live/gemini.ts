@@ -207,7 +207,13 @@ export async function onRequest(
 
     google.send(
       JSON.stringify({
-        setup: geminiSetup(modelPath, written.value, resolveSettings(config, choice)),
+        setup: geminiSetup(
+          choice,
+          modelPath,
+          language,
+          written.value,
+          resolveSettings(config, choice),
+        ),
       }),
     );
     return true;

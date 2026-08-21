@@ -83,14 +83,15 @@ export interface SessionHandlers {
    * The model called a tool — any tool, by whatever name, before anything has
    * been made of it.
    *
-   * THE RAW EVENT, AND THAT IS THE ENTIRE POINT. `onLessonComplete` below is an
+   * THE RAW EVENT, AND THAT IS THE ENTIRE POINT. `onQuestionDone` below is an
    * interpretation: it fires for one name and is silent for every other, which
    * means a model calling a tool this build does not implement produces no
-   * signal anywhere. That is not a hypothetical gap. A prompt published against
-   * an older protocol goes on asking for a tool that no longer exists, the model
-   * obliges, and each answer restarts it into a turn spoken on top of the last
-   * one — so the learner hears every question twice, and nothing in the account
-   * of the call says why. See PROMPT_COMPOSER_VERSION in vocoSessions.ts.
+   * signal anywhere. That is not a hypothetical gap. A prompt that asks for a
+   * tool which no longer exists gets called anyway, every call is answered
+   * because an unanswered one leaves a tutor silent, and on a surface without
+   * non-blocking calls each answer restarts the model into a turn spoken on top
+   * of the last — so the learner hears every question twice, and nothing in the
+   * account of the call says why.
    *
    * Fires for every call in the frame, including the recognised one, so the
    * account carries what actually arrived rather than what was understood. What
@@ -98,28 +99,30 @@ export interface SessionHandlers {
    * a gap between the two is exactly the sort of thing worth being able to see.
    *
    * `args` is whatever the model sent, unvalidated. It is for reading, not for
-   * acting on: a diagnostic that can print `questionAnswered {"n":1}` twice in
+   * acting on: a diagnostic that can print `questionDone {"number":1}` twice in
    * four seconds has answered the question a transcript cannot.
    */
   onToolCall?: (name: string, args?: Record<string, unknown>) => void;
   /**
-   * The tutor reported that it has reached the end of its question list.
+   * The tutor reported that one more question on its list has been answered.
    *
-   * The only structured thing a call ever says about its own progress, and it
-   * says it once — see _setup.ts on why it is a tool rather than something read
-   * out of the transcript, and COMPLETE_TOOL in vocoSessions.ts on why there is
-   * one signal at the end rather than one per question.
+   * The only structured thing a call ever says about its own progress — see
+   * _setup.ts on why it is a tool rather than something read out of the
+   * transcript, and PROGRESS_TOOL in tutorPrompt.ts on why there is one of
+   * these per question rather than a single claim at the end.
    *
-   * THE TUTOR'S CLAIM AND NOT A FACT. A model can reach this early, on a
-   * question the learner deflected, or never reach it at all. What follows from
-   * it is when the closing note goes out, and nothing else; the cap is
-   * underneath for the calls where it never arrives, and the end-of-call report
-   * reads the whole transcript and is what actually knows.
+   * THE TUTOR'S CLAIM AND NOT A FACT, and this is the layer that says so
+   * loudest: it fires for whatever the model sent, unfiltered and uncounted.
+   * A model can report a question the learner deflected, report the same one
+   * twice, report five in a single turn, or send a number that is not on the
+   * list at all. Deciding which of those to believe is useVoiceCall's job —
+   * see `acceptProgress` — and the separation is deliberate, because the run
+   * that prompted it was a lesson ended by one unexamined tool call.
    *
-   * May fire more than once — the prompt asks for a single call, and a prompt
-   * is not a guarantee. Consumers should be idempotent.
+   * `number` is the question's position in the list, counting from 1, or
+   * undefined when the model called the tool without one.
    */
-  onLessonComplete?: () => void;
+  onQuestionDone?: (number: number | undefined) => void;
 }
 
 /**
@@ -140,7 +143,7 @@ export interface VoiceSession {
    * The only way to steer a call already in progress. The clock lives in the
    * page — a model cannot see one and invents elapsed time when asked to — so
    * when the lesson's minutes are up, the page is what tells the tutor to
-   * close. See HOW THIS ENDS in `lessonBlock`.
+   * close. See LESSON_DONE_SIGNAL and TIME_UP_SIGNAL in tutorPrompt.ts.
    *
    * Not shown to the learner and not recorded: the transcript is built from
    * `inputTranscription`, which is what the microphone heard, and this never

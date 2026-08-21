@@ -28,12 +28,22 @@
  * student arrives with a code or they arrive with nothing, and pretending
  * otherwise is what made two teachers publishing overwrite each other.
  *
- * THE INSTRUCTIONS TRAVEL AS TEXT, NOT AS A STYLE ID. A style lives in the
- * house library, which the student's browser has no business reading, and the
- * persona wrap depends on a face's bio that is megabytes away in another
- * bucket. Publishing composes the two server-side and stores the result, which
- * also means a style edited after publishing does not silently change what a
- * student is talking to.
+ * THE LESSON TRAVELS AS DATA, AND THE PROMPT IS BUILT WHEN THE STUDENT DIALS.
+ * The style and the persona travel as text rather than as ids, for the reason
+ * they always did: a style lives in the house library, which a student's
+ * browser has no business reading, and a persona lives in a kit that is
+ * megabytes away in another bucket. What has changed is that this setup no
+ * longer stores the *composed* prompt those pieces make.
+ *
+ * Storing the composition froze an agreement that only one side of could be
+ * frozen. A published setup is what was handed out and never changes; the build
+ * that answers it ships again every week. When the two stopped agreeing about
+ * which tools a call declares, the stored prompt was still perfectly valid text
+ * describing a protocol nothing implemented any more — and the conversation
+ * went wrong in a way that read entirely as the model misbehaving. Composing at
+ * dial time keeps everything a teacher decided frozen, and lets the half that
+ * is really a protocol move with the code that implements it. See
+ * composeTutorPrompt in tutorPrompt.ts.
  *
  * Deliberately free of DOM imports, and of anything that imports one:
  * functions/ compiles against workers-types with no DOM lib, and the routes
@@ -43,6 +53,7 @@
  * safe to take the motion vocabulary from.
  */
 
+import type { Persona } from '../facekit/persona';
 import type { HeadMotion, MotionCadence, PressTrigger, TiltTrigger } from '../live/headMotion';
 import { LESSON_CODE } from './lessonCodes';
 
@@ -147,28 +158,61 @@ export interface PublishedSetup extends PerformanceProfile {
   // --- What is being learned, and by whom it is said.
   /** The target language, ISO-639-1, resolved against languages.ts. */
   language: string;
-  /** The composed system prompt. See the header on why it is not an id. */
-  instructions: string;
   /**
-   * Which generation of the tutor protocol `instructions` was composed against.
+   * The tutor style, as the house library had it at the moment of publishing.
    *
-   * THE ONE FIELD HERE THAT DESCRIBES THE SNAPSHOT RATHER THAN THE LESSON, and
-   * it exists because everything else in this type is deliberately frozen. A
-   * published setup is what was handed out and never changes; the build that
-   * runs it ships again every week. When those two stop agreeing about which
-   * tools a call declares, the prompt is still perfectly valid text describing a
-   * protocol nothing implements any more — and the conversation goes wrong in a
-   * way that reads entirely as the model misbehaving. See
-   * PROMPT_COMPOSER_VERSION in vocoSessions.ts for what that looked like, and
-   * why the answer is a stamp rather than a migration.
+   * Prose, not an id — see the header. What sort of tutor this is: the manner,
+   * the register, the rules about speaking the language and keeping turns
+   * short. It becomes the YOUR JOB section of the composed prompt and is the
+   * one part of that prompt an administrator writes.
    *
-   * Nothing branches on it. It is read by the student page's diagnostic and by
-   * /teach's list of what has gone out, both of which say "republish this one"
-   * and neither of which refuses to run it.
+   * Optional, and absent means the built-in conversational preset. That is not
+   * a degraded lesson: setups published before this field existed stored a
+   * composed prompt whose first section was very nearly that same text, so a
+   * code handed out last term still opens onto a tutor of the same manner. See
+   * defaultInstructions in instructions.ts.
+   */
+  style?: string;
+  /**
+   * The worn face's persona, copied out of its kit at publish time.
    *
-   * Optional by the mechanism `tiltSettle` documents below: setups written
-   * before the field existed are in the bucket and have to keep opening. Absent
-   * reads as stale — see `promptIsStale`.
+   * By value for `style`'s reason, and read at publish rather than at dial for
+   * a second one: a kit is several megabytes of artwork around one paragraph of
+   * biography, and the student page fetches it for the drawing on a path that
+   * is allowed to fail. A prompt that quietly loses its persona whenever the
+   * face bucket is slow is a tutor that changes character for no reason anybody
+   * could see.
+   *
+   * The composer takes the name and one sentence of it. See personaBlock.
+   */
+  persona?: Persona;
+  /**
+   * The composed system prompt, on setups published before there was a
+   * composer to run at dial time.
+   *
+   * READ ON ONE PATH ONLY, AND IT IS THE PATH WITH NO LESSON ON IT. A setup
+   * that carries questions is composed from the fields above and this is
+   * ignored, so an old lesson gets today's protocol with its own questions and
+   * its own targets — the whole point of the change, and why none of this needs
+   * a migration. A setup with *no* questions is a conversation rather than a
+   * lesson, which is what everything published before lessons existed is: there
+   * is nothing to compose, and the prompt it went out with is still the right
+   * one. See the composer in Eleve.tsx.
+   *
+   * @deprecated Nothing writes this. A lesson's prompt is composed at dial time.
+   */
+  instructions?: string;
+  /**
+   * Which generation of the tutor protocol the stored `instructions` were
+   * composed against, on setups old enough to have any.
+   *
+   * IT EXISTED TO NAME A PROBLEM THAT NO LONGER HAPPENS. A stored prompt could
+   * fall out of step with the build that ran it, and this stamp is what let the
+   * diagnostic and the teacher's list say "republish this one" instead of
+   * leaving somebody to work it back from a timeline. Composing at dial time
+   * removes the gap, so nothing reads the stamp any more and nothing writes it.
+   *
+   * @deprecated Kept so rows that carry it still validate. Never set this.
    */
   composerVersion?: number;
   /** Prebuilt voice name, or empty for the provider's own default. */
@@ -275,8 +319,8 @@ export function hasLesson(setup: PublishedSetup | null | undefined): boolean {
  * The same posture `looksLikeEvaluator` takes: this decides whether an object
  * is a published setup at all, not whether every enum inside it is one this
  * deployment knows. A motion nobody has heard of leaves the face on its
- * default, which is survivable; a missing `instructions` is a call with no
- * tutor in it, which is not. The narrow checks that matter — the language, the
+ * default, which is survivable; a missing `code` is a row that cannot be
+ * looked up, which is not. The narrow checks that matter — the language, the
  * evaluator, the code in an object key — are made where they are used, against
  * the lists that own them.
  */
@@ -289,8 +333,12 @@ export function looksLikeSetup(value: unknown): value is PublishedSetup {
     LESSON_CODE.test(setup.code) &&
     typeof setup.updatedAt === 'number' &&
     isString(setup.language) &&
-    isString(setup.instructions) &&
-    setup.instructions.trim().length > 0 &&
+    // Optional, all three: a setup published before the composer moved carries
+    // an `instructions` and no `style`, and one published after carries the
+    // reverse. Neither is a reason to refuse a lesson — see the fields.
+    (setup.instructions === undefined || isString(setup.instructions)) &&
+    (setup.style === undefined || isString(setup.style)) &&
+    (setup.persona === undefined || (!!setup.persona && typeof setup.persona === 'object')) &&
     // Absent is the common case and a legal one — every setup published before
     // the stamp existed. It must never be the reason a lesson stops opening:
     // the whole posture of this field is that a stale setup still teaches.

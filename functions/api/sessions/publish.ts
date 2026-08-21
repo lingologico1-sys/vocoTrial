@@ -1,6 +1,8 @@
 import { json } from '../_middleware';
 import { findLanguage } from '../../../src/realtime/languages';
-import { MAX_INSTRUCTIONS, withPersona } from '../../../src/realtime/instructions';
+import { MAX_INSTRUCTIONS, defaultInstructions } from '../../../src/realtime/instructions';
+import { composeTutorPrompt } from '../../../src/realtime/tutorPrompt';
+import { patienceSettings } from '../../../src/realtime/settings';
 import { FALLBACK_PERFORMANCE } from '../../../src/realtime/house';
 import { newLessonCode } from '../../../src/realtime/lessonCodes';
 import {
@@ -11,8 +13,6 @@ import {
 import {
   MAX_QUESTIONS,
   MAX_TARGETS,
-  PROMPT_COMPOSER_VERSION,
-  lessonBlock,
   capMinutesOf,
   type VocoSession,
 } from '../../../src/realtime/vocoSessions';
@@ -32,18 +32,16 @@ import { codeTaken, writeSetup, type SessionEnv } from './_library';
  * eventually reads is composed here, where the house library and the face
  * bucket are both in reach.
  *
- * THE PROMPT IS BUILT IN THREE LAYERS, in this order, and the order is load
- * bearing:
+ * IT NO LONGER COMPOSES THE PROMPT, and that is the change this route exists
+ * to carry. It resolves the three things a prompt is built from — the style out
+ * of the house library, the persona out of the face bucket, the lesson out of
+ * the request — and stores them as data. The student page composes them when it
+ * dials. What a teacher decided is still frozen at this moment; what is really
+ * a protocol between the prompt and the tools a call declares now moves with
+ * the build that implements it. See session.ts and composeTutorPrompt.
  *
- *   1. the tutor style          what sort of tutor this is
- *   2. the persona wrap         who, if the worn face has a bio
- *   3. the lesson block         which questions, and what to steer towards
- *
- * The lesson goes last because instructions.ts says a constraint held across a
- * whole call survives longest at the end of the prompt, and a question list
- * held for a whole call is exactly that. The persona wraps the style rather
- * than being appended to it because `withPersona` puts the style under YOUR
- * JOB, which is what wins wherever the two disagree.
+ * It still composes one *for measurement*, below, because a prompt too long to
+ * send should fail in front of the teacher rather than in front of the class.
  *
  * THE PERSONA IS READ SERVER-SIDE, out of the kit in the face bucket. It could
  * have been sent from the browser, but /teach only ever fetches the face index
@@ -101,9 +99,9 @@ type PublishEnv = SessionEnv & HouseEnv & { FACES?: R2Bucket };
  * The worn face's persona, or undefined.
  *
  * Undefined for every reason — no face, no bucket, no kit, unreadable JSON, no
- * bio written. They collapse deliberately: `withPersona` treats undefined as
- * "no persona" and returns the style untouched, so every one of these paths
- * lands on a tutor that works.
+ * bio written. They collapse deliberately: the composer treats undefined as
+ * "no persona" and leaves the section out, so every one of these paths lands on
+ * a tutor that works.
  */
 async function personaFor(
   bucket: R2Bucket | undefined,
@@ -189,18 +187,32 @@ export async function onRequestPost(
    * one asking for zero gets the floor — `capMinutesOf` is the single place
    * that decides.
    *
-   * It is NOT passed to `lessonBlock`, and that is deliberate rather than an
+   * It never reaches the prompt, and that is deliberate rather than an
    * oversight left over from the rename: the cap is the student page's alone,
    * and a tutor told a length paces to fill it. See vocoSessions.ts above
-   * `MIN_CAP_MINUTES`. The composed prompt below therefore contains no number
-   * of minutes anywhere, which is the property to preserve when editing it.
+   * `MIN_CAP_MINUTES`, and `composeTutorPrompt`, which takes no minutes at all.
    */
   const capMinutes = capMinutesOf(incoming);
 
-  const instructions = `${withPersona(style.text, persona)}${lessonBlock({
+  /*
+   * Composed here only to be measured, and thrown away.
+   *
+   * The student page builds this again at dial time from the fields stored
+   * below, with whatever composer is running then — so this is not the text
+   * that will be sent, and must not be stored as though it were. What it is
+   * good for is the one check that has to happen in front of the person who can
+   * act on it: a prompt over the ceiling fails at connect, and a student
+   * pressing Commencer cannot shorten a biography they have never seen.
+   *
+   * It reads the same defaults the student page will: a setup with no style
+   * falls back to the built-in preset there too.
+   */
+  const composed = composeTutorPrompt({
+    style: style.text || defaultInstructions(language),
+    persona,
     questions,
     targets,
-  })}`;
+  });
 
   /*
    * The same ceiling the live session enforces, checked here instead of there.
@@ -211,10 +223,10 @@ export async function onRequestPost(
    * the publish puts the error in front of the person who can act on it, and
    * names the three parts so they know which one to cut.
    */
-  if (instructions.length > MAX_INSTRUCTIONS) {
+  if (composed.length > MAX_INSTRUCTIONS) {
     return json(
       {
-        error: `The style, the persona and the questions come to ${instructions.length} characters together, and a session takes ${MAX_INSTRUCTIONS}. Shorten the questions, or pick a face with a shorter biography.`,
+        error: `The style, the persona and the questions come to ${composed.length} characters together, and a session takes ${MAX_INSTRUCTIONS}. Shorten the questions, or pick a face with a shorter biography.`,
         code: 'too_long',
       },
       400,
@@ -250,29 +262,39 @@ export async function onRequestPost(
         ? incoming.name.trim().slice(0, MAX_SESSION_LABEL)
         : undefined;
 
+  /*
+   * The lesson's patience, over the house profile's turn-taking.
+   *
+   * Spread after `performance` and so it wins, which is the whole point: a
+   * house profile is tuned once by an administrator for every lesson this
+   * deployment runs, and how long to wait for a learner assembling a sentence
+   * is the one turn-taking decision that belongs to the class in front of you.
+   * A lesson on 'standard' sends nothing and leaves the house profile's own
+   * fields — including the absence that means "let Google decide" — untouched.
+   */
+  const patience = patienceSettings(incoming.patience);
+
   const setup: PublishedSetup = {
     ...performance,
+    ...patience,
     code,
     label: label || undefined,
     updatedAt: Date.now(),
     language: language.code,
-    instructions,
-    // Stamped here because here is the only place that knows what went into
-    // the text above. `lessonBlock` and the tools a live call declares are two
-    // halves of one agreement, and a snapshot is the one thing that cannot
-    // notice the other half moving underneath it. See session.ts.
-    composerVersion: PROMPT_COMPOSER_VERSION,
+    // The two halves of a prompt that are a teacher's and an administrator's,
+    // stored as they were at this moment. The third — the protocol the tutor is
+    // told to follow — is the build's, and is not stored at all. See session.ts.
+    style: style.text,
+    persona,
     // Off the face, never off the request — see the header. An incoming `voice`
     // is a field /teach no longer sends, and honouring one would leave the door
     // open for a hand-written POST to put Fenrir behind Marta's biography.
     voice: persona?.voice ?? '',
     faceId,
     evaluatorId: typeof incoming.evaluatorId === 'string' ? incoming.evaluatorId : '',
-    // The lesson, copied rather than referenced — see session.ts. The questions
-    // are already inside `instructions` above; these are the same text again,
-    // structurally, so the student page can render a list instead of a wall of
-    // prompt. A few hundred duplicated bytes against MAX_SESSION's 30,000,
-    // bought deliberately.
+    // The lesson, copied rather than referenced — see session.ts. It is stored
+    // once now rather than twice: it used to be here structurally *and* inside
+    // a composed prompt, and the prompt is composed when the student dials.
     brief: typeof incoming.brief === 'string' ? incoming.brief : '',
     targets,
     questions,
