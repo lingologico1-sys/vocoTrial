@@ -52,22 +52,43 @@ const IDLE_POLL_MS = 1_000;
  * How long a tutor may say nothing after its bookkeeping call before the page
  * asks it to carry on.
  *
- * LONGER THAN THE GAP THAT IS NORMAL, and the measurement is why there is a
- * number here at all: on gemini-flash-31 the call comes first and the speech
- * about eight tenths of a second behind it, every time. Two and a half seconds
- * clears that several times over, so an ordinary turn never sees this — while
- * the failure it exists for was silence with no end at all, waiting on a
- * learner to give up and speak first.
+ * SIX SECONDS, AND IT WAS TWO AND A HALF, WHICH LOST A RACE IT CANNOT AFFORD TO
+ * ENTER. The old number came off a measurement that was true as far as it went:
+ * on gemini-flash-31 the bookkeeping call comes first and the speech about
+ * eight tenths of a second behind it, every time — in the lesson that was
+ * measured. On 2026-08-22 a turn took two and a half seconds to start, the note
+ * went out at 2.5s, the first audio arrived at 2.6s, and the note interrupted
+ * the turn it was asking for. The words already queued were dropped unheard,
+ * the model started again from the note, and the learner sat through eight
+ * seconds of silence — in the middle of a lesson, caused by the thing that
+ * exists to prevent exactly that.
+ *
+ * THE TWO MISTAKES COST WILDLY DIFFERENT AMOUNTS, which is what sets the
+ * number. Firing late costs a few more seconds of a silence that was going to
+ * be long anyway — the failure this exists for is silence with no end at all,
+ * waiting on a learner to give up and speak first. Firing early costs a turn
+ * that was already on its way, plus the whole regeneration behind it. So this
+ * is set well clear of the slowest start anybody has seen rather than snugly
+ * above the average one, and the average one never reaches it.
  *
  * IT REACHES THE LAST QUESTION TOO, and there is nothing left for it to race.
  * The page no longer says anything when the list completes — the tutor closes
  * that turn itself, see the closing effect in Eleve.tsx — so a report for the
  * last question with no speech behind it is the same stall as any other, and
- * the same nudge is the right answer: the turn it asks for is the goodbye. The
- * page waits six seconds of quiet before hanging up, which is this twice over,
- * so the nudge always gets its chance first.
+ * the same nudge is the right answer: the turn it asks for is the goodbye. That
+ * close waits twelve seconds on a tutor which has not spoken, which is this
+ * with room after it, so the nudge always gets its chance first.
  */
-const STALL_NUDGE_MS = 2_500;
+const STALL_NUDGE_MS = 6_000;
+
+/**
+ * How recently a note must have gone out for a barge-in to be laid at its door.
+ *
+ * A second and a half: the measured case was two tenths, and everything past a
+ * second is the learner. Wrong in either direction costs a word in a log line,
+ * which is why this is a plain number and not a mechanism.
+ */
+const NOTE_BLAME_MS = 1_500;
 
 export interface Turn {
   role: 'user' | 'agent';
@@ -865,6 +886,13 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
    * silence the learner has already filled is a silence that needs no help.
    */
   const stall = useRef<number | null>(null);
+  /**
+   * When this page last put a note on the wire, for the barge-in line to read.
+   *
+   * Starts at -Infinity rather than 0 so the first interruption of a call is
+   * never blamed on a note that was never sent.
+   */
+  const noteAt = useRef(-Infinity);
   const clearStall = useCallback(() => {
     if (stall.current === null) return;
     clearTimeout(stall.current);
@@ -874,6 +902,9 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
   const say = useCallback(
     (text: string, label?: string) => {
       const said = label ?? oneLine(text);
+      // Before the send, so an interruption caused by this note can never look
+      // older than the note that caused it.
+      noteAt.current = Date.now();
       /*
        * A note with no call to land in is recorded as dropped rather than not
        * recorded at all. That is the single most useful line this log can
@@ -1006,11 +1037,30 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
           say(KEEP_GOING_SIGNAL, 'nudge — the tutor called its tool and then said nothing');
         }, STALL_NUDGE_MS);
       },
-      // Barge-in. The audio for anything still queued was thrown away unplayed,
-      // so showing those words would put sentences on screen that were cut off
-      // mid-breath and never spoken.
+      /*
+       * Barge-in. The audio for anything still queued was thrown away unplayed,
+       * so showing those words would put sentences on screen that were cut off
+       * mid-breath and never spoken.
+       *
+       * IT SAID "THE LEARNER TALKED OVER THE TUTOR" AND THAT WAS A GUESS. The
+       * socket reports that a turn was cut off and never says by what, and the
+       * page is itself one of the two things that can do it: a note is
+       * clientContent, and clientContent landing on a turn in flight interrupts
+       * it exactly as a voice does. A diagnostic that names the learner every
+       * time hides the case worth finding, which is the page interrupting its
+       * own tutor — that cost eight seconds of dead air once, and read as the
+       * learner talking over a tutor who had not started talking yet. So the
+       * line reports the note if one had just gone out, and otherwise says the
+       * only other thing it can honestly say.
+       */
       onInterrupted: () => {
-        record('interrupted', 'the learner talked over the tutor; unheard words were dropped');
+        const sinceNote = Date.now() - noteAt.current;
+        record(
+          'interrupted',
+          sinceNote <= NOTE_BLAME_MS
+            ? `the turn was cut off ${(sinceNote / 1000).toFixed(1)}s after this page sent a note, so the note is the likely cause; unheard words were dropped`
+            : 'the learner talked over the tutor; unheard words were dropped',
+        );
         queue.current.discard();
         // The turn those words belonged to is over, so the note test starts
         // again with the next one. What is already on screen was audible and

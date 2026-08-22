@@ -19,7 +19,7 @@ import { findLanguage, defaultLanguageCode } from '../realtime/languages';
 import { codeFromUrl, fetchSetup } from '../realtime/sessionStore';
 import { defaultModelKey, findModel } from '../realtime/models';
 import type { SessionSettings } from '../realtime/settings';
-import { useVoiceCall } from '../live/useVoiceCall';
+import { useVoiceCall, type Turn } from '../live/useVoiceCall';
 import ConsignePanel from './ConsignePanel';
 import DiagnosticPanel from './DiagnosticPanel';
 import DictionaryPanel, { type LookupRequest } from './DictionaryPanel';
@@ -65,45 +65,59 @@ import type { VocabItem } from './vocab';
 const CLOSING_GRACE_MS = 45_000;
 
 /**
+ * How long the page waits after a close that is demonstrably finished.
+ *
+ * THE TURN BEING COMPLETE IS THE REAL SIGNAL, and this is the wait that gets to
+ * use it. Everything below measures silence, because silence was all the page
+ * had: a `speaking` flag is a claim about an audio queue, and a queue that has
+ * momentarily run dry looks exactly like a tutor that has finished. The
+ * transcript carries something better — the model marks the end of its own turn
+ * — so once the tutor's turn is closed and it came after the learner's last
+ * answer, there is nothing more coming and the only question left is whether
+ * the learner wants to say goodbye back.
+ *
+ * TWO SECONDS IS FOR THEM, THEN. It is not a guess about the tutor; it is the
+ * beat a person needs to start saying "au revoir" into. The clock counts the
+ * room rather than the tutor, so a learner who takes it is not cut off — their
+ * voice resets it, and the page waits again after they stop.
+ *
+ * WHAT IT REPLACES was six seconds of silence on every finished lesson, which
+ * is a long time to sit looking at a face that has already waved.
+ */
+const CLOSING_DONE_MS = 2_000;
+
+/**
  * How long the tutor has to be quiet, once a close has begun, before the page
  * hangs up on it.
  *
- * THE GRACE ABOVE IS A CEILING AND THIS IS THE ORDINARY WAY A LESSON ENDS —
- * now the only way, on a lesson that finishes. Nothing is sent when the count
- * completes: the tutor has been told to comment on the last answer and say
- * goodbye in that same turn, so what the page is waiting for is the end of a
- * goodbye that is already being spoken.
+ * FOR A CLOSE THAT NEVER SAYS IT IS FINISHED. The rule above covers the
+ * ordinary ending, where the model marks its own turn complete; this is what is
+ * left when that mark never arrives — a socket that drops mid-goodbye, a turn
+ * the model abandons. All the page has then is silence, so silence is what it
+ * measures, from the last sound anyone made.
  *
- * MEASURED FROM THE LATER OF THE CLOSE BEGINNING AND THE LAST WORD SPOKEN,
- * which is what lets one rule cover both endings. A tutor closing a finished
- * lesson keeps resetting this while it talks and is hung up on six seconds
- * after it stops. A tutor sent the cap's note is hung up on six seconds after
- * whichever came last, the note or its answer to it. Neither is cut off.
- *
- * Six seconds rather than two or three: the gap it must not mistake for the end
- * is a tutor drawing breath mid-close, and the cost of waiting too long is a
- * few seconds of silence where the cost of cutting early is talking over a
- * goodbye. The ceiling is still overhead, for a `speaking` flag stuck true on a
- * stalled player.
+ * Six seconds rather than two or three, because without the turn mark the gap
+ * this must not mistake for the end is a tutor drawing breath mid-close. The
+ * cost of waiting too long is a few seconds of silence; the cost of cutting
+ * early is hanging up over a goodbye. The ceiling is still overhead, for a
+ * `speaking` flag stuck true on a stalled player.
  */
 const CLOSING_QUIET_MS = 6_000;
 
 /**
  * The same wait, for a close the tutor has not said a word into.
  *
- * SIX SECONDS IS A RULE ABOUT A TUTOR THAT HAS BEEN TALKING, and it measures
- * the pause after the last word of a goodbye. A close that opens on silence is
- * not that: the tutor reported the last question and said nothing, or it was
- * sent the cap's note and has not answered yet, and what the page is waiting
- * for is a turn that has not started. Six seconds is too short for that. The
- * stall watchdog in useVoiceCall takes two and a half of them before it nudges,
- * and a nudged turn was measured at five seconds from note to audible speech —
- * so the old number would hang up on a goodbye already on its way.
+ * THE RULES ABOVE ARE ABOUT A TUTOR THAT HAS BEEN TALKING. A close that opens
+ * on silence is not that: the tutor reported the last question and said
+ * nothing, or it was sent the cap's note and has not answered yet, and what the
+ * page is waiting for is a turn that has not started. Six seconds is too short
+ * for that. The stall watchdog in useVoiceCall takes six before it nudges, and
+ * a nudged turn was measured at five seconds from note to audible speech.
  *
- * Twelve is that with room, and it is a ceiling nobody reaches on a healthy
- * lesson: the tutor closes the last turn itself, which means it is speaking
- * when the count completes, which means the six-second rule is the one that
- * applies. This is what a lesson that has already gone quiet costs, once.
+ * Twelve is those two with room, and it is a ceiling nobody reaches on a
+ * healthy lesson: the tutor closes the last turn itself, which means it is
+ * speaking when the count completes. This is what a lesson that has already
+ * gone quiet costs, once.
  */
 const CLOSING_SILENT_MS = 12_000;
 
@@ -137,6 +151,17 @@ const NUDGE_AFTER_MS = 15_000;
  * rather than leaving them talking into a page that keeps prodding a corpse.
  */
 const MAX_NUDGES = 2;
+
+/**
+ * The last turn a role took, or none.
+ *
+ * A loop rather than `findLast`, which this project's ES2020 lib does not
+ * carry, and rather than reversing a copy of the transcript on every render.
+ */
+function lastTurnBy(turns: Turn[], role: Turn['role']): Turn | undefined {
+  for (let at = turns.length - 1; at >= 0; at--) if (turns[at].role === role) return turns[at];
+  return undefined;
+}
 
 /** Where the learner's own language is remembered. Nothing here is a secret. */
 const L1_KEY = 'vocotrial.eleve.l1';
@@ -523,6 +548,26 @@ export default function Eleve() {
   const lessonDone = total > 0 && call.answered.length >= total;
 
   /**
+   * Whether the tutor has finished replying to the last thing the learner said.
+   *
+   * TWO FACTS, AND THE SECOND ONE IS WHAT MAKES IT MEAN ANYTHING. That the
+   * tutor's turn is marked done is the model saying it has stopped — but the
+   * turn before an unanswered answer is also marked done, and a page reading
+   * only that would hang up on a tutor whose reply had not started. So the turn
+   * must also have ended after the learner's last one did: the tutor has heard
+   * the last answer, said its piece about it, and closed.
+   *
+   * An open learner turn — they started talking again after the goodbye — has
+   * no `endedAt`, so their `at` stands in and the test reads false while they
+   * are speaking. That is the answer that keeps them from being cut off.
+   */
+  const lastAgentTurn = lastTurnBy(call.turns, 'agent');
+  const lastUserTurn = lastTurnBy(call.turns, 'user');
+  const closingTurnDone =
+    !!lastAgentTurn?.done &&
+    (lastAgentTurn.endedAt ?? 0) >= (lastUserTurn?.endedAt ?? lastUserTurn?.at ?? 0);
+
+  /**
    * The two ways a lesson ends, and what the page does about each.
    *
    * THE TUTOR CLOSES A FINISHED LESSON AND THE PAGE ONLY WAITS. The prompt
@@ -558,15 +603,6 @@ export default function Eleve() {
   const closedAt = useRef<number | null>(null);
   /** When the list was first seen complete, which is when the close begins. */
   const doneSince = useRef<number | null>(null);
-  /**
-   * When the tutor last fell quiet inside a close. See CLOSING_QUIET_MS.
-   *
-   * A ref for `closedAt`'s reason: it is read and written inside an effect that
-   * runs on every tick, and holding it as state would re-render the page once a
-   * second through the one stretch of the lesson where nothing on screen is
-   * changing.
-   */
-  const quietSince = useRef<number | null>(null);
   /** Whether the tutor has said anything at all since the close began. */
   const spokeInClose = useRef(false);
   /**
@@ -581,7 +617,6 @@ export default function Eleve() {
     if (!call.live) {
       closedAt.current = null;
       doneSince.current = null;
-      quietSince.current = null;
       spokeInClose.current = false;
       silentSince.current = null;
       nudges.current = 0;
@@ -645,31 +680,52 @@ export default function Eleve() {
     /*
      * A close is under way. What is left is deciding when it is over.
      *
-     * The clock restarts on every word the tutor says, so what it measures is
-     * always the silence since the last one — or, when the tutor never speaks
-     * again, the silence since the close began. See CLOSING_QUIET_MS for why
-     * that second case is not the unlikely one.
+     * EVERY WAIT BELOW COUNTS THE ROOM AND NOT THE TUTOR, which is a change of
+     * its own. The clock restarts on anyone making a sound, the learner
+     * included — so a learner who says goodbye back is not hung up on
+     * mid-sentence, which the old tutor-only clock would do to them at six
+     * seconds whatever they were saying.
      */
     const closingFrom = lessonDone ? doneSince.current : closedAt.current;
     if (closingFrom === null) return;
 
-    if (call.speaking) {
-      quietSince.current = null;
-      spokeInClose.current = true;
-    } else if (quietSince.current === null) {
-      quietSince.current = Date.now();
-    }
+    if (call.speaking) spokeInClose.current = true;
 
-    const quiet = quietSince.current === null ? 0 : Date.now() - quietSince.current;
-    if (quiet >= (spokeInClose.current ? CLOSING_QUIET_MS : CLOSING_SILENT_MS)) {
+    /*
+     * Which of the three waits applies, and it is a question about evidence
+     * rather than about time.
+     *
+     * `closingTurnDone` is the good case and the ordinary one: the tutor's turn
+     * is marked complete and it ended after the learner's last answer, so the
+     * goodbye has been said in full and nothing else is coming. Two seconds,
+     * for the learner to say it back.
+     *
+     * Failing that, the tutor has at least been heard during the close and the
+     * turn has not closed — a socket that dropped mid-goodbye, or a model that
+     * abandoned the turn. Six seconds of silence, on the old rule.
+     *
+     * Failing even that, the close opened on a tutor that has not spoken at
+     * all, and what is being waited for is a turn that has not started. Twelve,
+     * which is the stall nudge plus the turn it asks for.
+     */
+    const wait = closingTurnDone
+      ? CLOSING_DONE_MS
+      : spokeInClose.current
+        ? CLOSING_QUIET_MS
+        : CLOSING_SILENT_MS;
+
+    const silent = silentSince.current === null ? 0 : Date.now() - silentSince.current;
+    if (silent >= wait) {
       // Nothing shown: the tutor has just said goodbye, and a line of chrome
       // under it would be the page talking over the ending. The account still
       // gets a sentence, which is why `hangUp` takes the two separately.
       call.hangUp(
         undefined,
-        spokeInClose.current
-          ? `closed — the tutor had been quiet for ${Math.round(quiet / 1000)}s`
-          : `closed — ${Math.round(quiet / 1000)}s into the close and the tutor never spoke`,
+        closingTurnDone
+          ? `closed — the tutor finished its goodbye and the room stayed quiet for ${(silent / 1000).toFixed(1)}s`
+          : spokeInClose.current
+            ? `closed — the tutor's last turn never closed and the room had been quiet for ${Math.round(silent / 1000)}s`
+            : `closed — ${Math.round(silent / 1000)}s into the close and the tutor never spoke`,
       );
       return;
     }
@@ -680,7 +736,7 @@ export default function Eleve() {
         `closed — ${CLOSING_GRACE_MS / 1000}s into the close and the tutor was still talking`,
       );
     }
-  }, [call, call.live, call.speaking, call.heard, elapsedMs, capMs, lessonDone, total]);
+  }, [call, call.live, call.speaking, call.heard, closingTurnDone, elapsedMs, capMs, lessonDone, total]);
 
   /**
    * Whether the conversation that just ended is worth reading.
