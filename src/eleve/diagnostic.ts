@@ -462,7 +462,12 @@ export function buildDiagnostic(input: DiagnosticInput): string {
         (input.answered.length ? ` — ${input.answered.join(', ')}` : ''),
     ),
   );
-  put(field('Page says done', input.lessonDone ? 'yes — a closing note is due or sent' : 'no'));
+  put(
+    field(
+      'Page says done',
+      input.lessonDone ? 'yes — the tutor closes it and the page waits for quiet' : 'no',
+    ),
+  );
   put(field('Evaluation', reportLine(input)));
 
   put(head('THE TIMELINE'));

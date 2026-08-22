@@ -9,7 +9,7 @@ import { LESSON_CODE_LENGTH, normaliseLessonCode } from '../realtime/lessonCodes
 import { hasLesson, type PublishedSetup } from '../realtime/session';
 import { capMinutesOf } from '../realtime/vocoSessions';
 import {
-  LESSON_DONE_SIGNAL,
+  KEEP_GOING_SIGNAL,
   TIME_UP_SIGNAL,
   composeTutorPrompt,
   openingSignal,
@@ -50,83 +50,93 @@ import type { VocabItem } from './vocab';
  */
 
 /**
- * How long the tutor gets to close before the page hangs up on it.
+ * How long a close gets before the page hangs up on it regardless.
  *
- * The lesson's minutes are the conversation's length, not the call's: at the
- * limit the tutor is told to close, and closing is a turn or two of speech that
- * has to finish. Forty-five seconds is long enough for a warm goodbye and short
- * enough that a tutor which ignores the note — or never hears it, because the
- * socket dropped — does not leave the call running on the meter.
+ * The lesson's minutes are the conversation's length, not the call's: closing
+ * is a turn or two of speech that has to finish, whether it began on the tutor
+ * reaching the last answer or on the page's note at the cap. Forty-five seconds
+ * is long enough for a warm goodbye and short enough that a tutor which will
+ * not stop — or one whose `speaking` flag is stuck true on a dropped socket —
+ * does not leave the call running on the meter.
  *
- * The call can still end sooner than this. A learner who has heard goodbye
- * presses the microphone, and the idle timer is still watching underneath.
+ * The call can still end sooner than this, and almost always does: the quiet
+ * rule below is the ordinary ending, and the idle timer is watching underneath.
  */
 const CLOSING_GRACE_MS = 45_000;
 
 /**
- * How long the tutor has to be quiet, after the closing note, before the page
+ * How long the tutor has to be quiet, once a close has begun, before the page
  * hangs up on it.
  *
- * THE GRACE ABOVE IS A CEILING AND THIS IS THE ORDINARY WAY A LESSON ENDS. A
- * flat forty-five seconds assumed the goodbye always comes *after* the note, so
- * the only question was how long to allow for it. It does not always come after.
- * A tutor can reach its own goodbye before the note goes out — the last
- * progress report and the page's closing note are a beat apart, and a tutor
- * that has just finished the last question often uses that beat to wrap up. The
- * note then lands on a tutor with nothing left, and the call sits in dead air
- * for the rest of the grace period with the learner looking at a face that has
- * already waved. That is what a real diagnostic showed, and hanging up on quiet
- * rather than on a fixed number is what fixes it in both orders at once.
+ * THE GRACE ABOVE IS A CEILING AND THIS IS THE ORDINARY WAY A LESSON ENDS —
+ * now the only way, on a lesson that finishes. Nothing is sent when the count
+ * completes: the tutor has been told to comment on the last answer and say
+ * goodbye in that same turn, so what the page is waiting for is the end of a
+ * goodbye that is already being spoken.
  *
- * MEASURED FROM THE LATER OF THE NOTE AND THE LAST WORD SPOKEN, which is what
- * makes one rule cover both cases. A tutor that closes normally keeps resetting
- * this while it talks and is hung up on six seconds after it stops; a tutor with
- * nothing to say is hung up on six seconds after the note. Neither is cut off.
+ * MEASURED FROM THE LATER OF THE CLOSE BEGINNING AND THE LAST WORD SPOKEN,
+ * which is what lets one rule cover both endings. A tutor closing a finished
+ * lesson keeps resetting this while it talks and is hung up on six seconds
+ * after it stops. A tutor sent the cap's note is hung up on six seconds after
+ * whichever came last, the note or its answer to it. Neither is cut off.
  *
  * Six seconds rather than two or three: the gap it must not mistake for the end
- * is a tutor drawing breath before a closing turn, and the cost of waiting too
- * long is a few seconds of silence where the cost of cutting early is talking
- * over a goodbye. The ceiling is still overhead, for a `speaking` flag stuck
- * true on a stalled player.
+ * is a tutor drawing breath mid-close, and the cost of waiting too long is a
+ * few seconds of silence where the cost of cutting early is talking over a
+ * goodbye. The ceiling is still overhead, for a `speaking` flag stuck true on a
+ * stalled player.
  */
 const CLOSING_QUIET_MS = 6_000;
 
 /**
- * The beat the closing note waits before it will even look for a gap.
+ * The same wait, for a close the tutor has not said a word into.
  *
- * The last question being answered and the page deciding to close are two
- * different moments, and the tutor is mid-turn between them: it has just heard
- * an answer and is replying to it, which is what it was told to do. That reply
- * is the last thing the learner hears before the goodbye, and it takes about
- * half a second to start.
+ * SIX SECONDS IS A RULE ABOUT A TUTOR THAT HAS BEEN TALKING, and it measures
+ * the pause after the last word of a goodbye. A close that opens on silence is
+ * not that: the tutor reported the last question and said nothing, or it was
+ * sent the cap's note and has not answered yet, and what the page is waiting
+ * for is a turn that has not started. Six seconds is too short for that. The
+ * stall watchdog in useVoiceCall takes two and a half of them before it nudges,
+ * and a nudged turn was measured at five seconds from note to audible speech —
+ * so the old number would hang up on a goodbye already on its way.
  *
- * Which is the problem this constant solves. The tutor reports the list
- * finished just after the learner has stopped talking, so at that exact moment
- * nobody is speaking — `speaking` is false, the gap test passes, and the note
- * goes out straight into the turn that is about to begin and cuts it off. Two
- * seconds is long enough for that turn to have started and be visible as
- * speech, and short enough that nobody is left waiting on a goodbye.
+ * Twelve is that with room, and it is a ceiling nobody reaches on a healthy
+ * lesson: the tutor closes the last turn itself, which means it is speaking
+ * when the count completes, which means the six-second rule is the one that
+ * applies. This is what a lesson that has already gone quiet costs, once.
  */
-const CLOSING_SETTLE_MIN_MS = 2_000;
+const CLOSING_SILENT_MS = 12_000;
 
 /**
- * How long the closing note will then wait for a gap before going anyway.
+ * How long the room may be silent, with the list unfinished, before the page
+ * asks the tutor to carry on.
  *
- * The note is sent as `clientContent`, and clientContent arriving while the
- * tutor is mid-sentence interrupts it — the learner hears the sentence stop
- * dead, and then a goodbye. So the note waits for the tutor to stop speaking.
+ * FIFTEEN SECONDS IS CHOSEN AGAINST THE IDLE TIMER, not against a measurement
+ * of conversation. This page hangs a call up after thirty seconds with nobody
+ * talking, so a silence that reaches fifteen is halfway to being ended without
+ * an ending. Waiting longer buys a quieter page and risks spending the rest of
+ * that window on nothing; nudging sooner starts talking over a learner who is
+ * thinking, and a beginner composing a sentence in a foreign language takes
+ * longer than a fluent one would.
  *
- * This is the ceiling on that wait, and it exists because `speaking` is a claim
- * about an audio queue: a dropped socket or a stalled player leaves it true
- * with nothing coming, and a lesson that has finished must still be allowed to
- * end. Twelve seconds is longer than the turns this tutor takes — the
- * diagnostics' were three to seven — and short enough that waiting through a
- * stuck flag is not a hang.
- *
- * Only the completion note waits. The cap is a cost bound, and a call held past
- * it by a tutor that will not stop talking is the thing the cap is for.
+ * IT IS NOT THE STALL WATCHDOG. That one lives in useVoiceCall, arms on a
+ * bookkeeping call with no speech behind it, and waits two and a half seconds —
+ * it is about one turn going missing. This is about the conversation stopping,
+ * which is a different silence with a different cause, most often a tutor that
+ * decided the lesson was over ahead of the list. Both send KEEP_GOING_SIGNAL,
+ * and a tutor that ignores the first gets the second ten seconds later.
  */
-const CLOSING_SETTLE_MS = 12_000;
+const NUDGE_AFTER_MS = 15_000;
+
+/**
+ * How many times the page will do that in one call.
+ *
+ * Two, because the third is not a nudge any more. A tutor that has been asked
+ * twice to carry on and has not is not going to, and the honest ending is the
+ * idle timer saying so — which at least tells the learner the call stopped
+ * rather than leaving them talking into a page that keeps prodding a corpse.
+ */
+const MAX_NUDGES = 2;
 
 /** Where the learner's own language is remembered. Nothing here is a secret. */
 const L1_KEY = 'vocotrial.eleve.l1';
@@ -513,37 +523,43 @@ export default function Eleve() {
   const lessonDone = total > 0 && call.answered.length >= total;
 
   /**
-   * The two ways a lesson ends, and the close each one triggers.
+   * The two ways a lesson ends, and what the page does about each.
    *
-   * THE QUESTIONS END IT AND THE CLOCK ONLY CATCHES IT. This effect used to
-   * watch one condition; it watches two, and the order they are tested in is
-   * the whole design. A lesson is over when its questions are answered. The cap
-   * is a cost bound underneath — it ends a call the tutor has stopped making
-   * progress in, and on a healthy lesson it never fires at all. See
-   * vocoSessions.ts above `MIN_CAP_MINUTES`.
+   * THE TUTOR CLOSES A FINISHED LESSON AND THE PAGE ONLY WAITS. The prompt
+   * tells it to flag the last question, then comment on the answer and say
+   * goodbye in the same turn — so on a healthy lesson nothing is said from out
+   * here at all, and the ending is one turn with no gap in the middle of it.
+   * What the page kept is the decision it can actually make: it holds the count,
+   * and it will not hang up until the count says every question was answered.
+   * A tutor that says goodbye at question three of five is talking to a page
+   * that is still listening.
    *
-   * THE PAGE OWNS BOTH because nothing else can. The model is told there is no
-   * length to fill and told never to guess the time, so it has no clock and is
-   * given none — the moment of closing is decided out here and said into the
-   * conversation. Which of the two notes goes matters: one congratulates a
-   * finished lesson, the other admits to cutting one short. See
-   * LESSON_DONE_SIGNAL and TIME_UP_SIGNAL.
+   * THAT IS A TRADE AND IT IS WORTH NAMING. The page used to send a note the
+   * moment its count completed, which guaranteed a goodbye even from a tutor
+   * that had lost its place — and cost every lesson a five-second silence
+   * between the comment on the last answer and the goodbye, because the note
+   * cannot be sent any earlier. See the deleted LESSON_DONE_SIGNAL in
+   * tutorPrompt.ts for why. What replaces the guarantee is `nudge` below.
    *
-   * TWO STEPS, NOT ONE. The note goes first and the hang-up follows a grace
-   * period later, so the conversation ends on a goodbye rather than mid-clause.
-   * Cutting the socket at the limit would also cost the end of the transcript,
-   * which is the part a report reads for how the learner handled a close.
+   * THE CAP IS STILL THE PAGE'S TO SAY, and it is the only note left. The model
+   * is told there is no length to fill and told never to guess the time, so it
+   * has no clock and is given none: a lesson cut short mid-list can only be
+   * ended from here. See TIME_UP_SIGNAL, and vocoSessions.ts above
+   * `MIN_CAP_MINUTES`.
    *
-   * The ref is what stops it firing every second once the moment has passed:
-   * state would re-render before the note was sent and send it again on the
-   * next tick. It is cleared when a call ends, so a second conversation gets
-   * its own clock rather than closing the instant it connects.
+   * COMPLETION IS TESTED FIRST, so a lesson that finishes on the very tick the
+   * cap lands ends as a finished lesson rather than as one that ran out of time.
+   *
+   * The refs are what stop this firing every second once a moment has passed:
+   * state would re-render before the note was sent and send it again on the next
+   * tick. They are cleared when a call ends, so a second conversation gets its
+   * own clock rather than closing the instant it connects.
    */
   const closedAt = useRef<number | null>(null);
-  /** When the list was first seen complete, so the wait for a gap is bounded. */
+  /** When the list was first seen complete, which is when the close begins. */
   const doneSince = useRef<number | null>(null);
   /**
-   * When the tutor last fell quiet after the closing note. See CLOSING_QUIET_MS.
+   * When the tutor last fell quiet inside a close. See CLOSING_QUIET_MS.
    *
    * A ref for `closedAt`'s reason: it is read and written inside an effect that
    * runs on every tick, and holding it as state would re-render the page once a
@@ -551,6 +567,14 @@ export default function Eleve() {
    * changing.
    */
   const quietSince = useRef<number | null>(null);
+  /** Whether the tutor has said anything at all since the close began. */
+  const spokeInClose = useRef(false);
+  /**
+   * When the room last went completely silent, and how often that has been
+   * nudged. See NUDGE_AFTER_MS.
+   */
+  const silentSince = useRef<number | null>(null);
+  const nudges = useRef(0);
   const capMs = session ? capMinutesOf(session) * 60_000 : 0;
 
   useEffect(() => {
@@ -558,69 +582,105 @@ export default function Eleve() {
       closedAt.current = null;
       doneSince.current = null;
       quietSince.current = null;
+      spokeInClose.current = false;
+      silentSince.current = null;
+      nudges.current = 0;
       return;
     }
     if (elapsedMs === null) return;
 
-    if (closedAt.current === null) {
-      // Completion first: a lesson that finishes on the very tick the cap
-      // lands should still be told it finished.
-      if (lessonDone) {
-        if (doneSince.current === null) doneSince.current = Date.now();
-        /*
-         * Held, in two stages, because the note interrupts whatever is being
-         * said when it lands and there is always something about to be said.
-         *
-         * First a fixed beat, so the turn that answering the tool provokes has
-         * time to start; then until the tutor is actually quiet, with a ceiling
-         * on the waiting. Both halves are needed: without the beat the gap test
-         * passes in the silence right before that turn begins, and without the
-         * gap test the note lands in the middle of it. See CLOSING_SETTLE_MIN_MS.
-         */
-        const waited = Date.now() - doneSince.current;
-        if (waited < CLOSING_SETTLE_MIN_MS) return;
-        if (call.speaking && waited < CLOSING_SETTLE_MS) return;
+    // Nobody is making a sound: not the tutor, and not the microphone. Held as
+    // one clock because what `nudge` waits for is the room being silent, and
+    // either of them talking is the reason not to.
+    if (call.speaking || call.heard) silentSince.current = null;
+    else if (silentSince.current === null) silentSince.current = Date.now();
+
+    if (lessonDone && doneSince.current === null) doneSince.current = Date.now();
+
+    if (!lessonDone && closedAt.current === null) {
+      if (capMs && elapsedMs >= capMs) {
         closedAt.current = Date.now();
-        // Labelled, because the two closes are indistinguishable in a log
-        // otherwise — both notes open on the same sixty characters of marker,
-        // and which one went is the difference between a lesson that finished
-        // and one that was cut off. See `say` in useVoiceCall.
-        call.say(LESSON_DONE_SIGNAL, 'closing — every question answered');
+        call.say(TIME_UP_SIGNAL, 'closing — out of time, questions unanswered');
         return;
       }
-      if (!capMs || elapsedMs < capMs) return;
-      closedAt.current = Date.now();
-      call.say(TIME_UP_SIGNAL, 'closing — out of time, questions unanswered');
+
+      /*
+       * The tutor stopped with the lesson unfinished, and nobody has filled the
+       * silence.
+       *
+       * WHAT IT IS FOR is the cost of letting the tutor own the ending: one
+       * that closes at question three has said goodbye to a page that will not
+       * hang up, and without this the call runs to the idle timer and tells a
+       * learner who was mid-lesson that nobody was talking. It is not specific
+       * to that — a tutor that simply stops is the same silence and the same
+       * cure — which is why it tests the silence rather than trying to read a
+       * goodbye out of the transcript in twenty-eight languages.
+       *
+       * WHY IT CAN AFFORD TO BE WRONG. The learner sitting and thinking looks
+       * exactly like this from out here, and there is no signal that separates
+       * them. What makes that acceptable is the alternative already in place:
+       * fifteen seconds into a silence, the thirty-second idle timer is halfway
+       * to hanging the call up. A tutor asking again is a better use of that
+       * window than a countdown the learner cannot see, and if they were
+       * thinking, they have been asked the question a second time.
+       *
+       * TWICE, AND ONLY INTO A FRESH SILENCE. The clock is reset on the nudge,
+       * so a second one costs another full fifteen seconds; after that the page
+       * has nothing useful left to say and the idle timer is the right answer.
+       */
+      const silent = silentSince.current === null ? 0 : Date.now() - silentSince.current;
+      if (silent >= NUDGE_AFTER_MS && nudges.current < MAX_NUDGES) {
+        nudges.current += 1;
+        silentSince.current = Date.now();
+        call.say(
+          KEEP_GOING_SIGNAL,
+          `nudge — ${NUDGE_AFTER_MS / 1000}s of silence, ${
+            total ? `${call.answered.length} of ${total} answered` : 'and this lesson has no list'
+          }`,
+        );
+      }
       return;
     }
 
     /*
-     * The note has gone. What is left is deciding when the goodbye is over.
+     * A close is under way. What is left is deciding when it is over.
      *
      * The clock restarts on every word the tutor says, so what it measures is
      * always the silence since the last one — or, when the tutor never speaks
-     * again, the silence since the note itself. See CLOSING_QUIET_MS for why
+     * again, the silence since the close began. See CLOSING_QUIET_MS for why
      * that second case is not the unlikely one.
      */
-    if (call.speaking) quietSince.current = null;
-    else if (quietSince.current === null) quietSince.current = Date.now();
+    const closingFrom = lessonDone ? doneSince.current : closedAt.current;
+    if (closingFrom === null) return;
+
+    if (call.speaking) {
+      quietSince.current = null;
+      spokeInClose.current = true;
+    } else if (quietSince.current === null) {
+      quietSince.current = Date.now();
+    }
 
     const quiet = quietSince.current === null ? 0 : Date.now() - quietSince.current;
-    if (quiet >= CLOSING_QUIET_MS) {
+    if (quiet >= (spokeInClose.current ? CLOSING_QUIET_MS : CLOSING_SILENT_MS)) {
       // Nothing shown: the tutor has just said goodbye, and a line of chrome
       // under it would be the page talking over the ending. The account still
       // gets a sentence, which is why `hangUp` takes the two separately.
-      call.hangUp(undefined, `closed — the tutor had been quiet for ${Math.round(quiet / 1000)}s`);
+      call.hangUp(
+        undefined,
+        spokeInClose.current
+          ? `closed — the tutor had been quiet for ${Math.round(quiet / 1000)}s`
+          : `closed — ${Math.round(quiet / 1000)}s into the close and the tutor never spoke`,
+      );
       return;
     }
 
-    if (Date.now() - closedAt.current >= CLOSING_GRACE_MS) {
+    if (Date.now() - closingFrom >= CLOSING_GRACE_MS) {
       call.hangUp(
         undefined,
-        `closed — ${CLOSING_GRACE_MS / 1000}s after the closing note and the tutor was still talking`,
+        `closed — ${CLOSING_GRACE_MS / 1000}s into the close and the tutor was still talking`,
       );
     }
-  }, [call, call.live, call.speaking, elapsedMs, capMs, lessonDone]);
+  }, [call, call.live, call.speaking, call.heard, elapsedMs, capMs, lessonDone, total]);
 
   /**
    * Whether the conversation that just ended is worth reading.

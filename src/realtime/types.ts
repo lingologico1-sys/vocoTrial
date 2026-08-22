@@ -157,7 +157,10 @@ export interface VoiceSession {
    * The only way to steer a call already in progress. The clock lives in the
    * page — a model cannot see one and invents elapsed time when asked to — so
    * when the lesson's minutes are up, the page is what tells the tutor to
-   * close. See LESSON_DONE_SIGNAL and TIME_UP_SIGNAL in tutorPrompt.ts.
+   * close. See TIME_UP_SIGNAL in tutorPrompt.ts, and KEEP_GOING_SIGNAL beside
+   * it, which is the other thing a page has ever needed to say. A lesson that
+   * finishes its list needs nothing said at all: the tutor closes that one
+   * itself.
    *
    * Not shown to the learner and not recorded: the transcript is built from
    * `inputTranscription`, which is what the microphone heard, and this never

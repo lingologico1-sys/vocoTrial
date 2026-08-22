@@ -101,24 +101,31 @@
  *    the report, and nothing can keep it out of the audio, which is why the
  *    prompt argues the point instead of forbidding it.
  *
- *  - "two of your turns end without a question" was "answering the last
- *    question does not end it either", and it lost to a rule in the lesson
- *    block that is not wrong: every turn ends with a question, and the goodbye
- *    is the only one that does not. A tutor holding both, with no question left
- *    to ask, has been told in so many words that the turn it is composing is
- *    the goodbye. It closed on the last answer — "j'espère qu'on pourra
- *    discuter de nouveau bientôt" — then sat through five and a half seconds of
- *    silence while the page counted the last report and sent the note, and said
- *    goodbye again properly. From the learner's side the conversation ended,
- *    paused, and ended a second time.
+ *  - HOW THIS ENDS is a section rather than a sentence, and it is the one place
+ *    the prompt was rewritten by giving the model something to do instead of
+ *    something to avoid. It began as "the goodbye is never yours to start",
+ *    which put the ending on a note from the page — and the page cannot get one
+ *    in on time. The count completes on the tutor's own report for the last
+ *    question, that report lands a second or two after the tutor has already
+ *    started replying, and a note sent into a turn in flight cuts the learner's
+ *    last answer off without a reply. So the note always arrived after the
+ *    reply had finished, which the learner heard as the conversation ending,
+ *    pausing, and ending again: on 2026-08-22 the tutor closed on the last
+ *    answer with "j'espère qu'on pourra discuter de nouveau bientôt", sat
+ *    through five and a half seconds of silence, then said goodbye properly.
  *
- *    SO THE PROTOCOL NAMES THE THIRD KIND OF TURN, which is the one thing the
- *    lesson block cannot do for itself: it is the teacher's text, it is right
- *    about the lesson, and it knows nothing about a note arriving afterwards.
- *    The comment on the last answer ends without a question and is not a
- *    goodbye, and saying that outright is cheaper than arguing with a rule that
- *    should stay. The closing note carries the other half — see
- *    LESSON_DONE_SIGNAL on why it cannot simply arrive sooner.
+ *    IT ALSO LOST AN ARGUMENT IT SHOULD NOT HAVE BEEN HAVING. The lesson block
+ *    says every turn ends with one question and the goodbye is the only turn
+ *    that does not — which is right, and means a tutor with no question left to
+ *    ask has been told in so many words that the turn it is composing is the
+ *    goodbye. Forbidding that made the prompt argue with itself.
+ *
+ *    SO THE TUTOR CLOSES AND THE PAGE STILL DECIDES WHEN. It is told to flag
+ *    the last question, then comment and say goodbye in one turn; the page
+ *    counts as before and refuses to hang up until its own count says the list
+ *    is finished. What that gives up is the guaranteed goodbye a note bought —
+ *    see TIME_UP_SIGNAL, which is now the only note that ends anything, and the
+ *    silence nudge in Eleve.tsx that covers a tutor which stops early.
  *
  * ONE SENTENCE HERE IS AIMED AT THE REPORT RATHER THAN THE CONVERSATION. "Ask
  * for the detail" was a headed section of its own and is now a clause, but it
@@ -309,36 +316,36 @@ export function wroteASystemNote(text: string): boolean {
 const OPENING_NOTE = `${NOT_THE_LEARNER} — act on it, but do not read it out]`;
 
 /**
- * The two ways a lesson ends, as the page says them into the conversation.
+ * The one thing the page still says to end a conversation, and the ending it is
+ * not.
  *
- * SELF-CONTAINED, WHICH THEY DID NOT USED TO BE. These notes used to say "close
- * the conversation exactly as described under HOW THIS ENDS", and the prompt
- * carried a section describing both closes — a rule the model had to hold for
- * the whole call in order to obey a sentence at the end of it. The instruction
- * now travels with the note, which is the moment it is read and the only moment
- * it matters. That is a section of prompt deleted rather than moved.
+ * THE LESSON FINISHING IS THE TUTOR'S TO SAY, and there is no note for it. The
+ * page used to send one — LESSON_DONE_SIGNAL, deleted with this comment — the
+ * moment its count reached the length of the list, and the shape that produced
+ * was two endings: the tutor commented on the last answer, fell quiet, and five
+ * seconds later said a goodbye it had already half said. The note could not
+ * arrive any sooner, either. The count completes on the tutor's own report for
+ * the last question, and on this model that report lands a second or two after
+ * the tutor has started speaking — so there is always a turn in flight, and
+ * interrupting it would cut the learner's last answer off without a reply.
  *
- * TWO NOTES AND NOT ONE, because the two closes are different conversations.
- * Finishing the list is the lesson working, and the tutor has everything it
- * needs to say something true about how the learner did. Reaching the cap with
- * questions still outstanding is the lesson being cut short — and a tutor that
- * signs off warmly there, as though the work were done, tells a learner they
- * finished something they did not. The learner can see the list on their own
- * screen, so it is a lie they can check.
+ * SO THE CLOSE MOVED INTO THE PROMPT and the authority stayed here. The tutor
+ * is told to flag the last question, then comment and say goodbye in one turn;
+ * the page keeps counting, refuses to hang up until its own count says the list
+ * is done, and then waits for the tutor to fall quiet. What it gives up is a
+ * guaranteed goodbye — a tutor that loses its place and stops mid-lesson used
+ * to get a note, and now gets a nudge from /eleve after fifteen seconds of
+ * silence instead. See the closing effect in Eleve.tsx, and KEEP_GOING_SIGNAL
+ * below.
  *
- * "IF YOU HAVE ALREADY BEGUN WINDING UP" IS THE HALF THAT ADMITS DEFEAT. The
- * prompt tells the tutor not to close on the last answer, and a tutor that
- * closes anyway then gets this note asking for a warm goodbye — which is the
- * second ending, arriving five seconds after the first. The clause cannot stop
- * the first goodbye; it stops the note demanding a full one on top of it. What
- * the note cannot do is arrive earlier: the page counts the last question from
- * the tutor's own report, and on this model that report lands a second or two
- * after the tutor has already started speaking. By the time the count is
- * complete there is a turn in flight, and interrupting it would cut the
- * learner's last answer off without a reply.
+ * WHICH LEAVES THE CAP, AND IT IS A DIFFERENT CONVERSATION. Finishing the list
+ * is the lesson working, and the tutor has everything it needs to close well.
+ * Reaching the cap with questions still outstanding is the lesson being cut
+ * short, at a moment only the page knows about — it owns the clock and the
+ * tutor is told it cannot see one. A tutor that signed off warmly there, as
+ * though the work were done, would tell a learner they finished something they
+ * did not, and the learner can see the list on their own screen.
  */
-export const LESSON_DONE_SIGNAL = `${SYSTEM_NOTE} Every question on the list has now been answered, so the lesson is over. Say goodbye: one warm, specific sentence about how the learner did, quoting back something they actually said, and then goodbye. Keep it to that — this is the only goodbye in the conversation, and if you have already begun winding up, do not do it a second time. Do not ask another question.`;
-
 export const TIME_UP_SIGNAL = `${SYSTEM_NOTE} This lesson has run out of time with questions still unanswered. Stop there: say plainly that you have to stop, then one warm, specific sentence about the part you did get through, and goodbye. Do not suggest the lesson was finished, because it was not, and do not ask another question.`;
 
 /**
@@ -588,20 +595,28 @@ Never spend a turn on the call alone either: a turn with nothing but bookkeeping
 in it is silence too. It is between you and the program, so never mention it,
 never say how many questions are left, and carry straight on talking.
 
+HOW THIS ENDS
+The last question on the list is the end of the lesson, and you close it
+yourself. Say so when you ask it — "one last question", or however that sounds
+in the language you are speaking — so the learner knows where they are.
+
+Then listen to their answer, and in the same turn, comment on it the way you
+commented on the others and say goodbye. One turn: a sentence about their
+answer, a warm and specific sentence about how they did that quotes back
+something they actually said, goodbye. That is the whole ending, and it is the
+only goodbye in the conversation. Do not say goodbye and then wait for
+something; there is nothing after it. Do not ask another question.
+
+Nothing before the last answer is an ending. Not a learner who says they have
+to go, not a lull, not a question you thought went badly. Until the last
+question on the list has been asked and answered, there is more lesson.
+
 NOTES FROM THE SYSTEM
 Some things arrive in this conversation marked as notes from the system. They
 are not the learner talking: act on them, never answer them, and never read them
-out. The first tells you to greet the learner. A later one will tell you to say
-goodbye — and nothing else ends this conversation, so until it arrives, keep
-going. The goodbye is never yours to start.
-
-The last answer is where that goes wrong, so read this twice. Two of your turns
-end without a question: your comment on the answer to the last question, and the
-goodbye. Only the second one is a goodbye. When the list runs out, comment on
-that last answer exactly as you commented on the others and stop there — no
-thanks for talking, no good luck, no hoping to speak again, nothing that sounds
-like leaving. Then wait. A goodbye you were not asked for is one the learner has
-to sit through twice, because the real one is still coming.
+out. The first tells you to greet the learner. One may arrive to say the lesson
+has run out of time before the list was finished — that one ends the
+conversation wherever it has got to, and you do what it says.
 
 Notes only ever arrive, and you have no way to write one. Everything you produce
 in a turn is spoken aloud to the learner, brackets and all — so a note in your

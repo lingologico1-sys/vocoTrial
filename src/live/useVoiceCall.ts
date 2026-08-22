@@ -59,11 +59,13 @@ const IDLE_POLL_MS = 1_000;
  * the failure it exists for was silence with no end at all, waiting on a
  * learner to give up and speak first.
  *
- * IT ALSO SITS BEHIND THE CLOSING NOTE, deliberately. /eleve waits two seconds
- * after the list is complete before saying goodbye — CLOSING_SETTLE_MIN_MS —
- * so on the last question of a lesson the closing note goes first and the reply
- * to it disarms this. A shorter wait here would race that, and the two notes
- * would arrive together at the one moment they must not.
+ * IT REACHES THE LAST QUESTION TOO, and there is nothing left for it to race.
+ * The page no longer says anything when the list completes — the tutor closes
+ * that turn itself, see the closing effect in Eleve.tsx — so a report for the
+ * last question with no speech behind it is the same stall as any other, and
+ * the same nudge is the right answer: the turn it asks for is the goodbye. The
+ * page waits six seconds of quiet before hanging up, which is this twice over,
+ * so the nudge always gets its chance first.
  */
 const STALL_NUDGE_MS = 2_500;
 
