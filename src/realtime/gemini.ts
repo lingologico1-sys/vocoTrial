@@ -194,10 +194,33 @@ export async function startGeminiSession(
    */
   let answering = false;
 
-  /** Emitted once per model turn: their turn ended when this one began. */
+  /**
+   * Whether the learner has said anything in the turn now being answered.
+   *
+   * THE CLOSE BELOW USED TO GO OUT UNCONDITIONALLY, and a turn the learner
+   * never spoke in was closed as though they had: the greeting is a model turn
+   * answering the page's own opening note, so every lesson began by crediting
+   * the learner with a turn they had not taken. Nothing on screen showed it —
+   * an empty turn appends nothing — but `learnerTurns` in useVoiceCall counted
+   * it, and that count is the ceiling on what the tutor is allowed to claim.
+   * A ceiling one higher than the truth is one unearned progress report per
+   * lesson, which is the one thing that number exists to refuse.
+   */
+  let heardLearner = false;
+
+  /**
+   * Emitted once per model turn: their turn ended when this one began.
+   *
+   * IT CLOSES THE LEARNER ONLY IF THE LEARNER SPOKE. `answering` still flips
+   * either way — it is the flag the stall watchdog reads, and a silent turn is
+   * exactly what that watches for — but a turn with no learner speech in it has
+   * no turn of theirs to end. See `heardLearner`.
+   */
   const answerBegins = () => {
     if (answering) return;
     answering = true;
+    if (!heardLearner) return;
+    heardLearner = false;
     handlers.onTranscript({ role: 'user', text: '', done: true });
   };
 
@@ -363,6 +386,32 @@ export async function startGeminiSession(
          * look like separate moments and invited the layer above to hold the
          * second against the first for arriving too soon.
          */
+        /*
+         * The learner's turn ends here, and not when the tutor starts talking.
+         *
+         * A TOOL CALL IS THIS TURN BEGINNING. The rule above `answerBegins` is
+         * that the only thing on the wire saying the learner has stopped is the
+         * model starting to answer — the server's own voice detection, read at
+         * the earliest honest moment. A frame of bookkeeping is the model
+         * answering: it is generated in response to that same judgement, and on
+         * this model it arrives first, about eight tenths of a second ahead of
+         * the audio. So it is the earlier honest moment, and the one to use.
+         *
+         * WITHOUT THIS THE REPORT IT CARRIES CANNOT BE BELIEVED. `acceptProgress`
+         * refuses a report the learner has not spoken enough times to have
+         * earned, and the tutor is now told to report a question as the learner
+         * finishes answering it — so the report for question five arrives while
+         * the fifth answer is still, on this side, an open turn. It would be
+         * refused, never repaired, and the lesson would run to the cap with
+         * every question answered. Closing the turn here is what makes the
+         * count and the claim describe the same moment.
+         *
+         * AFTER `spoken` IS READ, NEVER BEFORE. That flag is the evidence the
+         * stall watchdog arms on, and it has to mean "had the model said
+         * anything when it called" rather than "has this turn begun".
+         */
+        answerBegins();
+
         const numbers = calls
           .filter((call) => call.name === PROGRESS_TOOL)
           .map((call) => (call.args as { number?: unknown } | undefined)?.number)
@@ -388,6 +437,7 @@ export async function startGeminiSession(
       }
 
       if (content.inputTranscription?.text) {
+        heardLearner = true;
         handlers.onTranscript({ role: 'user', text: content.inputTranscription.text, done: false });
       }
 

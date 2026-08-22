@@ -403,6 +403,17 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
    * deciding what a full sentence is in twenty-eight languages, on a transcript
    * of a hesitant beginner — see the report for who is allowed to make that
    * call, and on what evidence.
+   *
+   * IT COUNTS TO THE MOMENT, WHICH IT DID NOT USED TO. Two things in gemini.ts
+   * decide what arrives here: a turn is closed when the model begins answering
+   * — including when it begins with a tool call, which on this model is the
+   * first thing it emits — and a turn the learner never spoke in is not closed
+   * at all. Before the first, a report made as the learner stopped talking
+   * arrived while their turn was still open here and was refused for being one
+   * short. Before the second, the greeting credited every lesson with a turn
+   * nobody had taken, and the two cancelled out — a ceiling one too high
+   * meeting a count one too low. They are both true now instead, which is the
+   * only version of this that stays true when either end changes.
    */
   const learnerTurns = useRef(0);
 
