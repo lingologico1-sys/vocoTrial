@@ -42,10 +42,24 @@
  *    The tutor opened a lesson with three of them in a single turn, and a
  *    learner answers the one they heard last — so the follow-up that was meant
  *    to grow the answer is the one that gets dropped.
- *  - "not the moment they answer, but after you have replied" was "as soon as a
- *    question has been answered and talked about". The tutor reported question
- *    one immediately after "Ça va bien, merci", having said nothing about it,
- *    which is a lesson that can march through five questions on five shrugs.
+ *  - "the reply and the call are one turn, made together" has been rewritten
+ *    twice, in opposite directions, and both runs are worth keeping. It began as
+ *    "as soon as a question has been answered and talked about", and the tutor
+ *    reported question one immediately after "Ça va bien, merci" having said
+ *    nothing about it — a lesson that can march through five questions on five
+ *    shrugs. So it became "not the moment they answer, but after you have
+ *    replied", which fixed that and bought a worse thing: "after you have
+ *    replied" is true of every turn from then on, and the model settled on the
+ *    next one. Every report arrived one turn late — question one on the turn
+ *    that asked question three — which nothing notices until the end of the
+ *    list, where there is no next turn to carry the last report. Observed: the
+ *    tutor replied to the fifth answer at 0:58, the page was still counting
+ *    four, and the learner sat in silence for twenty-one seconds before asking,
+ *    in French, how one ends this. That question was a turn, so the fifth report
+ *    rode it, and the lesson then closed twice — once in answer to the learner
+ *    and once on the page's note. Naming the turn is what closes both readings:
+ *    not the moment they answer, not the turn after, but the turn the reply is
+ *    in.
  *  - "never as a turn of its own" is about dead air, and is the one that is
  *    really about the transport. `scheduling: 'SILENT'` on the tool response is
  *    what stops the result from becoming a turn — the thing that made the tutor
@@ -451,12 +465,15 @@ ${rules}
 REPORTING YOUR PROGRESS
 Call ${PROGRESS_TOOL} when a question is finished, with that question's number —
 once each, in order, up to ${count}. Finished means the learner has answered it
-and you have already said something back about their answer; not the moment they
-answer, but after you have replied. Make the call in a turn where you are also
-speaking, never as a turn of its own: a turn spent only on the call is silence,
-and the learner is left listening to nothing. It is bookkeeping between you and
-the program, so never mention it, never say how many questions are left, and
-carry straight on talking.
+and you are saying something back about their answer, so the call belongs to
+that turn: the reply and the call for the question it replies to are one turn,
+made together. Never the turn after. The turn after may not come — the reply to
+the last answer on the list ends the lesson, and a call left waiting for a turn
+that never happens leaves the learner sitting in silence, waiting for you.
+
+Never make it a turn of its own either: a turn spent only on the call is silence
+too. It is bookkeeping between you and the program, so never mention it, never
+say how many questions are left, and carry straight on talking.
 
 NOTES FROM THE SYSTEM
 Some things arrive in this conversation marked as notes from the system. They

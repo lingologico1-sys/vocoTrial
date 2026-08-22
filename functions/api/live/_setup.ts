@@ -37,6 +37,14 @@ import { PROGRESS_TOOL } from '../../../src/realtime/tutorPrompt';
  * is read at the moment the model is deciding whether to call, which is the
  * only moment it decides anything.
  *
+ * WHICH IS ALSO WHY IT NAMES THE TURN. "You have talked about their answer" is
+ * a past tense, and read at the moment of deciding it describes a turn already
+ * over — so a model that satisfies it waits for the next one and reports every
+ * question one turn late. That is invisible until the end of the list, where
+ * the turn it is waiting for never comes and the last report never arrives. The
+ * present tense here is the whole repair: this turn, the one being spoken.
+ * tutorPrompt.ts has the run it was measured on.
+ *
  * DECLARED ON EVERY CALL, including the ones with no lesson. The alternative is
  * plumbing a question count from the browser through _resolve.ts to here, to
  * save a few dozen tokens on the minority of calls that are the workshop trying
@@ -56,7 +64,7 @@ function progressDeclaration(model: ModelChoice) {
   return {
     name: PROGRESS_TOOL,
     description:
-      "Record that one question from the system instructions is finished: the learner has answered it in at least a full sentence and you have talked about their answer. Pass that question's number in the list, counting from 1, and call this once per question as you go. Bookkeeping only: it is never spoken about and produces no reply to read out.",
+      "Record that one question from the system instructions is finished: the learner has answered it in at least a full sentence and this turn is the one where you talk about their answer. Call it in that turn, alongside what you are saying — not in the turn after, which for the last question on the list never comes. Pass that question's number in the list, counting from 1, once per question as you go. Bookkeeping only: it is never spoken about and produces no reply to read out.",
     parameters: {
       type: 'OBJECT',
       properties: {
