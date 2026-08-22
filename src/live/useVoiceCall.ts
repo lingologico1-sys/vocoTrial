@@ -90,6 +90,21 @@ const STALL_NUDGE_MS = 6_000;
  */
 const NOTE_BLAME_MS = 1_500;
 
+/**
+ * How long the transcript of a finished utterance is waited for.
+ *
+ * The learner's own words arrive after they have stopped saying them, and the
+ * pill shows a loader across that gap rather than the sentence before it — see
+ * `transcribing`. This is the end of that patience: the microphone hears things
+ * that are never transcribed at all, a cough or a door, and a loader armed by
+ * one of those with no transcript coming would spin for the rest of the call.
+ *
+ * Eight seconds is long enough to be wrong only when the provider is having a
+ * bad minute, and short enough that a learner who coughed does not sit in front
+ * of a page that appears to still be thinking about it.
+ */
+const TRANSCRIPT_WAIT_MS = 8_000;
+
 export interface Turn {
   role: 'user' | 'agent';
   text: string;
@@ -277,6 +292,20 @@ export interface VoiceCall {
   speaking: boolean;
   heard: boolean;
   /**
+   * Whether the learner has said something the page has not shown them yet.
+   *
+   * TRUE FROM THE FIRST SOUND OF AN UTTERANCE TO THE ARRIVAL OF ITS TRANSCRIPT,
+   * which is a longer span than `heard` and is the one the pill needs. `heard`
+   * ends when the room goes quiet; the words land a beat after that, and in
+   * that beat the pill was showing the *previous* answer as though it were the
+   * one just given. So this stays up over both halves — the speaking and the
+   * waiting — and the pill spends it on a loader.
+   *
+   * It gives up after TRANSCRIPT_WAIT_MS of silence with nothing transcribed,
+   * because not every sound a microphone hears becomes a sentence.
+   */
+  transcribing: boolean;
+  /**
    * Whether the tutor has finished its opening turn and handed over the floor.
    *
    * FALSE FOR THE WHOLE OF A CALL'S FIRST STRETCH — the dialling, and then the
@@ -386,6 +415,21 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
    * mid-sentence cannot leave the face believing it is still being spoken to.
    */
   const [heard, setHeard] = useState(false);
+  /**
+   * See `transcribing` on VoiceCall. The timer beside it is the giving up.
+   *
+   * Armed when a voice stops rather than when it starts, so a learner still
+   * talking is never timed out mid-sentence: the clock only ever runs over the
+   * silence at the end of an utterance, which is the part a transcript is
+   * supposed to arrive in.
+   */
+  const [transcribing, setTranscribing] = useState(false);
+  const waiting = useRef<number | null>(null);
+  const stopWaiting = useCallback(() => {
+    if (waiting.current === null) return;
+    clearTimeout(waiting.current);
+    waiting.current = null;
+  }, []);
   /**
    * See `openingDone` on VoiceCall for what this means. The ref beside it is
    * the guard that keeps it honest: it flips on an *end* of tutor audio, and
@@ -730,6 +774,12 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
         // Partials arrive on the way to it and must not each count as a turn.
         if (delta.done) {
           learnerTurns.current += 1;
+          // The words the loader was standing in for. Cleared here rather than
+          // on the turn appearing in `turns`, because this is the same frame
+          // and the pill would otherwise flicker back to the previous sentence
+          // for a paint on its way to the new one.
+          stopWaiting();
+          setTranscribing(false);
           // The turn an early report was waiting on. Taken here rather than on a
           // timer because this is the moment it stops being a claim about the
           // future — and the closing note is two seconds behind the count, so a
@@ -745,7 +795,7 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
       // what -Infinity means to the queue: due on the next frame.
       queue.current.push({ text: delta.text, done: delta.done, at: delta.at ?? -Infinity });
     },
-    [append, takeHeld],
+    [append, stopWaiting, takeHeld],
   );
 
   /**
@@ -944,6 +994,8 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
     setDetail(null);
     setMuted(false);
     clearStall();
+    stopWaiting();
+    setTranscribing(false);
     queue.current.discard();
     setOpeningDone(false);
     tutorHasSpoken.current = false;
@@ -972,6 +1024,8 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
           setTap(null);
           setSpeaking(false);
           setHeard(false);
+          stopWaiting();
+          setTranscribing(false);
           setOpeningDone(false);
           tutorHasSpoken.current = false;
           // Measured from the moment the call went live rather than from the
@@ -1026,6 +1080,19 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
         // button promising a tutor that has plainly already finished.
         if (active) setOpeningDone(true);
         setHeard(active);
+        /*
+         * The loader's span, which starts here and usually ends at a
+         * transcript. A voice starting arms it; a voice stopping starts the
+         * clock on how long the words behind it are waited for. See
+         * `transcribing` and TRANSCRIPT_WAIT_MS.
+         */
+        stopWaiting();
+        if (active) setTranscribing(true);
+        else
+          waiting.current = window.setTimeout(() => {
+            waiting.current = null;
+            setTranscribing(false);
+          }, TRANSCRIPT_WAIT_MS);
       },
       /*
        * Every tool call, named, with what it carried and what became of it.
@@ -1130,7 +1197,7 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
       setStatus('error');
       setDetail(error instanceof Error ? error.message : 'Could not start the session');
     }
-  }, [acceptProgress, append, clearStall, cue, onTranscript, record, reveal, say]);
+  }, [acceptProgress, append, clearStall, cue, onTranscript, record, reveal, say, stopWaiting]);
 
   // Read-then-set rather than a functional updater: the session call is a side
   // effect, and StrictMode double-invokes updaters in development, so putting
@@ -1148,6 +1215,7 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
     tap,
     speaking,
     heard,
+    transcribing,
     openingDone,
     muted,
     tiltCue,

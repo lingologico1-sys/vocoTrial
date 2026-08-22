@@ -953,6 +953,7 @@ export default function Eleve() {
               tap={call.tap}
               speaking={call.speaking}
               heard={call.heard}
+              transcribing={call.transcribing}
               live={call.live}
               openingDone={call.openingDone}
               busy={call.busy}

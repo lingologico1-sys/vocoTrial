@@ -31,6 +31,9 @@ interface TutorStageProps {
   tap: AudioTap | null;
   speaking: boolean;
   heard: boolean;
+  /** Whether the learner's last words are still being transcribed. The pill
+   *  spends that span on a loader — see LearnerPill. */
+  transcribing: boolean;
   live: boolean;
   /** Whether the tutor's opening turn is over. The pill's glyph turns on it. */
   openingDone: boolean;
@@ -51,6 +54,7 @@ export default function TutorStage({
   tap,
   speaking,
   heard,
+  transcribing,
   live,
   openingDone,
   busy,
@@ -178,6 +182,7 @@ export default function TutorStage({
         openingDone={openingDone}
         busy={busy}
         heard={heard}
+        transcribing={transcribing}
         idleHint={idleHint}
         onCall={onCall}
         onWord={onWord}

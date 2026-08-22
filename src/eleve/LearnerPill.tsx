@@ -13,6 +13,15 @@ import { useLongPress } from './useLongPress';
  * saying it, which is worse than showing nothing and actively discouraging: the
  * page appears to be mishearing you. So the pill waits for a turn to close.
  *
+ * WHICH LEFT THE WAIT SAYING THE WRONG THING. Waiting is not nothing: from the
+ * first word a learner speaks to the moment their transcript lands, this space
+ * held either an empty hint or — worse — the sentence they said *last*, sitting
+ * there unchanged while they answered a new question. Both read as a page that
+ * did not hear them. So the whole of that span is spent on a loader instead:
+ * the dots are moving, so something is happening, and nothing on screen claims
+ * to be the words they are still in the middle of saying. `transcribing` is the
+ * span; see VoiceCall, which owns both its ends.
+ *
  * THE MICROPHONE IS THE ONLY CONTROL, and it is big because of it. Commencer,
  * Recommencer and Raccrocher were three words for one act — deciding whether to
  * be talking to the tutor — and they sat in a pill beside a microphone that did
@@ -60,6 +69,14 @@ interface LearnerPillProps {
   /** Whether the microphone is hearing a voice right now. */
   heard: boolean;
   /**
+   * Whether the learner's words are on their way but not here yet.
+   *
+   * Wider than `heard` — it outlives the sound by however long transcription
+   * takes — and it is what puts the loader in the text's place. See the note
+   * above, and `transcribing` in useVoiceCall for where the span ends.
+   */
+  transcribing: boolean;
+  /**
    * What the arrow points at when there is no call — start, or start again.
    *
    * Passed in rather than chosen here, for the same reason the call label used
@@ -77,6 +94,7 @@ export default function LearnerPill({
   openingDone,
   busy,
   heard,
+  transcribing,
   idleHint,
   onCall,
   onWord,
@@ -93,7 +111,17 @@ export default function LearnerPill({
    * line sitting here would bury the only remaining control's own label behind
    * a sentence that is already finished with.
    */
-  const showText = live && Boolean(text);
+  const showText = live && !transcribing && Boolean(text);
+
+  /*
+   * The loader outranks both the sentence and the hint.
+   *
+   * Which is the whole point: the two things it displaces are exactly the two
+   * wrong answers — last turn's sentence, and an invitation to speak aimed at
+   * somebody who already is. It cannot appear outside a call, because nothing
+   * is being transcribed then.
+   */
+  const settling = live && transcribing;
 
   useLongPress(body, onWord, showText);
 
@@ -104,6 +132,10 @@ export default function LearnerPill({
    * the microphone was making, said out loud: for the length of the tutor's
    * opening it is addressed to somebody who should be listening. So the pill
    * names what is actually happening until the floor changes hands.
+   *
+   * There is no branch here for a learner who is talking: that is the loader's
+   * span now, and it is drawn instead of this. What is left is the one line
+   * that is true of a live call nobody is speaking into.
    */
   const hint = busy
     ? FR.starting
@@ -111,9 +143,7 @@ export default function LearnerPill({
       ? idleHint
       : !openingDone
         ? FR.pillOpening
-        : heard
-          ? FR.pillListening
-          : FR.pillWaiting;
+        : FR.pillWaiting;
 
   /*
     Tone by state, and the two filled ones are told apart by the halo rather
@@ -203,7 +233,34 @@ export default function LearnerPill({
         </div>
 
         <div ref={body} data-dict-context className="min-w-0 flex-1 text-center text-base leading-snug">
-          {showText ? (
+          {settling ? (
+            /*
+              THE GIF IS 800x800 AND THE DOTS ARE A BAND ACROSS ITS MIDDLE, so
+              it is cropped rather than scaled: shrunk to fit the pill whole it
+              would be a row of specks in a large empty square, and that square
+              would push the pill's height around every time a learner opened
+              their mouth. The window below is the band and nothing else —
+              background-size is the whole image at about a quarter of its size,
+              and the offsets slide it so the dots land inside a 150x16 hole,
+              which is the height of the line of text it stands in for. Fixed
+              pixels on purpose: this crops one specific file, and a percentage
+              would silently reframe if that file were ever swapped.
+
+              `role="status"` with the label the pill used to say in words, so a
+              screen reader is told the same thing the dots are telling everyone
+              else. Not `aria-live` — it would announce on every single turn.
+            */
+            <span
+              role="status"
+              aria-label={FR.pillListening}
+              className="mx-auto block h-4 w-[150px] bg-no-repeat"
+              style={{
+                backgroundImage: 'url(/interimSpeech.gif)',
+                backgroundSize: '208px 208px',
+                backgroundPosition: '-10px -96px',
+              }}
+            />
+          ) : showText ? (
             <span className="text-lingo-ink">{text}</span>
           ) : (
             <span className="inline-flex items-center gap-2 text-lingo-muted/75">
