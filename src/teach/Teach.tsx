@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Check, Copy, Loader2, Plus, X } from 'lucide-react';
 import BrandBar from '../lingo/BrandBar';
+import BuildBadge from '../BuildBadge';
 import { LANGUAGES, defaultLanguageCode, findLanguage } from '../realtime/languages';
 import { BUILTIN_EVALUATOR_ID, type Evaluator } from '../realtime/evaluators';
 import { listEvaluators } from '../realtime/evaluatorStore';
@@ -482,6 +483,9 @@ export default function Teach() {
 
   return (
     <div className="lingo-light min-h-screen bg-lingo-mat font-lingo text-lingo-ink">
+      {/* The same build stamp tutorBench carries, in the family's palette and
+          in the far corner from the brand bar's own link. See BuildBadge.tsx. */}
+      <BuildBadge look="lingo" />
       <BrandBar tagline="Prepare a lesson">
         <a
           href="/eleve"
