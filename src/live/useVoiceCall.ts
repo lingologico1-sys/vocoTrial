@@ -6,6 +6,7 @@ import type {
   AudioTap,
   SessionStatus,
   TranscriptDelta,
+  ToolScheduling,
   VoiceSession,
 } from '../realtime/types';
 import { RevealQueue } from './reveal';
@@ -760,14 +761,30 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
        * same tool apart, which is the whole question when one is arriving after
        * every question. Trimmed hard: this is a log line, not a payload.
        */
-      onToolCall: (name: string, args?: Record<string, unknown>) => {
+      onToolCall: (
+        name: string,
+        args?: Record<string, unknown>,
+        scheduling?: ToolScheduling,
+      ) => {
         const carried =
           args && Object.keys(args).length ? ` ${oneLine(JSON.stringify(args), 80)}` : '';
+        /*
+         * How it was answered, and only where that is the interesting answer.
+         * SILENT is the ordinary case and says nothing a reader needs; WHEN_IDLE
+         * means the call arrived in a turn the tutor had not spoken a word in,
+         * which is a lesson that would have gone quiet on an earlier build and
+         * is the single most useful thing this line can carry. See the
+         * scheduling decision in gemini.ts.
+         */
+        const answered =
+          scheduling === 'WHEN_IDLE'
+            ? ' · the tutor had said nothing in that turn, so the result was asked to prompt one'
+            : '';
         record(
           'tool',
           name === PROGRESS_TOOL
-            ? `${name}${carried} — the signal this page counts`
-            : `${name}${carried} — NOT A TOOL THIS PAGE KNOWS; answered on the socket, then ignored`,
+            ? `${name}${carried} — the signal this page counts${answered}`
+            : `${name}${carried} — NOT A TOOL THIS PAGE KNOWS; answered on the socket, then ignored${answered}`,
         );
       },
       // Barge-in. The audio for anything still queued was thrown away unplayed,

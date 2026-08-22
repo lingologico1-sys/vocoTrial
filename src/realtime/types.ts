@@ -19,6 +19,23 @@ export interface SessionConfig {
 
 export type SessionStatus = 'idle' | 'connecting' | 'live' | 'closed' | 'error';
 
+/**
+ * What a tool response was allowed to do to the conversation.
+ *
+ * SILENT is the result going into context and nothing else; WHEN_IDLE is the
+ * result also asking the model to say something once it stops. Which one a call
+ * gets is decided in gemini.ts, at the moment of answering, and the whole of
+ * that decision is whether the model had spoken yet in the turn it called from
+ * — see the note there.
+ *
+ * Undefined is a surface that implements neither, where the field is left off
+ * rather than sent and ignored. It travels as far as the account log because a
+ * tool call answered one way and a tool call answered the other are the
+ * difference between a tutor that carries on and a tutor that goes quiet, and
+ * that difference was invisible in a diagnostic until it was written down.
+ */
+export type ToolScheduling = 'SILENT' | 'WHEN_IDLE';
+
 export interface TranscriptDelta {
   role: 'user' | 'agent';
   /**
@@ -101,8 +118,17 @@ export interface SessionHandlers {
    * `args` is whatever the model sent, unvalidated. It is for reading, not for
    * acting on: a diagnostic that can print `questionDone {"number":1}` twice in
    * four seconds has answered the question a transcript cannot.
+   *
+   * `scheduling` is how the call was answered, and it is here for the same
+   * reason `args` is: a call made from a turn with no speech in it is the one
+   * that costs a learner half a minute of silence, and it leaves no other mark
+   * anywhere. See ToolScheduling.
    */
-  onToolCall?: (name: string, args?: Record<string, unknown>) => void;
+  onToolCall?: (
+    name: string,
+    args?: Record<string, unknown>,
+    scheduling?: ToolScheduling,
+  ) => void;
   /**
    * The tutor reported that one more question on its list has been answered.
    *

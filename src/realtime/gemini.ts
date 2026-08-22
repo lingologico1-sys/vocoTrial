@@ -1,7 +1,7 @@
 import { MicCapture, PcmPlayer, decodeBase64, encodeBase64 } from './audio';
 import { addUsage, emptyUsage, totalTokens, type UsageTotals } from './cost';
 import { UnauthorizedError, checkSession, reportExpired } from './auth';
-import type { SessionConfig, SessionHandlers, VoiceSession } from './types';
+import type { SessionConfig, SessionHandlers, ToolScheduling, VoiceSession } from './types';
 import { findModel } from './models';
 import { PROGRESS_TOOL } from './tutorPrompt';
 
@@ -184,6 +184,11 @@ export async function startGeminiSession(
    * seconds saying. Audio is generated faster than real time, so the learner's
    * own sentence appeared while the tutor was already mid-answer — long after
    * the moment they were looking for it.
+   *
+   * IT HAS A SECOND READER NOW, and the same sentence answers both questions.
+   * A tool call arriving while this is false is a call made from a turn with no
+   * speech in it, which is the turn that ends in dead air — see the scheduling
+   * chosen in the tool handling below.
    */
   let answering = false;
 
@@ -279,9 +284,36 @@ export async function startGeminiSession(
        * implements it, for the reason _setup.ts sends `behavior` only there —
        * a field the far end drops is a claim this file would otherwise be
        * making falsely about how the next turn will behave.
+       *
+       * SILENT IS ONLY RIGHT WHILE THE MODEL IS TALKING, which is the case it
+       * was written for and not the only case that happens. A model that spends
+       * a whole turn on the call and says nothing has, under SILENT, nothing
+       * left that will ever make it speak again: the result goes into context,
+       * no generation is scheduled, and the tutor is mute until the learner
+       * gives up and talks first. The prompt asks it not to do that — see
+       * "never as a turn of its own" in tutorPrompt.ts — and a lesson recorded
+       * on 2026-08-22 is a model doing it anyway, on question four of five: the
+       * call arrived alone, the learner said their answer a second time into the
+       * silence, then answered the next question themselves off the screen, and
+       * the tutor came back only to say goodbye without ever asking it.
+       *
+       * So the scheduling is read off the turn the call was made from, and
+       * `answering` is exactly that reading — it is true once the model has
+       * emitted a word or a sample of audio, which in every measured good run
+       * happens well before the call. A turn that has spoken keeps SILENT and
+       * behaves as it did. A turn that has not gets WHEN_IDLE, so the result
+       * itself is what asks for the reply the model forgot to give. The doubled
+       * turn SILENT exists to prevent cannot follow from that branch: there is
+       * no spoken turn there to speak on top of.
        */
       if (message.toolCall?.functionCalls?.length) {
         const calls = message.toolCall.functionCalls;
+        const scheduling: ToolScheduling | undefined = silentResponses
+          ? answering
+            ? 'SILENT'
+            : 'WHEN_IDLE'
+          : undefined;
+
         if (socket.readyState === WebSocket.OPEN) {
           socket.send(
             JSON.stringify({
@@ -291,8 +323,10 @@ export async function startGeminiSession(
                   name: call.name,
                   // Acknowledged, with nothing to say. The tutor is told in the
                   // prompt that this produces no reply to read out; an object
-                  // with prose in it is prose a model will sometimes speak.
-                  response: silentResponses ? { ok: true, scheduling: 'SILENT' } : { ok: true },
+                  // with prose in it is prose a model will sometimes speak. The
+                  // scheduling rides inside the response object rather than
+                  // beside it, which is where the Live API reads it from.
+                  response: scheduling ? { ok: true, scheduling } : { ok: true },
                 })),
               },
             }),
@@ -304,7 +338,9 @@ export async function startGeminiSession(
         // otherwise vanish without trace — which is precisely the call that
         // wrecks a conversation, because answering it is what restarts the model
         // into a turn it has already spoken. See onToolCall in types.ts.
-        for (const call of calls) handlers.onToolCall?.(call.name ?? '(unnamed)', call.args);
+        for (const call of calls) {
+          handlers.onToolCall?.(call.name ?? '(unnamed)', call.args, scheduling);
+        }
         /*
          * Passed on as the frame carried them: all of it, unfiltered, in one
          * handoff. The believing happens in useVoiceCall.

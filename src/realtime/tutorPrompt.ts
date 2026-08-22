@@ -52,6 +52,13 @@
  *    says nothing at all, and the learner is left listening to silence after
  *    answering. Observed once in three runs.
  *
+ *    THE TRANSPORT NOW CATCHES THAT ONE, and the sentence stays anyway. A call
+ *    made from a turn with no speech in it is answered WHEN_IDLE instead, so
+ *    the result asks for the reply the model forgot to give — see the
+ *    scheduling decision in gemini.ts. That is a recovery and not a fix: the
+ *    reply still arrives a beat late, and the cheapest reply is the one the
+ *    model gives without being asked twice.
+ *
  * ONE SENTENCE HERE IS AIMED AT THE REPORT RATHER THAN THE CONVERSATION. "Ask
  * for the detail" was a headed section of its own and is now a clause, but it
  * could not simply go: a learner who answers "Ça va bien" has answered the
