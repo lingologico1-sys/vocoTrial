@@ -1,14 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { startGeminiSession } from '../realtime/gemini';
 import type { SessionSettings } from '../realtime/settings';
-import { NOT_THE_LEARNER, PROGRESS_TOOL, withoutSystemNote } from '../realtime/tutorPrompt';
-import type {
-  AudioTap,
-  SessionStatus,
-  TranscriptDelta,
-  ToolScheduling,
-  VoiceSession,
-} from '../realtime/types';
+import {
+  KEEP_GOING_SIGNAL,
+  NOT_THE_LEARNER,
+  PROGRESS_TOOL,
+  withoutSystemNote,
+} from '../realtime/tutorPrompt';
+import type { AudioTap, SessionStatus, TranscriptDelta, VoiceSession } from '../realtime/types';
 import { RevealQueue, type StampedText } from './reveal';
 import type { TiltCue } from './headMotion';
 
@@ -48,6 +47,25 @@ export const IDLE_TIMEOUT_MS = 90_000;
  * thirty-five, which is a tenth of the interval it is meant to be enforcing.
  */
 const IDLE_POLL_MS = 1_000;
+
+/**
+ * How long a tutor may say nothing after its bookkeeping call before the page
+ * asks it to carry on.
+ *
+ * LONGER THAN THE GAP THAT IS NORMAL, and the measurement is why there is a
+ * number here at all: on gemini-flash-31 the call comes first and the speech
+ * about eight tenths of a second behind it, every time. Two and a half seconds
+ * clears that several times over, so an ordinary turn never sees this — while
+ * the failure it exists for was silence with no end at all, waiting on a
+ * learner to give up and speak first.
+ *
+ * IT ALSO SITS BEHIND THE CLOSING NOTE, deliberately. /eleve waits two seconds
+ * after the list is complete before saying goodbye — CLOSING_SETTLE_MIN_MS —
+ * so on the last question of a lesson the closing note goes first and the reply
+ * to it disarms this. A shorter wait here would race that, and the two notes
+ * would arrive together at the one moment they must not.
+ */
+const STALL_NUDGE_MS = 2_500;
 
 export interface Turn {
   role: 'user' | 'agent';
@@ -741,11 +759,51 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
     setDetail(message);
   }, []);
 
+  /**
+   * The tutor called its tool, said nothing, and is being given a moment.
+   *
+   * WHY A TIMER RATHER THAN A TEST. A bookkeeping call arriving before the
+   * model has spoken is not a stall — on gemini-flash-31 it is simply the order
+   * the model works in, measured at five calls out of five in one lesson, with
+   * the speech following about eight tenths of a second later. It is a stall
+   * only if nothing follows, and nothing following is not something that can be
+   * known at the moment the call arrives. So this waits, and the waiting is the
+   * whole mechanism: almost every arming is disarmed by the tutor talking.
+   *
+   * WHAT DISARMS IT is the tutor speaking, the learner speaking, or the call
+   * ending. The learner counts because a note is `clientContent`, and
+   * clientContent landing while somebody is mid-sentence cuts them off — so a
+   * silence the learner has already filled is a silence that needs no help.
+   */
+  const stall = useRef<number | null>(null);
+  const clearStall = useCallback(() => {
+    if (stall.current === null) return;
+    clearTimeout(stall.current);
+    stall.current = null;
+  }, []);
+
+  const say = useCallback(
+    (text: string, label?: string) => {
+      const said = label ?? oneLine(text);
+      /*
+       * A note with no call to land in is recorded as dropped rather than not
+       * recorded at all. That is the single most useful line this log can
+       * carry: a closing note the page believes it sent and the tutor never
+       * received is a conversation that runs to the idle timeout, and from the
+       * outside it looks exactly like a tutor ignoring its instructions.
+       */
+      record('note', session.current ? said : `${said} — DROPPED, no call was running`);
+      session.current?.say(text);
+    },
+    [record],
+  );
+
   const connect = useCallback(async () => {
     record('dialled', `${latest.current.modelKey} · ${latest.current.language}`);
     setTurns([]);
     setDetail(null);
     setMuted(false);
+    clearStall();
     queue.current.discard();
     said.current = { heard: '', shown: 0, stray: false };
 
@@ -759,6 +817,7 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
           setConnectedAt(startedAt.current);
         }
         if (next === 'closed' || next === 'error') {
+          clearStall();
           // Whatever was still queued was said, or was a word away from it.
           // Dropping it silently would lose the end of every conversation.
           reveal(queue.current.drain());
@@ -782,6 +841,8 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
       onTranscript,
       onSpeaking: (next: boolean) => {
         lastActivity.current = Date.now();
+        // The turn arrived after all, which is the ordinary end of a wait.
+        if (next) clearStall();
         setSpeaking(next);
         // Every false, barge-in included, and no attempt to tell them apart:
         // both are the agent's audio ending and the floor going back to the
@@ -806,6 +867,9 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
        */
       onVoice: (active: boolean) => {
         if (active) lastActivity.current = Date.now();
+        // A silence the learner has filled themselves. Nudging into it would
+        // put a note on the wire in the middle of their sentence.
+        if (active) clearStall();
         setHeard(active);
       },
       /*
@@ -831,31 +895,27 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
        * same tool apart, which is the whole question when one is arriving after
        * every question. Trimmed hard: this is a log line, not a payload.
        */
-      onToolCall: (
-        name: string,
-        args?: Record<string, unknown>,
-        scheduling?: ToolScheduling,
-      ) => {
+      onToolCall: (name: string, args?: Record<string, unknown>, spoken?: boolean) => {
         const carried =
           args && Object.keys(args).length ? ` ${oneLine(JSON.stringify(args), 80)}` : '';
-        /*
-         * How it was answered, and only where that is the interesting answer.
-         * SILENT is the ordinary case and says nothing a reader needs; WHEN_IDLE
-         * means the call arrived in a turn the tutor had not spoken a word in,
-         * which is a lesson that would have gone quiet on an earlier build and
-         * is the single most useful thing this line can carry. See the
-         * scheduling decision in gemini.ts.
-         */
-        const answered =
-          scheduling === 'WHEN_IDLE'
-            ? ' · the tutor had said nothing in that turn, so the result was asked to prompt one'
-            : '';
         record(
           'tool',
           name === PROGRESS_TOOL
-            ? `${name}${carried} — the signal this page counts${answered}`
-            : `${name}${carried} — NOT A TOOL THIS PAGE KNOWS; answered on the socket, then ignored${answered}`,
+            ? `${name}${carried} — the signal this page counts`
+            : `${name}${carried} — NOT A TOOL THIS PAGE KNOWS; answered on the socket, then ignored`,
         );
+
+        /*
+         * Armed only where the turn has produced nothing yet, and it is a
+         * question rather than a verdict — see `stall`. Rearmed rather than
+         * stacked: a frame carrying two calls is one silence, not two.
+         */
+        if (spoken) return;
+        clearStall();
+        stall.current = window.setTimeout(() => {
+          stall.current = null;
+          say(KEEP_GOING_SIGNAL, 'nudge — the tutor called its tool and then said nothing');
+        }, STALL_NUDGE_MS);
       },
       // Barge-in. The audio for anything still queued was thrown away unplayed,
       // so showing those words would put sentences on screen that were cut off
@@ -895,23 +955,7 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
       setStatus('error');
       setDetail(error instanceof Error ? error.message : 'Could not start the session');
     }
-  }, [acceptProgress, append, cue, onTranscript, record, reveal]);
-
-  const say = useCallback(
-    (text: string, label?: string) => {
-      const said = label ?? oneLine(text);
-      /*
-       * A note with no call to land in is recorded as dropped rather than not
-       * recorded at all. That is the single most useful line this log can
-       * carry: a closing note the page believes it sent and the tutor never
-       * received is a conversation that runs to the idle timeout, and from the
-       * outside it looks exactly like a tutor ignoring its instructions.
-       */
-      record('note', session.current ? said : `${said} — DROPPED, no call was running`);
-      session.current?.say(text);
-    },
-    [record],
-  );
+  }, [acceptProgress, append, clearStall, cue, onTranscript, record, reveal, say]);
 
   // Read-then-set rather than a functional updater: the session call is a side
   // effect, and StrictMode double-invokes updaters in development, so putting

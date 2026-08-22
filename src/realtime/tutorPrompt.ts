@@ -214,6 +214,22 @@ export const LESSON_DONE_SIGNAL = `${SYSTEM_NOTE} Every question on the list has
 export const TIME_UP_SIGNAL = `${SYSTEM_NOTE} This lesson has run out of time with questions still unanswered. Stop there: say plainly that you have to stop, then one warm, specific sentence about the part you did get through, and goodbye. Do not suggest the lesson was finished, because it was not, and do not ask another question.`;
 
 /**
+ * The note that gets a stalled tutor talking again.
+ *
+ * NOT AN ENDING, WHICH IS THE WHOLE DIFFERENCE from the two above. Those close
+ * a conversation; this one asks only for the turn that was owed and never came
+ * — so it says nothing about where the lesson has got to, and deliberately does
+ * not name a question. The tutor knows which one it is on, and a note that
+ * guessed would be the page overruling it on the strength of its own count.
+ *
+ * SENT ON SILENCE THAT HAS HAPPENED, never on silence expected: the tutor
+ * called its bookkeeping tool, said nothing in that turn, and was still saying
+ * nothing seconds later. See the stall watchdog in useVoiceCall, and the note
+ * in gemini.ts on what it cost to guess at this from the tool call alone.
+ */
+export const KEEP_GOING_SIGNAL = `${SYSTEM_NOTE} You have gone quiet and the learner is waiting for you. Carry on now, out loud, from wherever the lesson had got to.`;
+
+/**
  * Which greeting the hour has earned, on the clock of whoever is talking.
  *
  * `getHours` reads the browser's own zone, and the browser is in the room with
@@ -447,6 +463,8 @@ Some things arrive in this conversation marked as notes from the system. They
 are not the learner talking: act on them, never answer them, and never read them
 out. The first tells you to greet the learner. A later one will tell you to say
 goodbye — and nothing else ends this conversation, so until it arrives, keep
-going. You never write one yourself: they only ever arrive, and one in your own
-turn is you telling yourself what to do.`;
+going. Answering the last question on the list does not end it either: say
+something about that answer, then stop and wait. The goodbye is never yours to
+start. You never write a note yourself, either: they only ever arrive, and one
+in your own turn is you telling yourself what to do.`;
 }
