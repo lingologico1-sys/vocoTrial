@@ -83,14 +83,23 @@
  *    reply still arrives a beat late, and the cheapest reply is the one the
  *    model gives without being asked twice.
  *
- *  - "you never write one yourself" was nothing at all, because nobody thought
- *    a model would. One did: it copied the opening note's marker verbatim and
- *    wrote itself a closing note, in English, four seconds before the real one
- *    arrived — and then began winding the lesson up on its own authority.
- *    withoutSystemNote keeps the invention off the learner's screen and out of
- *    the report, which is the half that can be enforced; this sentence is the
- *    half that cannot, because a tutor that believes its own note has already
- *    decided the lesson is over whatever the transcript ends up saying.
+ *  - "everything you say is heard" was nothing at all, because nobody thought a
+ *    model would write itself a note. Two did, on the same day. The first
+ *    copied the opening note's marker verbatim and wrote itself a closing note,
+ *    in English, four seconds before the real one arrived. The second wrote its
+ *    own paraphrase — `[SYSTEM NOTE] The learner has finished the questions:
+ *    say goodbye now` — with no marker in it, and read the whole thing out
+ *    loud: twenty seconds of English instructions in the middle of a French
+ *    lesson, and then a goodbye nobody had asked for.
+ *
+ *    THE SENTENCE NOW SAYS WHY RATHER THAN NO. "You never write one" is a rule
+ *    a model can weigh against its own conviction that the lesson is over, and
+ *    twice it lost. What it cannot argue with is where the words go: there is
+ *    no channel out of a turn except the learner's ears, so a note written in
+ *    one is not bookkeeping at all — it is the tutor reading English aloud to a
+ *    beginner. withoutSystemNote keeps the invention off the screen and out of
+ *    the report, and nothing can keep it out of the audio, which is why the
+ *    prompt argues the point instead of forbidding it.
  *
  * ONE SENTENCE HERE IS AIMED AT THE REPORT RATHER THAN THE CONVERSATION. "Ask
  * for the detail" was a headed section of its own and is now a clause, but it
@@ -146,6 +155,14 @@ import type { Persona } from '../facekit/persona';
  * nobody was asked, and the learner can see those questions on their own
  * screen. Both are visible in the diagnostic: refused reports are logged with
  * the reason beside the count that ignored them.
+ *
+ * WHICH IS WHY BEING EARLY IS NOT REFUSING. That price is paid once per lesson
+ * and it was being paid for a rounding error: a tutor reporting a question in
+ * the same breath as the one before it, one turn ahead of the learner, took the
+ * whole count down with it — every later report refused for a gap that report
+ * left. A report one turn early is now held and taken when the learner finishes
+ * that turn, so the asymmetry above costs a lesson only when the tutor is
+ * actually wrong. See `held` in useVoiceCall.ts.
  */
 export const PROGRESS_TOOL = 'questionDone';
 
@@ -164,42 +181,100 @@ const SYSTEM_NOTE = `${NOT_THE_LEARNER} — do not answer it or read it out]`;
 /**
  * The tutor's own words, with any note it wrote itself cut off the end.
  *
- * A MARKER IN THE TUTOR'S MOUTH IS ALWAYS A FAKE, which is what makes this a
- * test and not a guess. Notes travel one way — the page writes them, the model
- * reads them — so the marker appearing in the model's *output* cannot be a note
- * the page sent, whatever it says. On 2026-08-22 a tutor closed a lesson by
- * writing one: the marker copied verbatim off the opening note it had been
- * handed a minute earlier, then a body nobody wrote telling itself to say
- * goodbye and add nothing further. The real note went out four seconds later.
+ * A NOTE IN THE TUTOR'S MOUTH IS ALWAYS A FAKE, which is what makes this a test
+ * and not a guess. Notes travel one way — the page writes them, the model reads
+ * them — so anything shaped like one appearing in the model's *output* cannot
+ * be a note the page sent, whatever it says. Twice on 2026-08-22 a tutor closed
+ * a lesson by writing itself one: the first copied the opening note's marker
+ * verbatim, and the second, hours later, wrote `[SYSTEM NOTE] The learner has
+ * finished the questions: say goodbye now` — its own paraphrase, in its own
+ * words, carrying no marker at all.
  *
- * IT WAS NEVER SPOKEN, and that is the reason this cuts rather than warns. The
- * turn carried three seconds of audio and the note came after it as text with
- * no sound behind it, so the learner did not hear a word of it — they read it,
- * in the bubble, in English, at the end of a French lesson. The report and the
- * vocabulary list read the same turns.
+ * SO THE TEST IS THE SHAPE AND NO LONGER THE STRING. A bracket opening on the
+ * word "note" or the word "system" is the whole of it. That is wider than the
+ * marker by design: the second invention proves the model is not copying a
+ * string but reproducing a convention, and a test on the exact bytes catches
+ * only the imitations that happen to be exact. What it costs is a tutor who
+ * wanted to say "[note: …]" out loud, which is not a sentence anybody teaching
+ * a language says.
  *
- * EVERYTHING AFTER THE MARKER GOES, not just the marker. What follows it is the
+ * THE FIRST WAS NEVER SPOKEN AND THE SECOND WAS. The first came as text with no
+ * sound behind it and was only read, in the bubble, in English, at the end of a
+ * French lesson. The second took twenty seconds of audio: the learner heard the
+ * whole invented instruction read out. This cuts what reaches the screen, the
+ * report and the vocabulary list, and it cannot cut what reaches the ear —
+ * that half is the prompt's, under NOTES FROM THE SYSTEM in composeTutorPrompt.
+ *
+ * EVERYTHING AFTER THE OPENING GOES, not just the bracket. What follows is the
  * body of the invented note, and a tutor that resumed talking after one has not
  * been observed. Cutting to the end of the turn is the reading that cannot
  * leave half a fake instruction on a learner's screen.
  *
- * A PARTIAL MARKER COUNTS. Transcription arrives in fragments split wherever
- * the model split them, so the marker very often lands across two of them —
- * and text is shown as it becomes audible, which means anything let through
- * cannot be taken back. So a tail that is the *beginning* of the marker is cut
- * too, and released only once the next fragment proves it was something else.
- * The cost is one comfortably invisible frame; the alternative is the first
- * half of `[NOTE FROM THE SYS` flashing up in the bubble.
+ * A PARTIAL OPENING COUNTS. Transcription arrives in fragments split wherever
+ * the model split them, so an opening very often lands across two of them — and
+ * text is shown as it becomes audible, which means anything let through cannot
+ * be taken back. So a tail that is the *beginning* of one is cut too, and
+ * released only once the next fragment proves it was something else. The cost
+ * is one comfortably invisible frame; the alternative is the first half of
+ * `[NOTE FROM THE SYS` flashing up in the bubble.
  */
-export function withoutSystemNote(text: string): string {
-  const found = text.indexOf(NOT_THE_LEARNER);
-  if (found >= 0) return text.slice(0, found);
+const NOTE_OPENERS = ['note', 'system'];
 
-  const earliest = Math.max(0, text.length - NOT_THE_LEARNER.length + 1);
-  for (let cut = earliest; cut < text.length; cut++) {
-    if (NOT_THE_LEARNER.startsWith(text.slice(cut))) return text.slice(0, cut);
+/**
+ * What a bracket in the tutor's speech is turning out to be.
+ *
+ * Three answers rather than two because the text is still arriving: `maybe` is
+ * an opening that has not yet been proved either way — a bracket at the very
+ * end of a fragment, or the four letters of `[NOTE` with nothing after them to
+ * say whether the word was "note" or "notebook". Both cut, because a cut can be
+ * released next frame and a word already on screen cannot be taken back; only
+ * `yes` is worth a line in the log.
+ */
+type Opening = 'yes' | 'maybe' | 'no';
+
+function opensANote(after: string): Opening {
+  const rest = after.replace(/^\s+/, '');
+  if (!rest) return 'maybe';
+
+  const word = (/^[A-Za-z]*/.exec(rest) as RegExpExecArray)[0].toLowerCase();
+  // Letters running to the end of what has arrived are a word that may yet
+  // grow: "note" is one of ours and "notebook" is not, and nothing here can
+  // tell them apart until the next fragment lands.
+  const ended = word.length < rest.length;
+
+  for (const opener of NOTE_OPENERS) {
+    if (word === opener) return ended ? 'yes' : 'maybe';
+    if (!ended && word && opener.startsWith(word)) return 'maybe';
+  }
+  return 'no';
+}
+
+/** Every `[` in the text, in the order they were said. */
+function* brackets(text: string): Generator<number> {
+  for (let at = text.indexOf('['); at >= 0; at = text.indexOf('[', at + 1)) yield at;
+}
+
+export function withoutSystemNote(text: string): string {
+  for (const at of brackets(text)) {
+    if (opensANote(text.slice(at + 1)) !== 'no') return text.slice(0, at);
   }
   return text;
+}
+
+/**
+ * Whether the tutor has written itself a note, for the account rather than the
+ * screen.
+ *
+ * Only on a note that is certainly one: a bracket still arriving is withheld by
+ * `withoutSystemNote` above and needs no line, and a diagnostic that reported a
+ * stray note every time a turn happened to end on `[` would be reporting the
+ * transport rather than the tutor.
+ */
+export function wroteASystemNote(text: string): boolean {
+  for (const at of brackets(text)) {
+    if (opensANote(text.slice(at + 1)) === 'yes') return true;
+  }
+  return false;
 }
 
 /**
@@ -490,6 +565,11 @@ out. The first tells you to greet the learner. A later one will tell you to say
 goodbye — and nothing else ends this conversation, so until it arrives, keep
 going. Answering the last question on the list does not end it either: say
 something about that answer, then stop and wait. The goodbye is never yours to
-start. You never write a note yourself, either: they only ever arrive, and one
-in your own turn is you telling yourself what to do.`;
+start.
+
+Notes only ever arrive, and you have no way to write one. Everything you produce
+in a turn is spoken aloud to the learner, brackets and all — so a note in your
+own turn is not a note at all, it is you reading instructions aloud to a
+beginner in the middle of their lesson. The only thing you can say to the
+program is ${PROGRESS_TOOL}. Everything else, they hear.`;
 }

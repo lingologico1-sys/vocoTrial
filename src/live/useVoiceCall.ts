@@ -3,9 +3,9 @@ import { startGeminiSession } from '../realtime/gemini';
 import type { SessionSettings } from '../realtime/settings';
 import {
   KEEP_GOING_SIGNAL,
-  NOT_THE_LEARNER,
   PROGRESS_TOOL,
   withoutSystemNote,
+  wroteASystemNote,
 } from '../realtime/tutorPrompt';
 import type { AudioTap, SessionStatus, TranscriptDelta, VoiceSession } from '../realtime/types';
 import { RevealQueue, type StampedText } from './reveal';
@@ -128,19 +128,21 @@ export interface CallEvent {
      */
     | 'tool'
     /**
-     * The page's verdict on a progress report: taken, or refused and why.
+     * The page's verdict on a progress report: taken, held, or refused and why.
      *
      * Every report gets one of these, including the refused ones — a tutor
      * reporting a question the learner never answered is the failure this
      * whole layer exists for, and it has to be visible as a line rather than
-     * as an absence.
+     * as an absence. A held report gets two: one where it arrived and one where
+     * it was taken, a turn later, which is the only way to read off a timeline
+     * that the tutor was early rather than wrong.
      */
     | 'progress'
     /** The learner talked over the tutor and unheard words were dropped. */
     | 'interrupted'
     /**
-     * The tutor wrote a note to itself in the page's own marker, and it was cut
-     * out of the transcript before anyone read it.
+     * The tutor wrote itself a note — the page's marker, or its own paraphrase
+     * of one — and it was cut out of the transcript before anyone read it.
      *
      * A line rather than a silent repair, because the cut is the only trace
      * left: the words never reach the bubble, the report or the vocabulary
@@ -418,6 +420,33 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
   const learnerTurns = useRef(0);
 
   /**
+   * The one report that arrived a moment too early, waiting for the turn it is
+   * about to finish.
+   *
+   * A REPORT ONE AHEAD OF THE LEARNER IS EARLY, NOT FALSE, and until this
+   * existed the page could not tell those apart — it refused both, and a
+   * refusal is permanent. What that cost is a whole lesson: on 2026-08-22 a
+   * tutor reported question four in the same breath as question three, one
+   * turn before the learner answered it. Four was refused; the learner then
+   * answered four and five; the report for five was refused in turn because
+   * four was never counted; and a lesson the learner had finished sat at three
+   * of five until the cap ran out and told them they had run out of time. One
+   * early report by one turn, and the count could never recover.
+   *
+   * ONE SLOT AND ONE TURN OF PATIENCE, which is what keeps the guard a guard. A
+   * report is held only when it is exactly one ahead — the tutor reporting the
+   * answer the learner is finishing as it speaks, which is the timing the
+   * prompt asks for and the transport sometimes rounds the wrong way. Anything
+   * further ahead is still refused on the spot, so the pathological case is
+   * unchanged: a tutor claiming all five before anybody has spoken gets one
+   * held and four refused, and the held one is taken only once a learner turn
+   * exists to pay for it. Nothing is ever counted that the conversation could
+   * not contain — the ceiling is the same, this just stops the page dropping a
+   * claim that becomes true a second later.
+   */
+  const held = useRef<number | null>(null);
+
+  /**
    * The last thing that happened worth leaning at.
    *
    * State rather than a ref because the face has to be told, and told by a
@@ -527,8 +556,17 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
    * answered can never exceed the number of turns the learner has finished:
    * five answered questions require five times the learner has spoken. This is
    * the test that makes the pathological case impossible — a tutor reporting
-   * the whole list before anybody has said anything gets one report counted and
+   * the whole list before anybody has said anything gets one report held and
    * the rest refused.
+   *
+   * IT IS THE ONE TEST THAT CAN FAIL TEMPORARILY, which is why it alone has a
+   * third answer. Every other refusal here is about the report — a number off
+   * the list, a repeat, a place in the list it cannot occupy — and none of those
+   * becomes true later. This one is about the clock: a report one turn ahead of
+   * the learner is the same report a second early, and a second later the turn
+   * it names has happened. So a report exactly one ahead is held and taken when
+   * the learner's next turn closes, and anything further ahead is refused where
+   * it stands. See `held`, which carries what that distinction cost to learn.
    *
    * NO REPORT MAY JUMP AHEAD OF THE LIST. A report for question five while one
    * through three are uncounted is a tutor that has lost its place, so a number
@@ -591,7 +629,20 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
           continue;
         }
         if (seen.length + 1 > learnerTurns.current) {
-          refuse(named, `the learner has only finished ${learnerTurns.current} turn(s)`);
+          const short = `the learner has finished ${learnerTurns.current} turn(s)`;
+          // One ahead is early rather than false, and the slot is free: hold it
+          // for the turn the learner is finishing as the tutor speaks. See `held`.
+          if (seen.length === learnerTurns.current && held.current === null) {
+            held.current = number;
+            record('progress', `question ${named} held — ${short}, so this is one early`);
+            continue;
+          }
+          refuse(
+            named,
+            held.current === null
+              ? short
+              : `${short}, and question ${held.current} is already waiting on the next`,
+          );
           continue;
         }
 
@@ -608,6 +659,23 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
     [record],
   );
 
+  /**
+   * Puts the early report back through the tests, now that the turn it was
+   * about has happened.
+   *
+   * Through `acceptProgress` rather than straight onto the list, because being
+   * one turn early was only ever one of five reasons to refuse a report and the
+   * other four still apply. The slot is cleared before the call rather than
+   * after, so the report is judged on the same terms as any other instead of
+   * against a hold it is itself occupying.
+   */
+  const takeHeld = useCallback(() => {
+    const waiting = held.current;
+    if (waiting === null) return;
+    held.current = null;
+    acceptProgress([waiting]);
+  }, [acceptProgress]);
+
   const onTranscript = useCallback(
     (delta: TranscriptDelta) => {
       lastActivity.current = Date.now();
@@ -617,7 +685,15 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
       if (delta.role === 'user') {
         // A finished utterance, which is the unit the progress guard counts in.
         // Partials arrive on the way to it and must not each count as a turn.
-        if (delta.done) learnerTurns.current += 1;
+        if (delta.done) {
+          learnerTurns.current += 1;
+          // The turn an early report was waiting on. Taken here rather than on a
+          // timer because this is the moment it stops being a claim about the
+          // future — and the closing note is two seconds behind the count, so a
+          // report left waiting for the tutor's next tool call would arrive
+          // after the lesson had already been declared unfinished.
+          takeHeld();
+        }
         append('user', delta.text, delta.done);
         return;
       }
@@ -626,7 +702,7 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
       // what -Infinity means to the queue: due on the next frame.
       queue.current.push({ text: delta.text, done: delta.done, at: delta.at ?? -Infinity });
     },
-    [append],
+    [append, takeHeld],
   );
 
   /**
@@ -676,7 +752,7 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
 
         // Only on the whole marker. A turn that happens to end on `[` has a
         // tail withheld for a frame, and that is not worth a line in the log.
-        if (!turn.stray && turn.heard.includes(NOT_THE_LEARNER)) {
+        if (!turn.stray && wroteASystemNote(turn.heard)) {
           turn.stray = true;
           record('stray', 'the tutor wrote itself a system note; it was cut from the transcript');
         }
@@ -949,6 +1025,7 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
       // A new call is a new pass down the list. Reset here rather than on hang
       // up, so the state stays readable on the summary of the call that ended.
       accepted.current = [];
+      held.current = null;
       setAnswered([]);
       learnerTurns.current = 0;
       const { modelKey, language: code, instructions, settings } = latest.current;
