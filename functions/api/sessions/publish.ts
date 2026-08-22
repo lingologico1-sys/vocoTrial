@@ -1,6 +1,10 @@
 import { json } from '../_middleware';
 import { findLanguage } from '../../../src/realtime/languages';
-import { MAX_INSTRUCTIONS, defaultInstructions } from '../../../src/realtime/instructions';
+import {
+  MAX_INSTRUCTIONS,
+  defaultInstructions,
+  findInstructionPreset,
+} from '../../../src/realtime/instructions';
 import { composeTutorPrompt } from '../../../src/realtime/tutorPrompt';
 import { patienceSettings } from '../../../src/realtime/settings';
 import { FALLBACK_PERFORMANCE } from '../../../src/realtime/house';
@@ -186,6 +190,25 @@ export async function onRequestPost(
     );
   }
 
+  /*
+   * The style, in the language this lesson is being taught in.
+   *
+   * A style is prose frozen when an administrator published it, and the
+   * language it was frozen against is the language studio had on screen that
+   * afternoon — not the language of the lesson going out now. Where the prose
+   * came out of a built-in, the key is here and the built-in is a function of
+   * the language, so it is rendered again for `language` and the frozen copy is
+   * ignored. Where it did not — a prompt an administrator wrote themselves —
+   * there is nothing to re-render, the text stands as written, and the mismatch
+   * is /teach's to show. See `TutorStyle.preset`.
+   *
+   * This is the fix for a French lesson whose tutor opened in English: every
+   * rule in the prompt honoured, in the wrong language, because the manner had
+   * been published off an English picker.
+   */
+  const preset = findInstructionPreset(style.preset ?? '');
+  const styleText = preset ? preset.render(language) : style.text;
+
   const faceId = typeof incoming.faceId === 'string' ? incoming.faceId : null;
   const persona = await personaFor(env.FACES, faceId);
 
@@ -216,7 +239,7 @@ export async function onRequestPost(
    * falls back to the built-in preset there too.
    */
   const composed = composeTutorPrompt({
-    style: style.text || defaultInstructions(language),
+    style: styleText || defaultInstructions(language),
     rules: lessonRules ?? undefined,
     persona,
     questions,
@@ -311,7 +334,7 @@ export async function onRequestPost(
     // the build's; see session.ts, and DEFAULT_LESSON_RULES on where the line
     // falls. Undefined rather than '' when nobody has written one, so an
     // unconfigured house stores nothing instead of storing a blank.
-    style: style.text,
+    style: styleText,
     lessonRules: lessonRules ?? undefined,
     persona,
     // Off the face, never off the request — see the header. An incoming `voice`

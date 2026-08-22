@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { Mic, MicOff, PhoneOff, Radio, SlidersHorizontal, User } from 'lucide-react';
 import { findModel } from '../realtime/models';
 import { LANGUAGES, defaultLanguageCode, findLanguage } from '../realtime/languages';
-import { lastUsedKey, listPresets, rememberPreset, renderPreset } from '../realtime/presets';
+import { findPreset, lastUsedKey, listPresets, rememberPreset, renderPreset } from '../realtime/presets';
 import { MAX_INSTRUCTIONS, withPersona } from '../realtime/instructions';
 import { VOICES } from '../realtime/settings';
 import {
@@ -743,6 +743,12 @@ export default function Studio() {
         // Rendered, not the key. See the note beside the button.
         text: renderPreset(presetKey, styleLanguage),
         language: styleLanguage.code,
+        // And the key as well, when it names a built-in. That one is not in
+        // this browser's localStorage — it is in the bundle and in the Worker —
+        // so publishing can render the manner again for the language of the
+        // lesson going out. A saved prompt sends nothing and stays frozen in
+        // whatever language it was written in.
+        preset: findPreset(presetKey)?.builtIn ? presetKey : undefined,
       });
       setStyleName('');
       setHouseNote(`Published “${written.name}”. Teachers can pick it on /teach.`);
@@ -1749,14 +1755,21 @@ export default function Studio() {
           </div>
           {/*
             The rendered preset, not the preset key — a key names a prompt in
-            this browser's localStorage and nowhere else. The persona is
-            deliberately absent: which face is worn is decided per lesson on
-            /teach, so the wrap is applied at publish rather than baked in here.
+            this browser's localStorage and nowhere else. Except a built-in's,
+            which names the same function of the language everywhere, and goes
+            with it so a teacher's language picker can still decide the text.
+            The persona is deliberately absent: which face is worn is decided
+            per lesson on /teach, so the wrap is applied at publish rather than
+            baked in here.
           */}
           <p className="mt-1.5 text-[11px] leading-relaxed text-slate-500">
             Saves {renderPreset(presetKey, styleLanguage).length.toLocaleString()} characters of
-            prompt as it stands, rendered for {styleLanguage.label}. The face&rsquo;s persona is
-            not included — that is applied when a teacher picks a face.
+            prompt as it stands, rendered for {styleLanguage.label}.{' '}
+            {findPreset(presetKey)?.builtIn
+              ? 'It is one of the built-in prompts, so a lesson published in another language gets it in that language instead.'
+              : 'It is a saved prompt, so it stays in the language it was written in whatever language a lesson is published in.'}{' '}
+            The face&rsquo;s persona is not included — that is applied when a teacher picks a
+            face.
           </p>
 
           <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1.5">

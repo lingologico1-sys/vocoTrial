@@ -238,6 +238,25 @@ export function defaultPresetKey(): string {
 }
 
 /**
+ * A built-in by key, or undefined for anything else.
+ *
+ * Exists so a *stored* thing can name one of these and be rendered later, which
+ * is the one property a built-in has and a saved prompt does not: it is a
+ * function of the language rather than a paragraph in one. A tutor style keeps
+ * that key when it came from here, so the language a lesson is taught in can
+ * still decide the text at publish rather than the language studio happened to
+ * have on screen weeks earlier. See `TutorStyle.preset` in house.ts.
+ *
+ * Undefined is the ordinary answer, not a failure: a style rendered from a
+ * saved prompt names no built-in, and a key from a build that has since dropped
+ * a preset names nothing either. Both fall back to the frozen text, which is
+ * what every style did before this existed.
+ */
+export function findInstructionPreset(key: string): InstructionPreset | undefined {
+  return INSTRUCTION_PRESETS.find((preset) => preset.key === key);
+}
+
+/**
  * Wraps a rendered preset in the persona the worn face carries.
  *
  * A PREFIX AND A SUFFIX, never a rewrite. The preset's own text arrives here

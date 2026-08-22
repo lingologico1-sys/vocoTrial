@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Check, Copy, Loader2, Plus, X } from 'lucide-react';
 import BrandBar from '../lingo/BrandBar';
-import { LANGUAGES, defaultLanguageCode } from '../realtime/languages';
+import { LANGUAGES, defaultLanguageCode, findLanguage } from '../realtime/languages';
 import { BUILTIN_EVALUATOR_ID, type Evaluator } from '../realtime/evaluators';
 import { listEvaluators } from '../realtime/evaluatorStore';
 import { fetchHouse, resolveStyle } from '../realtime/houseStore';
@@ -336,6 +336,24 @@ export default function Teach() {
    * publish — see resolveStyle.
    */
   const style = resolveStyle(styles, styleId);
+
+  /**
+   * The manner's own language, when the manner has one to disagree with.
+   *
+   * A style is prose an administrator published, frozen against whatever
+   * language studio had on screen at the time — so a manner written out in
+   * English, picked for a French lesson, is a tutor that greets a class in
+   * English and keeps going. That is not a thing a call should discover: it was
+   * discovered in a call, which is why this is here.
+   *
+   * A style carrying a built-in's key has no such language. Those are rendered
+   * for the lesson at publish, so the picker above decides the language and
+   * there is nothing to warn about — see `TutorStyle.preset`. Undefined here is
+   * the ordinary, quiet case both ways round.
+   */
+  const styleLanguage = style && !style.preset ? findLanguage(style.language) : undefined;
+  const styleMismatch = styleLanguage && styleLanguage.code !== language ? styleLanguage : null;
+  const lessonLanguage = findLanguage(language);
 
   /** What would be written, gathered once for both save and publish. */
   const composed = (): VocoSession => ({
@@ -855,6 +873,21 @@ export default function Teach() {
                   {style?.note ||
                     'How the tutor talks. Published from studio by an administrator — you pick one, you do not write one.'}
                 </p>
+                {/*
+                  Said only when it is true, the way the cap warning above is.
+                  This one names the fix as well, because the teacher cannot
+                  apply it: a manner is an administrator's to publish, and a
+                  teacher who reads only "mismatch" is left with a dropdown of
+                  manners that all say the same wrong thing.
+                */}
+                {styleMismatch && (
+                  <p className="text-[11px] leading-relaxed text-lingo-accent-deep">
+                    This manner is written in {styleMismatch.label} and the lesson is in{' '}
+                    {lessonLanguage?.label ?? language}, so the tutor will talk to the class in{' '}
+                    {styleMismatch.label}. Ask an administrator to publish it for{' '}
+                    {lessonLanguage?.label ?? language}.
+                  </p>
+                )}
               </div>
 
               <div className="flex flex-col gap-2">

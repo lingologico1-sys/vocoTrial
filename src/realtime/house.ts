@@ -22,6 +22,13 @@
  * against the language picker and publishes the text, which is the same move
  * publishing already makes for a student and for the same reason.
  *
+ * IT CARRIES THE KEY AS WELL WHEN THE PROMPT WAS A BUILT-IN, which is not a
+ * retreat from that. A built-in is not in localStorage — it is in the bundle and
+ * in the Worker — and it is a function of the language rather than a paragraph
+ * in one. Keeping the key lets the publish route render the manner for the
+ * language of the lesson going out, so one published manner serves every
+ * language instead of one per language. See `TutorStyle.preset`.
+ *
  * THE STYLE IS NOT THE WHOLE PROMPT. The persona wrap depends on which face is
  * worn, and the lesson block depends on which questions are asked — neither of
  * which studio knows when a style is saved. Composition happens at publish, in
@@ -53,11 +60,39 @@ export interface TutorStyle {
    * Rendered against a language when it was saved, which is why /teach shows
    * the style's own language beside it: a style written out in French and
    * published on a Spanish lesson is a mismatch the picker should make visible
-   * rather than one the call discovers.
+   * rather than one the call discovers. Unless `preset` says the language can
+   * still be decided later — read the two fields together.
    */
   text: string;
-  /** The language it was rendered for, ISO-639-1. See `text`. */
+  /** The language `text` was rendered for, ISO-639-1. See `text` and `preset`. */
   language: string;
+  /**
+   * The built-in prompt `text` came out of, when it came out of one.
+   *
+   * WHY A STYLE CARRIES ONE AT ALL, having just been told that a preset key
+   * names a prompt in one browser's localStorage. That is true of a *saved*
+   * prompt and false of a built-in: the five in instructions.ts are functions of
+   * the language, they compile into the Worker, and a key that names one means
+   * the same thing in every browser and on the server. So the key is kept when
+   * there is one, and the publish route renders it against the language of the
+   * lesson going out rather than spending the text frozen here.
+   *
+   * WHAT IT BUYS is the failure that produced it: a manner published from studio
+   * on an English picker, picked for a French lesson, and a tutor that opened
+   * the call with "Good morning! How are you feeling today?" — every rule in the
+   * prompt honoured, in the wrong language. A manner is a pedagogical choice and
+   * a language is a per-lesson one, and freezing the second into the first made
+   * an administrator publish the same manner once per language for a teacher to
+   * pick the matching pair. Now one "Patient beginner tutor" serves all of them.
+   *
+   * ABSENT IS THE ORDINARY STATE, not a defect: a style rendered from a prompt
+   * an administrator wrote themselves is prose in whatever language they wrote
+   * it in, and nothing can re-render it. Those still freeze, still carry
+   * `language`, and are still what /teach warns about. Absent on everything
+   * saved before this field existed, too, which is why publishing falls back to
+   * `text` rather than treating the absence as an error.
+   */
+  preset?: string;
   /** Last written. Sorts the picker, newest first. */
   updatedAt?: number;
 }
@@ -111,7 +146,8 @@ export function looksLikeStyle(value: unknown): value is TutorStyle {
     typeof style.name === 'string' &&
     typeof style.text === 'string' &&
     style.text.trim().length > 0 &&
-    typeof style.language === 'string'
+    typeof style.language === 'string' &&
+    (style.preset === undefined || typeof style.preset === 'string')
   );
 }
 
