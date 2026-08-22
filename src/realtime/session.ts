@@ -220,7 +220,8 @@ export interface PublishedSetup extends PerformanceProfile {
    * face bucket is slow is a tutor that changes character for no reason anybody
    * could see.
    *
-   * The composer takes the name and one sentence of it. See personaBlock.
+   * The composer sends the name and the whole paragraph, under rules about
+   * when a detail out of it may be spoken. See personaBlock.
    */
   persona?: Persona;
   /**
@@ -229,12 +230,12 @@ export interface PublishedSetup extends PerformanceProfile {
    *
    * READ ON ONE PATH ONLY, AND IT IS THE PATH WITH NO LESSON ON IT. A setup
    * that carries questions is composed from the fields above and this is
-   * ignored, so an old lesson gets today's protocol with its own questions and
-   * its own targets — the whole point of the change, and why none of this needs
-   * a migration. A setup with *no* questions is a conversation rather than a
-   * lesson, which is what everything published before lessons existed is: there
-   * is nothing to compose, and the prompt it went out with is still the right
-   * one. See the composer in Eleve.tsx.
+   * ignored, so an old lesson gets today's protocol with its own questions —
+   * the whole point of the change, and why none of this needs a migration. A
+   * setup with *no* questions is a conversation rather than a lesson, which is
+   * what everything published before lessons existed is: there is nothing to
+   * compose, and the prompt it went out with is still the right one. See the
+   * composer in Eleve.tsx.
    *
    * @deprecated Nothing writes this. A lesson's prompt is composed at dial time.
    */
@@ -283,8 +284,6 @@ export interface PublishedSetup extends PerformanceProfile {
    * whole reason they are stored structurally as well as composed.
    */
   brief?: string;
-  /** What the report checks, one verdict per entry. */
-  targets?: string[];
   /** Asked in this order. Also inside `instructions`. */
   questions?: string[];
   /**
@@ -387,7 +386,6 @@ export function looksLikeSetup(value: unknown): value is PublishedSetup {
     // The lesson is optional throughout — a setup with no lesson is a
     // conversation, which is what every session before lessons existed was.
     (setup.brief === undefined || isString(setup.brief)) &&
-    (setup.targets === undefined || isStringArray(setup.targets)) &&
     (setup.questions === undefined || isStringArray(setup.questions)) &&
     (setup.capMinutes === undefined || typeof setup.capMinutes === 'number') &&
     (setup.lengthMinutes === undefined || typeof setup.lengthMinutes === 'number') &&

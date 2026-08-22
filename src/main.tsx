@@ -38,8 +38,8 @@ const PAGES: Record<string, () => JSX.Element> = {
   // Models and prompts. Off the path to a published session — see Start.tsx.
   '/tutorbench': TutorBench,
   '/facekit': FaceKit,
-  // The teacher's page. One Voco Session — questions, consigne, targets, and
-  // the tutor that asks them — written here and handed out from here under a
+  // The teacher's page. One Voco Session — questions, consigne, and the
+  // tutor that asks them — written here and handed out from here under a
   // code. It is not a workshop page and does not look like one; see Teach.tsx.
   '/teach': Teach,
   // Tuning, and the two things an administrator publishes for every teacher:

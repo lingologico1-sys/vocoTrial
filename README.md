@@ -156,7 +156,6 @@ field drains the next time the lesson is saved.
 /teach ──save──► R2 sheets.json
                      │
                      └──publish──► setup ──► /eleve   (questions, consigne, cap)
-                                          └──► report  (targets)
 ```
 
 **Questions are one input each**, up to 20, starting at 5 empty rows. They were
@@ -181,9 +180,8 @@ the change removes, for three reasons that compound:
 
 - The learner never prepared those questions and may not have the vocabulary to
   answer them, or the comprehension to understand them at all.
-- The targets were written for the teacher's questions, so an improvised turn
-  invites none of them — and the report reads a comprehension failure as a
-  production failure.
+- The teacher's questions were chosen; an improvised one was not, so the
+  report reads a comprehension failure as a production failure.
 - Nobody chose it. It existed because a clock had to be filled and only the
   tutor could fill it.
 
@@ -218,21 +216,27 @@ its questions, one for a lesson the cap cut short. A tutor that signs off warmly
 on a truncated lesson tells a learner they finished something they did not — and
 the learner can see the list on their own screen.
 
-**The prose and the targets go to different readers**, which is the one thing
+**The prose and the questions go to different readers**, which is the one thing
 worth reading twice:
 
-| | Student sees | Tutor is told | Report checks |
-| --- | --- | --- | --- |
-| `brief` — the consigne, prose | ✅ verbatim | ❌ | ❌ |
-| `questions` — ordered | ✅ as a list | ✅ works down them | ❌ |
-| `targets` — nameable structures | ❌ | ✅ steers, never announces | ✅ one verdict each |
+| | Student sees | Tutor is told |
+| --- | --- | --- |
+| `brief` — the consigne, prose | ✅ verbatim | ❌ |
+| `questions` — ordered | ✅ as a list | ✅ works down them |
 
 The consigne is addressed to the learner — *"Réponds aux questions suivantes"* is
 an instruction to the person answering, and handing it to the tutor gives a model
-an instruction meant for somebody else, which these models act on. The targets
-are the machine-readable half of the same intent, which is what lets the report
-return a verdict per target instead of a paragraph of judgement about a
-paragraph of prose.
+an instruction meant for somebody else, which these models act on.
+
+**There is no separate list of structures to practise.** A `targets` field sat
+beside the consigne until this build: nameable structures — *le passé composé* —
+that the tutor steered towards and the report returned one verdict against
+apiece. It came out because the questions already carry that intent and carry it
+better. A teacher who wants the passé composé asks what somebody did yesterday,
+and the question does the steering without a second field to keep in sync with
+the first. The cost is the per-target row in the report, which is gone with it.
+Rows in R2 still holding a `targets` array are ignored and drain on the next
+save.
 
 **There is no built-in Voco Session**, unlike the evaluator. A report with no
 scale cannot be written at all, so a scale ships in the code; a conversation
@@ -343,17 +347,9 @@ At either ending the tutor is told to close and the page hangs up
 mid-clause, and the transcript keeps the part a report reads for how a learner
 handles a close.
 
-The report gains a **second axis, not a second scale**: `task` says whether the
-lesson's targets were met, `bands` says where the learner stands, and neither
-feeds the other. A secure A2 can miss the target and a shaky B1 can hit it. The
-targets are resolved server-side from the published setup rather than taken
-from the caller, for the reason the evaluator already is — they land in a system
-prompt. A report with no code gets no targets, rather than falling back to
-somebody else's lesson.
-
-And a **third axis that rewards failure**: `ambition` says how far the learner
-reached past the simplest answer each question allowed. Both the other axes are
-measurements, and both are satisfied by safe correct language — nothing in the
+The report gains a **second axis that rewards failure**: `ambition` says how far
+the learner reached past the simplest answer each question allowed. `bands` is a
+measurement, and one satisfied by safe correct language — nothing in the
 report could say the thing a tutor says constantly, that an answer was right and
 cost nothing. A reach recorded with `landed: false` is the evidence this section
 wants: *"Ça va, mais j'aurais voulu qu'il fasse plus beau"* with the mood wrong
@@ -374,7 +370,7 @@ of learner speech. What that missed is a three-question lesson answered properly
 in ninety seconds: the student finished everything they were set and the page
 told them they had not talked enough. A completed lesson now clears at
 `MIN_COMPLETE_EVAL_MS` instead, and the report is told that brevity is a sample
-rather than a failure — fill best sentences, ambition, the targets and the error
+rather than a failure — fill best sentences, ambition and the error
 patterns, let the band walk come back mostly `not-shown`, and answer
 `too-little-evidence` for the level, which is the honest answer rather than a
 poor one. The floor does not vanish entirely, because "completed" is the tutor's
@@ -404,7 +400,7 @@ English panel that plainly is not their app, and a Close button.
 
 | Section | What it settles |
 | --- | --- |
-| The lesson | Which setup opened, when it was published, and the questions, targets and consigne *as the student's browser has them* — not as `/teach` currently holds them |
+| The lesson | Which setup opened, when it was published, and the questions and consigne *as the student's browser has them* — not as `/teach` currently holds them |
 | What was sent to the model | The turn-taking that left the browser, **and the fields deliberately left unsent**. A tutor cutting in mid-clause is usually a `silenceDurationMs` nobody set, which a list of present fields alone would show as nothing being wrong |
 | The face | The house performance profile, so "it never blinked" needs no second round trip |
 | The call | Status, elapsed, and how many questions the tutor *claims* — a floor, not a count |

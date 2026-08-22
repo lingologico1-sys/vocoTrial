@@ -12,7 +12,7 @@
  *
  * COMPOSED WHEN THE STUDENT DIALS, NOT WHEN THE TEACHER PUBLISHES, which is the
  * other half of the same fix. A published setup snapshots the lesson — the
- * questions, the targets, the style prose, the persona — and the prompt is
+ * questions, the style prose, the persona — and the prompt is
  * built from that snapshot at the moment a call starts, by whatever build is
  * running. A teacher editing next week's questions still cannot touch a lesson
  * being taught right now, because the data is frozen; but a protocol change can
@@ -204,38 +204,56 @@ export function openingSignal(part: DayPart = dayPartAt()): string {
 }
 
 /**
- * The persona, cut down to what a tutor can carry without performing it.
+ * The persona, whole, and the rules for a tutor who has one.
  *
- * A NAME AND ONE SENTENCE, where this used to be a whole biography plus a block
- * of rules about when to use it. The rules were the tell: a model handed a life
- * wants to tell you about it, so the old wrap spent three sentences forbidding
- * what the paragraph above them invited — and it still leaked. A tutor two
- * questions into a lesson volunteered "J'habite à Lyon, personnellement" to a
- * learner who had asked nothing about it. Less material is a better fix than
- * more prohibition, and one sentence is enough for a face to have someone
- * behind it.
+ * THE WHOLE BIOGRAPHY, WHICH IS A REVERSAL. This took the name and the first
+ * sentence of the paragraph, mechanically, and the argument for that cut was
+ * that a model handed a life wants to tell you about it: a tutor two questions
+ * into a lesson had volunteered "J'habite à Lyon, personnellement" to a learner
+ * who had asked nothing, and less material looked like a better fix than more
+ * prohibition. What the cut actually bought was a tutor who could not answer
+ * the question the persona exists for. A learner who asks "et toi, tu fais quoi
+ * dans la vie?" — which is the first thing anybody asks a stranger, and is on
+ * the question list of half the lessons this app teaches — got an invention,
+ * and a different invention on the next call. A face that answers "where are
+ * you from?" differently every time is worse than a face with no life at all,
+ * because the learner is the one who notices.
  *
- * THE FIRST SENTENCE OF THE BIO, mechanically. Kits are authored in the first
- * person and open on an introduction — "My name is Théo Dubois, and I'm 24" —
- * so the first sentence is reliably the one a person would lead with. It is a
- * heuristic and it is allowed to be: a wrong cut costs one odd-sounding line of
- * background, and the alternative is asking every kit author to write a second,
- * shorter bio nobody would keep up to date.
+ * SO THE PROHIBITION COMES BACK, AND IT IS DOING THE WORK NOW. The five
+ * sentences below are written as tests rather than judgements, the habit this
+ * file argues for elsewhere: "only when the learner asks", "one detail, one
+ * sentence", "never open a turn with one" are all checkable against the turn
+ * being composed, where "keep the background in the background" is not. The
+ * Lyon leak is what they are aimed at, and the diagnostic timeline is where a
+ * repeat of it will show — a TUTOR line carrying a fact nobody asked for.
+ *
+ * THE PRECEDENCE LINE IS NOT A HEDGE. A biography is drafted to be usable in
+ * conversation — persona.ts asks the drafting model for "one opinion they will
+ * happily repeat" — and the lesson rules say never to open a subject of your
+ * own. Those two collide the moment a tutor decides its opinion about regional
+ * markets is worth a turn. Something has to win, and it is the lesson: the
+ * learner prepared that list and has the words for it.
+ *
+ * IT COSTS PROMPT, AND THE CEILING IS ALREADY WATCHED. MAX_BIO_CHARS caps a
+ * paragraph at 1,200, and publish.ts composes this whole prompt to measure it
+ * before it stores a lesson — so a face whose biography will not fit is refused
+ * in front of the teacher, who can pick another one, rather than at connect in
+ * front of a student who cannot.
  */
-function firstSentence(text: string): string {
-  const trimmed = text.trim();
-  const stop = trimmed.search(/[.!?](\s|$)/);
-  return stop === -1 ? trimmed : trimmed.slice(0, stop + 1);
-}
-
 export function personaBlock(persona: Persona | undefined): string {
   const name = persona?.fullName?.trim() ?? '';
-  const line = persona?.bio ? firstSentence(persona.bio) : '';
-  if (!name && !line) return '';
+  const bio = persona?.bio?.trim() ?? '';
+  if (!name && !bio) return '';
 
   return `WHO YOU ARE
-${[name ? `You are ${name}.` : '', line].filter(Boolean).join(' ')}
-Talk about your own life only when the learner asks about it: one sentence, then back to them.
+${[name ? `You are ${name}.` : '', bio].filter(Boolean).join('\n')}
+
+This is background to answer from, never material to perform. Bring in a detail
+from it only when the learner asks you something about yourself: one detail, one
+sentence, and then back to them. Never volunteer it, never list facts about
+yourself, and never open a turn with one. If they ask outright whether you are a
+real person, tell them the truth and carry on with the lesson. Wherever any of
+this disagrees with the lesson below, the lesson wins.
 
 `;
 }
@@ -315,7 +333,6 @@ export interface TutorPromptParts {
   rules?: string;
   persona?: Persona;
   questions: string[];
-  targets?: string[];
 }
 
 /**
@@ -347,10 +364,6 @@ export function composeTutorPrompt(parts: TutorPromptParts): string {
    */
   const rules = parts.rules?.trim() || DEFAULT_LESSON_RULES;
 
-  const targets = parts.targets?.length
-    ? `\nSteer towards ${parts.targets.join(', ')} where a turn invites it, by asking something whose natural answer uses one. Never name a grammatical structure out loud, and let a turn that does not invite one go.\n`
-    : '';
-
   return `${personaBlock(parts.persona)}YOUR JOB
 ${parts.style.trim()}
 
@@ -360,7 +373,7 @@ These ${count} questions are the whole lesson. Ask them in order, one at a time:
 ${questions.join('\n')}
 
 ${rules}
-${targets}
+
 REPORTING YOUR PROGRESS
 Call ${PROGRESS_TOOL} when a question is finished, with that question's number —
 once each, in order, up to ${count}. Finished means the learner has answered it

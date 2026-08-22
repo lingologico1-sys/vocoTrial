@@ -260,7 +260,7 @@ export default function Eleve() {
    *
    * NOT READ OUT OF THE SETUP, which is the change that makes a code handed out
    * last term safe to open today. A published setup carries the lesson as data
-   * — the questions, the targets, the style prose, the persona — and this is
+   * — the questions, the style prose, the persona — and this is
    * where those become a prompt, using whatever composer this build ships. What
    * the teacher decided is still frozen; what is really an agreement between
    * the prompt and the tools a call declares travels with the code that
@@ -269,16 +269,16 @@ export default function Eleve() {
    * A SETUP WITH NO STYLE FALLS BACK TO THE BUILT-IN, and that is what every
    * setup published before this change has. Those rows carry a composed
    * `instructions` string whose first section was very nearly this same text,
-   * so an old code opens onto a tutor of the same manner with its own questions
-   * and its own targets, on today's protocol. Nothing is stranded and nothing
-   * needs republishing.
+   * so an old code opens onto a tutor of the same manner with its own
+   * questions, on today's protocol. Nothing is stranded and nothing needs
+   * republishing.
    */
   const instructions = useMemo(() => {
     if (!session) return '';
     /*
      * A setup with no questions is a conversation rather than a lesson, which
      * is the shape of everything published before lessons existed. There is
-     * nothing to compose — no list, no targets, no protocol to describe — so
+     * nothing to compose — no list, no protocol to describe — so
      * the prompt it was published with is still exactly the right one, and it
      * is the only thing that still reads that stored text. Composing a lesson
      * prompt with an empty list would be worse than useless: it would tell the
@@ -292,7 +292,6 @@ export default function Eleve() {
       rules: session.lessonRules,
       persona: session.persona,
       questions: session.questions,
-      targets: session.targets,
     });
   }, [session]);
 
@@ -477,13 +476,6 @@ export default function Eleve() {
           languageCode: session?.language,
           l1Code: resolveL1(l1).reportCode,
           evaluatorId: session?.evaluatorId,
-          /*
-           * The code, not the targets, even though this page is holding them.
-           * The route reads the lesson from the bucket it was published to —
-           * see analyse.ts on why a target that lands in a system prompt has to
-           * be one somebody published rather than one a caller posted.
-           */
-          sessionCode: session?.code,
           turns: call.turns.map((turn) => ({ role: turn.role, text: turn.text })),
         }),
       });

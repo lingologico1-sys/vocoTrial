@@ -136,18 +136,6 @@ export const FR = {
    */
   evalLive: 'Conversation en cours',
 
-  // --- The consigne, read back in the report
-  evalTaskTitle: 'Ta consigne',
-  evalTaskMet: 'Réussi',
-  evalTaskPartly: 'En partie',
-  evalTaskMissing: 'Pas vu',
-  /*
-   * Said in as many words because "Pas vu" on its own reads as a failure, and
-   * it is not one: the tutor steers the conversation, so a structure that never
-   * came up is as often the conversation's doing as the learner's.
-   */
-  evalTaskMissingNote: 'Cette structure n’est pas apparue dans la conversation.',
-
   evalBestTitle: 'Tes meilleures phrases',
   /*
    * The risk section, and the wording is doing real work.

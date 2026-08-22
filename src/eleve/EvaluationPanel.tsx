@@ -86,7 +86,7 @@ export default function EvaluationPanel({ report }: EvaluationPanelProps) {
       {/*
         What they dared, straight after what they did well.
 
-        SECOND, AND DELIBERATELY ABOVE THE CONSIGNE. This is the one section
+        SECOND, AND DELIBERATELY ABOVE THE LEVEL. This is the one section
         that can say something the learner does not want to hear — "tu es resté
         sur des phrases sûres" — and the header's argument is that the opening
         is the part that gets believed. Buried under the level it would be read
@@ -129,76 +129,6 @@ export default function EvaluationPanel({ report }: EvaluationPanelProps) {
               ))}
             </ul>
           )}
-        </section>
-      )}
-
-      {/*
-        The consigne, read back.
-
-        SECOND, NOT FIRST, AND NOT LAST. The best sentences keep the opening for
-        the reason in the header — the first thing read is the thing believed —
-        but this is the question the student actually has: they were told to use
-        the passé composé an hour ago and they want to know whether they did.
-        Putting it above the level also keeps the two apart in the reading, which
-        is the point of it being a separate axis: it is not a rung, and a student
-        who meets it after their band will read it as one.
-
-        Absent for a session with no sheet, which is every session published
-        before sheets existed. See sheets.ts.
-      */}
-      {report.task?.length > 0 && (
-        <section>
-          <Heading>{FR.evalTaskTitle}</Heading>
-          <ul className="space-y-2">
-            {report.task.map((entry, index) => (
-              <li
-                key={index}
-                className={`rounded-lg border px-3 py-2.5 ${
-                  entry.verdict === 'met'
-                    ? 'border-lingo-success/40 bg-lingo-success-bg'
-                    : entry.verdict === 'partly'
-                      ? 'border-lingo-accent-light bg-lingo-accent-glow'
-                      : 'border-lingo-border-light bg-lingo-surface'
-                }`}
-              >
-                <div className="flex items-baseline justify-between gap-2">
-                  <span className="min-w-0 flex-1 text-sm font-semibold text-lingo-ink">
-                    {entry.target}
-                  </span>
-                  <span
-                    className={`shrink-0 text-[11px] font-bold uppercase tracking-wider ${
-                      entry.verdict === 'met'
-                        ? 'text-lingo-success'
-                        : entry.verdict === 'partly'
-                          ? 'text-lingo-accent-deep'
-                          : 'text-lingo-muted'
-                    }`}
-                  >
-                    {entry.verdict === 'met'
-                      ? FR.evalTaskMet
-                      : entry.verdict === 'partly'
-                        ? FR.evalTaskPartly
-                        : FR.evalTaskMissing}
-                  </span>
-                </div>
-                {entry.evidence && (
-                  <p className="mt-1.5 text-xs leading-snug">
-                    <Quote>{entry.evidence}</Quote>
-                  </p>
-                )}
-                {/*
-                  The model's line, or ours when it is "not-shown" and has
-                  nothing to say. A blank row under a grey verdict reads as a
-                  mark against the learner, and the strings table says in as
-                  many words that it is not one.
-                */}
-                <p className="mt-1 text-xs leading-relaxed text-lingo-muted">
-                  {entry.note?.trim() ||
-                    (entry.verdict === 'not-shown' ? FR.evalTaskMissingNote : '')}
-                </p>
-              </li>
-            ))}
-          </ul>
         </section>
       )}
 

@@ -2,7 +2,6 @@ import { json } from '../_middleware';
 import {
   MAX_BRIEF,
   MAX_QUESTIONS,
-  MAX_TARGETS,
   MAX_VOCO_SESSION,
   capMinutesOf,
   type VocoSession,
@@ -21,10 +20,9 @@ import { type VocoSessionEnv, readVocoSessions, writeVocoSessions } from './_lib
  *
  * The checks are shape checks, not a security boundary; the middleware has
  * already established the caller knew the site password. What they catch is a
- * malformed lesson reaching two prompts at once: the questions land in a live
- * system prompt and the targets land in the report's, and an empty entry in
- * either produces a tutor asking a blank question or a report grading against
- * nothing.
+ * malformed lesson reaching a live system prompt: the questions are asked out
+ * loud by the tutor, and an empty entry produces a tutor asking a blank
+ * question.
  *
  * THE TUTOR HALF IS CARRIED, NOT VALIDATED. `language`, `styleId`, `faceId`
  * and `evaluatorId` are ids naming things in four other libraries, and checking
@@ -83,11 +81,6 @@ export async function onRequestPost(
     );
   }
 
-  const targets = clean(incoming.targets, MAX_TARGETS + 1);
-  if (targets.length > MAX_TARGETS) {
-    return json({ error: `That is more than ${MAX_TARGETS} targets`, code: 'too_many_targets' }, 400);
-  }
-
   const brief = incoming.brief.trim();
   if (brief.length > MAX_BRIEF) {
     return json({ error: `A consigne takes ${MAX_BRIEF} characters`, code: 'brief_too_long' }, 400);
@@ -116,7 +109,6 @@ export async function onRequestPost(
     name: incoming.name.trim() || 'Untitled session',
     note: typeof incoming.note === 'string' ? incoming.note.trim() : '',
     brief,
-    targets,
     questions,
     language: carried<string>(incoming.language, isText),
     styleId: carried<string>(incoming.styleId, isText),

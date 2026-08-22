@@ -11,14 +11,9 @@ import {
 import { type GateEnv, json } from '../_middleware';
 import { VERTEX_KEY_NAMES, vertexGenerateContentUrl, vertexKey } from '../_vertex';
 import { type LibraryEnv, readLibrary } from '../evaluators/_library';
-import { type SessionEnv, readSetup } from '../sessions/_library';
 
-/**
- * The key that pays for the call, the bucket of scales, and the bucket of
- * published setups — the last one only so the lesson's targets can be read from
- * where they were published rather than taken from the caller. See below.
- */
-type ReportEnv = GateEnv & LibraryEnv & SessionEnv;
+/** The key that pays for the call, and the bucket of scales. */
+type ReportEnv = GateEnv & LibraryEnv;
 
 /**
  * The end-of-call report: a finished transcript in, a structured reading out.
@@ -52,20 +47,6 @@ interface AnalyseBody {
   languageCode?: unknown;
   l1Code?: unknown;
   evaluatorId?: unknown;
-  /**
-   * Which published setup this conversation was held under, if any.
-   *
-   * A CODE, NOT THE TARGETS THEMSELVES, for the reason the header gives about
-   * the evaluator: a lesson's targets land in a *system* prompt, and a caller
-   * who could post them inline could write the instruction rather than name it.
-   * Resolving from the bucket means every target the model is asked to check is
-   * one somebody published through sessions/publish.ts.
-   *
-   * Absent from tutorBench, which runs no lesson and gets no task section. That
-   * is the correct outcome rather than a gap: the workshop is measuring the
-   * model, not a student against a consigne.
-   */
-  sessionCode?: unknown;
   turns?: unknown;
 }
 
@@ -182,33 +163,6 @@ export async function onRequestPost(
     return json({ error: 'Unknown evaluator', code: 'bad_evaluator' }, 400);
   }
 
-  /*
-   * The lesson's targets, read from the setup the student was actually handed.
-   *
-   * Every failure here is silent and yields no targets, which is the right
-   * shape: the section is optional by design — a lesson with no targets has
-   * none — so an unreachable bucket or a code naming a setup since deleted
-   * costs the task section rather than the whole report. A learner
-   * who waited two minutes for a reading should not be told to try again
-   * because the half of it that is a bonus could not be assembled.
-   *
-   * A CODE IS REQUIRED, where a missing one used to fall through to whichever
-   * setup was published last. That pointer is gone — see sessions/_library.ts —
-   * and following it here would have been worse than useless once there is more
-   * than one live lesson: it would report a student against another class's
-   * targets and give no sign it had done so. No code now means no targets,
-   * which is the same outcome tutorBench already gets.
-   */
-  let targets: string[] | undefined;
-  if (env.SESSIONS) {
-    try {
-      const published = await readSetup(env.SESSIONS, String(body?.sessionCode ?? ''));
-      if (published?.targets?.length) targets = published.targets;
-    } catch {
-      // See above: no targets is a survivable answer, a failed report is not.
-    }
-  }
-
   const turns = readTurns(body?.turns);
   if (!turns) {
     return json({ error: 'A transcript is required', code: 'bad_turns' }, 400);
@@ -237,7 +191,7 @@ export async function onRequestPost(
       headers: { 'x-goog-api-key': key, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         systemInstruction: {
-          parts: [{ text: reportInstruction({ language, l1, evaluator, targets }) }],
+          parts: [{ text: reportInstruction({ language, l1, evaluator }) }],
         },
         contents: [{ role: 'user', parts: [{ text: transcript }] }],
         generationConfig: {

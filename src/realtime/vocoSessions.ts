@@ -2,11 +2,10 @@
  * The Voco Session: one prepared tutoring session, as a teacher writes it.
  *
  * WHAT IT IS. Everything one lesson needs — a few questions on a theme, the
- * consigne the learner is handed with them, the structures the teacher wants to
- * hear, and the tutor that will ask them: a language, a manner, a face and the
- * scale the report reads against. It is the thing a teacher prepares before a
- * lesson and reuses next year, which is why it is a library rather than a field
- * on anything.
+ * consigne the learner is handed with them, and the tutor that will ask them: a
+ * language, a manner, a face and the scale the report reads against. It is the
+ * thing a teacher prepares before a lesson and reuses next year, which is why
+ * it is a library rather than a field on anything.
  *
  * IT USED TO BE CALLED A SHEET, and held only the lesson half. The tutor half
  * was picked separately in studio at publish time and never saved, so reopening
@@ -41,20 +40,29 @@
  * Session with no questions, because that is a filing cabinet entry about
  * nothing. See `looksLikeVocoSession`.
  *
- * THE PROSE AND THE TARGETS GO TO DIFFERENT READERS, which is the one thing in
- * this file worth reading twice.
+ * THE PROSE AND THE QUESTIONS GO TO DIFFERENT READERS, which is the one thing
+ * in this file worth reading twice.
  *
  *   brief      to the student, verbatim, on screen. Never to the tutor.
- *   targets    to the tutor and to the report. Never read out on the call.
  *   questions  to both.
  *
  * The prose is addressed to the learner — "Réponds aux questions suivantes" is
  * an instruction to the person answering, and handing it to the tutor gives a
  * model an instruction meant for somebody else, which these models will act on.
- * The targets are the machine-readable half of the same intent: they are what
- * the tutor steers towards and what the report checks, and they are the reason
- * the report can return a verdict per target rather than a paragraph of
- * judgement about a paragraph of prose.
+ * The questions are the half both readers can act on: the tutor asks them, and
+ * the student sees the lesson they were set.
+ *
+ * THERE IS NO SEPARATE LIST OF STRUCTURES TO PRACTISE, and there was one until
+ * this build. `targets` was a second authored list — 'le passé composé' — that
+ * the tutor steered towards and the report returned a verdict against, one row
+ * each. It came out because the questions already carry that intent and carry
+ * it better: a teacher who wants the passé composé asks what somebody did
+ * yesterday, and that question does the steering without a second field to keep
+ * in sync with the first. What it cost is the per-target row in the report; see
+ * report.ts, which no longer has a `task` axis.
+ *
+ * Rows saved while the field existed still hold a stale `targets` array, and
+ * drain on the next save, for the reason the `voice` note above gives.
  *
  * Deliberately free of DOM imports, and of anything that imports one, for
  * session.ts's reason: functions/ compiles against workers-types with no DOM
@@ -82,14 +90,6 @@ export interface VocoSession {
    * change is worse than leaving them alone.
    */
   brief: string;
-  /**
-   * What the learner is meant to produce, one per entry.
-   *
-   * Short and nameable — 'passé composé', 'a subordinate clause'. The tutor
-   * steers towards these and the report returns one verdict per entry, so an
-   * entry that is really three things comes back as one unreadable verdict.
-   */
-  targets: string[];
   /** Asked in this order. See `composeTutorPrompt` on how strictly. */
   questions: string[];
 
@@ -239,11 +239,10 @@ export const DEFAULT_QUESTION_ROWS = 5;
  * finished the list with time still on the clock had to produce more
  * conversation from somewhere, so it improvised — and the improvised half is
  * the half the learner never prepared, has no vocabulary for, and may not even
- * understand. It is also the half the report cannot read fairly: the targets
- * were written for the teacher's questions, so an improvised turn invites none
- * of them, and the learner's weakest stretch of speech ends up being the
- * stretch that had nothing to do with the lesson. Removing the floor removes
- * all of that in one move. See `composeTutorPrompt` in tutorPrompt.ts.
+ * understand. It is also the half the report cannot read fairly: the learner's
+ * weakest stretch of speech ends up being the stretch that had nothing to do
+ * with the lesson, and a comprehension failure there reads as a production
+ * failure. Removing the floor removes all of that in one move. See `composeTutorPrompt` in tutorPrompt.ts.
  *
  * WHAT IS LEFT IS A COST BOUND. A lesson ends when its questions are answered;
  * the cap is what stops a call that will never answer them — a tutor
@@ -260,8 +259,22 @@ export const DEFAULT_QUESTION_ROWS = 5;
  * exists — `composeTutorPrompt` takes no minutes at all, which enforces it.
  */
 
-/** Short, but still a conversation. Below this a cap would cut good lessons. */
-export const MIN_CAP_MINUTES = 5;
+/**
+ * Short, but still a conversation.
+ *
+ * THREE, LOWERED FROM FIVE, because the cap stopped being a length. Five was
+ * the shortest thing worth calling a lesson back when this number was also the
+ * floor the tutor talked to fill; now it only decides when an unfinished call
+ * is cut off, so a teacher setting a two-question lesson or a quick drill has
+ * no reason to be held at five minutes of meter.
+ *
+ * It cannot go below three without breaking the report. A conversation cut at
+ * the cap is still read, and the learner's share of the clock is realistically
+ * 35-50% of it — under three minutes there is not enough learner speech left
+ * for a level judgement, and the evaluation refuses. See MIN_EVAL_MS in
+ * EvaluationPanel.tsx.
+ */
+export const MIN_CAP_MINUTES = 3;
 
 /**
  * Thirty, raised from ten, because twenty questions cannot happen in ten.
@@ -318,16 +331,6 @@ export function capLooksTight(questionCount: number, capMinutes: number): boolea
   return questionCount > 0 && capMinutes < questionCount * MINUTES_A_QUESTION;
 }
 
-/**
- * More targets than one conversation can evidence.
- *
- * Six is already generous: each becomes a row in the report that has to come
- * back met or not, and a target with no evidence reads to a learner as a
- * failure rather than as a conversation that went elsewhere. The ceiling is
- * here to stop a term's worth of grammar landing in one lesson.
- */
-export const MAX_TARGETS = 6;
-
 /** The consigne is read on a phone-width panel. This is about a paragraph. */
 export const MAX_BRIEF = 600;
 
@@ -335,28 +338,6 @@ export const MAX_BRIEF = 600;
 export function newVocoSessionId(): string {
   return `voco:${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 }
-
-/**
- * The editor's format for a list: one entry per line.
- *
- * Not parseBands' shape, because there is no nesting to express. A question is
- * a line and a target is a line, so the parse is a split, and the failures
- * worth reporting are the counted ceilings above rather than a syntax.
- *
- * Leading bullets and numbers are stripped rather than rejected. A teacher
- * pastes a numbered list out of a worksheet, and a lesson that then renders
- * "1. 1. Qu'as-tu fait" is the app being pedantic about something it can
- * simply handle.
- */
-export function splitLines(text: string, limit: number): string[] {
-  return text
-    .split('\n')
-    .map((line) => line.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, '').trim())
-    .filter(Boolean)
-    .slice(0, limit);
-}
-
-export const joinLines = (entries: string[]): string => entries.join('\n');
 
 /** Shape check shared by the save route and the picker. */
 export function looksLikeVocoSession(value: unknown): value is VocoSession {
@@ -370,7 +351,6 @@ export function looksLikeVocoSession(value: unknown): value is VocoSession {
     session.id.length > 0 &&
     typeof session.name === 'string' &&
     typeof session.brief === 'string' &&
-    strings(session.targets) &&
     strings(session.questions) &&
     session.questions.length > 0
   );

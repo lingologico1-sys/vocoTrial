@@ -14,15 +14,12 @@ import {
   MAX_BRIEF,
   MAX_CAP_MINUTES,
   MAX_QUESTIONS,
-  MAX_TARGETS,
   MAX_VOCO_SESSION_NAME,
   MINUTES_A_QUESTION,
   MIN_CAP_MINUTES,
   capLooksTight,
   capMinutesOf,
-  joinLines,
   newVocoSessionId,
-  splitLines,
   type VocoSession,
 } from '../realtime/vocoSessions';
 import {
@@ -93,13 +90,12 @@ import type { PublishedSetup } from '../realtime/session';
  * ways: fixing a typo here does not fix it under a code already read to a
  * class, and the fix is to publish again and hand out the new code.
  *
- * THE QUESTIONS ARE ONE INPUT EACH, and the targets are still a textarea. Both
- * are lists, so the asymmetry needs saying: a question is the unit the whole
- * app counts in. The tutor is handed them numbered, it reports progress by
- * number, and the student watches a countdown of them — so the number beside
- * each box on this page is the same number those three things mean, and a
- * teacher editing question 4 can see that it is question 4. A textarea makes
- * that a matter of counting newlines. Targets are counted by nobody.
+ * THE QUESTIONS ARE ONE INPUT EACH, rather than lines in a textarea, because a
+ * question is the unit the whole app counts in. The tutor is handed them
+ * numbered, it reports progress by number, and the student watches a countdown
+ * of them — so the number beside each box on this page is the same number those
+ * three things mean, and a teacher editing question 4 can see that it is
+ * question 4. A textarea makes that a matter of counting newlines.
  *
  * It also removes a quiet trap. The textarea sliced at MAX_QUESTIONS as you
  * typed, so pasting sixteen questions silently dropped the last one and showed
@@ -119,7 +115,6 @@ function empty(): VocoSession {
     name: '',
     note: '',
     brief: '',
-    targets: [],
     questions: [],
     language: defaultLanguageCode(),
     // A new lesson has no behaviour to preserve, so it gets the setting a class
@@ -168,7 +163,6 @@ export default function Teach() {
   const [name, setName] = useState('');
   const [note, setNote] = useState('');
   const [brief, setBrief] = useState('');
-  const [targetText, setTargetText] = useState('');
   /**
    * One string per row, blanks included.
    *
@@ -267,7 +261,6 @@ export default function Teach() {
     setName(source.name);
     setNote(source.note);
     setBrief(source.brief);
-    setTargetText(joinLines(source.targets));
     // Padded up to the default so a short lesson still opens with somewhere to
     // type, and never truncated: a saved lesson shows every question it has.
     setRows(
@@ -304,7 +297,6 @@ export default function Teach() {
 
   /* Whether the cap will land mid-list. The one warning this page owes a teacher. */
   const tightCap = capLooksTight(questions.length, capMinutes);
-  const targets = splitLines(targetText, MAX_TARGETS);
 
   /*
     Why Publish is greyed out, said next to the greyed button. Each of these
@@ -351,7 +343,6 @@ export default function Teach() {
     name: name.trim() || 'Untitled session',
     note: note.trim(),
     brief: brief.trim(),
-    targets,
     questions,
     capMinutes,
     patience,
@@ -796,33 +787,6 @@ export default function Teach() {
                   disabled={busy}
                   className={`${field} resize-y leading-relaxed`}
                 />
-              </div>
-
-              <div className="flex flex-col gap-1.5">
-                <div className="flex items-baseline justify-between">
-                  <label className={label} htmlFor="voco-targets">
-                    What they are practising
-                  </label>
-                  <span className="text-[11px] text-lingo-muted">
-                    {targets.length}/{MAX_TARGETS} · never said out loud
-                  </span>
-                </div>
-                <textarea
-                  id="voco-targets"
-                  value={targetText}
-                  onChange={(event) => setTargetText(event.target.value)}
-                  rows={3}
-                  placeholder={'le passé composé\nune subordonnée avec « parce que »'}
-                  disabled={busy}
-                  className={`${field} resize-y leading-relaxed`}
-                />
-                {/* The one thing this page cannot otherwise make visible: the
-                    student reads the consigne and the teacher writes the
-                    targets, and only one of the two reaches the tutor. */}
-                <p className="text-[11px] leading-relaxed text-lingo-muted">
-                  The tutor steers towards these and the report checks them one by one. The
-                  consigne above goes to the student instead — the tutor never sees it.
-                </p>
               </div>
             </div>
           </section>

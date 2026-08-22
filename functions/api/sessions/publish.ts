@@ -13,7 +13,6 @@ import {
 } from '../../../src/realtime/session';
 import {
   MAX_QUESTIONS,
-  MAX_TARGETS,
   capMinutesOf,
   type VocoSession,
 } from '../../../src/realtime/vocoSessions';
@@ -153,7 +152,6 @@ export async function onRequestPost(
   }
 
   const questions = clean(incoming.questions, MAX_QUESTIONS);
-  const targets = clean(incoming.targets, MAX_TARGETS);
   if (!questions.length) {
     return json({ error: 'A Voco Session needs at least one question', code: 'no_questions' }, 400);
   }
@@ -222,7 +220,6 @@ export async function onRequestPost(
     rules: lessonRules ?? undefined,
     persona,
     questions,
-    targets,
   });
 
   /*
@@ -327,7 +324,6 @@ export async function onRequestPost(
     // once now rather than twice: it used to be here structurally *and* inside
     // a composed prompt, and the prompt is composed when the student dials.
     brief: typeof incoming.brief === 'string' ? incoming.brief : '',
-    targets,
     questions,
     capMinutes,
     vocoSessionId: typeof incoming.id === 'string' ? incoming.id : undefined,

@@ -231,6 +231,34 @@ function performanceBlock(setup: PublishedSetup): string {
 }
 
 /**
+ * What of the worn face's persona actually reached the tutor.
+ *
+ * IT SAYS HOW MUCH, NOT JUST WHO. This line read "the name and one sentence
+ * reach the tutor" for as long as the composer cut the biography down, and it
+ * was the only place that fact was written down anywhere a teacher could see
+ * it — faceKit invites a hundred and fifty words and said nothing about what
+ * became of them. The composer sends the whole paragraph now, so the character
+ * count is what tells you the paragraph you wrote is the paragraph that went:
+ * a face whose background reads thin in a call is either a short bio or a
+ * tutor ignoring it, and the number separates those two before anyone starts
+ * rewriting a prompt over it. The full text is in the composed prompt below.
+ *
+ * A name with no paragraph and a paragraph with no name are both real states —
+ * see `hasPersona` — so neither is reported as "none stored".
+ */
+function personaLine(persona: PublishedSetup['persona']): string {
+  const name = persona?.fullName?.trim() ?? '';
+  const bio = persona?.bio?.trim() ?? '';
+  if (!name && !bio) return 'none stored';
+
+  const background = bio
+    ? `all ${bio.length} characters of the background reach the tutor`
+    : 'no background stored — the name is all the tutor gets';
+
+  return `${name || 'unnamed'} — ${background}`;
+}
+
+/**
  * The transcript and the events, merged and sorted by when they happened.
  *
  * ONE SEQUENCE AND NOT TWO LISTS. See the header: everything this file is for
@@ -369,9 +397,7 @@ export function buildDiagnostic(input: DiagnosticInput): string {
     put(
       field(
         'Persona',
-        setup.persona?.fullName
-          ? `${setup.persona.fullName} — the name and one sentence reach the tutor`
-          : 'none stored',
+        personaLine(setup.persona),
       ),
     );
     put(field('Language', language ? `${setup.language} — ${language.label}` : setup.language));
@@ -397,8 +423,6 @@ export function buildDiagnostic(input: DiagnosticInput): string {
       `Questions (${setup.questions?.length ?? 0}) — the tutor has these too, inside the prompt:`,
     );
     put(list(setup.questions));
-    put('', 'Targets — steered towards, never said aloud, and what the report checks:');
-    put(list(setup.targets, () => '-'));
     put('', 'Consigne — shown to the student, never sent to the tutor:');
     put(setup.brief ? `  ${setup.brief.replace(/\n/g, '\n  ')}` : '  —');
   }
@@ -470,7 +494,6 @@ export function buildDiagnostic(input: DiagnosticInput): string {
       rules: setup.lessonRules,
       persona: setup.persona,
       questions: setup.questions,
-      targets: setup.targets,
     });
     put(
       `${composed.length} characters, composed by this build at the moment of dialling.`,
