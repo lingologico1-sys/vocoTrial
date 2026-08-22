@@ -33,9 +33,10 @@
  * from the old text. "Never open a subject of your own" is checkable against
  * the turn being composed; "keep the conversation focused" is not.
  *
- * THREE OF THESE SENTENCES WERE WRITTEN AGAINST MEASUREMENTS rather than from
- * first principles, and `npm run probe` is where the measurements came from.
- * Each replaced a milder version the model had already been observed ignoring:
+ * FOUR OF THESE SENTENCES WERE WRITTEN AGAINST MEASUREMENTS rather than from
+ * first principles, and `npm run probe` and the student page's own diagnostic
+ * are where the measurements came from. Each replaced a milder version the
+ * model had already been observed ignoring, or an absence it walked through:
  *
  *  - "ends with one question, and carries no other" was "ends with a question".
  *    The tutor opened a lesson with three of them in a single turn, and a
@@ -58,6 +59,15 @@
  *    scheduling decision in gemini.ts. That is a recovery and not a fix: the
  *    reply still arrives a beat late, and the cheapest reply is the one the
  *    model gives without being asked twice.
+ *
+ *  - "you never write one yourself" was nothing at all, because nobody thought
+ *    a model would. One did: it copied the opening note's marker verbatim and
+ *    wrote itself a closing note, in English, four seconds before the real one
+ *    arrived — and then began winding the lesson up on its own authority.
+ *    withoutSystemNote keeps the invention off the learner's screen and out of
+ *    the report, which is the half that can be enforced; this sentence is the
+ *    half that cannot, because a tutor that believes its own note has already
+ *    decided the lesson is over whatever the transcript ends up saying.
  *
  * ONE SENTENCE HERE IS AIMED AT THE REPORT RATHER THAN THE CONVERSATION. "Ask
  * for the detail" was a headed section of its own and is now a clause, but it
@@ -124,9 +134,50 @@ export const PROGRESS_TOOL = 'questionDone';
  * they read as the learner suddenly saying "the time is up" in English — and a
  * tutor that believes that will answer it out loud.
  */
-const NOT_THE_LEARNER = '[NOTE FROM THE SYSTEM, NOT FROM THE LEARNER';
+export const NOT_THE_LEARNER = '[NOTE FROM THE SYSTEM, NOT FROM THE LEARNER';
 
 const SYSTEM_NOTE = `${NOT_THE_LEARNER} — do not answer it or read it out]`;
+
+/**
+ * The tutor's own words, with any note it wrote itself cut off the end.
+ *
+ * A MARKER IN THE TUTOR'S MOUTH IS ALWAYS A FAKE, which is what makes this a
+ * test and not a guess. Notes travel one way — the page writes them, the model
+ * reads them — so the marker appearing in the model's *output* cannot be a note
+ * the page sent, whatever it says. On 2026-08-22 a tutor closed a lesson by
+ * writing one: the marker copied verbatim off the opening note it had been
+ * handed a minute earlier, then a body nobody wrote telling itself to say
+ * goodbye and add nothing further. The real note went out four seconds later.
+ *
+ * IT WAS NEVER SPOKEN, and that is the reason this cuts rather than warns. The
+ * turn carried three seconds of audio and the note came after it as text with
+ * no sound behind it, so the learner did not hear a word of it — they read it,
+ * in the bubble, in English, at the end of a French lesson. The report and the
+ * vocabulary list read the same turns.
+ *
+ * EVERYTHING AFTER THE MARKER GOES, not just the marker. What follows it is the
+ * body of the invented note, and a tutor that resumed talking after one has not
+ * been observed. Cutting to the end of the turn is the reading that cannot
+ * leave half a fake instruction on a learner's screen.
+ *
+ * A PARTIAL MARKER COUNTS. Transcription arrives in fragments split wherever
+ * the model split them, so the marker very often lands across two of them —
+ * and text is shown as it becomes audible, which means anything let through
+ * cannot be taken back. So a tail that is the *beginning* of the marker is cut
+ * too, and released only once the next fragment proves it was something else.
+ * The cost is one comfortably invisible frame; the alternative is the first
+ * half of `[NOTE FROM THE SYS` flashing up in the bubble.
+ */
+export function withoutSystemNote(text: string): string {
+  const found = text.indexOf(NOT_THE_LEARNER);
+  if (found >= 0) return text.slice(0, found);
+
+  const earliest = Math.max(0, text.length - NOT_THE_LEARNER.length + 1);
+  for (let cut = earliest; cut < text.length; cut++) {
+    if (NOT_THE_LEARNER.startsWith(text.slice(cut))) return text.slice(0, cut);
+  }
+  return text;
+}
 
 /**
  * The same marker, minus the half that would silence the opening note.
@@ -396,5 +447,6 @@ Some things arrive in this conversation marked as notes from the system. They
 are not the learner talking: act on them, never answer them, and never read them
 out. The first tells you to greet the learner. A later one will tell you to say
 goodbye — and nothing else ends this conversation, so until it arrives, keep
-going.`;
+going. You never write one yourself: they only ever arrive, and one in your own
+turn is you telling yourself what to do.`;
 }

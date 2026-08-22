@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { startGeminiSession } from '../realtime/gemini';
 import type { SessionSettings } from '../realtime/settings';
-import { PROGRESS_TOOL } from '../realtime/tutorPrompt';
+import { NOT_THE_LEARNER, PROGRESS_TOOL, withoutSystemNote } from '../realtime/tutorPrompt';
 import type {
   AudioTap,
   SessionStatus,
@@ -9,7 +9,7 @@ import type {
   ToolScheduling,
   VoiceSession,
 } from '../realtime/types';
-import { RevealQueue } from './reveal';
+import { RevealQueue, type StampedText } from './reveal';
 import type { TiltCue } from './headMotion';
 
 /**
@@ -120,6 +120,16 @@ export interface CallEvent {
     | 'progress'
     /** The learner talked over the tutor and unheard words were dropped. */
     | 'interrupted'
+    /**
+     * The tutor wrote a note to itself in the page's own marker, and it was cut
+     * out of the transcript before anyone read it.
+     *
+     * A line rather than a silent repair, because the cut is the only trace
+     * left: the words never reach the bubble, the report or the vocabulary
+     * list, and without this the diagnostic of a lesson that ended strangely
+     * would show a tutor doing nothing unusual at all. See withoutSystemNote.
+     */
+    | 'stray'
     /** Something asked for the call to stop, and said why. */
     | 'hung-up';
   detail: string;
@@ -590,11 +600,70 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
     [append],
   );
 
+  /**
+   * The turn the tutor is part-way through, as it arrived and as it was shown.
+   *
+   * Two lengths of the same speech, and they differ only when the tutor has
+   * written a system note into its own turn. The raw text is what the marker
+   * test needs — transcription is split wherever the model split it, so the
+   * marker is very often across a fragment boundary and cannot be found in one
+   * — and the count of what has been shown is what turns a test on the whole
+   * turn back into deltas to append. See withoutSystemNote, whose cut is
+   * monotonic, which is the property that lets this subtract two lengths and
+   * never have to unsay anything.
+   */
+  const said = useRef({ heard: '', shown: 0, stray: false });
+
+  /**
+   * Puts words on screen, and is the only thing that may.
+   *
+   * Both callers reach it with text that has become audible: the frame loop
+   * with what is due, and the end of a call with whatever was still waiting.
+   * They share this rather than each calling `append` because the note test
+   * above is stateful across deltas, and two copies of it would be two states
+   * that disagree the moment a call ends mid-turn.
+   *
+   * Returns what it actually showed, which is what the question test then
+   * reads: a mark inside a note the tutor invented is not a question anybody
+   * was asked.
+   */
+  const reveal = useCallback(
+    (items: StampedText[]) => {
+      let shown = '';
+
+      for (const item of items) {
+        const turn = said.current;
+        turn.heard += item.text;
+        const spoken = withoutSystemNote(turn.heard);
+
+        if (spoken.length > turn.shown) {
+          const fresh = spoken.slice(turn.shown);
+          append('agent', fresh, item.done);
+          turn.shown = spoken.length;
+          shown += fresh;
+        } else if (item.done) {
+          append('agent', '', true);
+        }
+
+        // Only on the whole marker. A turn that happens to end on `[` has a
+        // tail withheld for a frame, and that is not worth a line in the log.
+        if (!turn.stray && turn.heard.includes(NOT_THE_LEARNER)) {
+          turn.stray = true;
+          record('stray', 'the tutor wrote itself a system note; it was cut from the transcript');
+        }
+
+        if (item.done) said.current = { heard: '', shown: 0, stray: false };
+      }
+
+      return shown;
+    },
+    [append, record],
+  );
+
   /** Moves whatever has become audible out of the queue and onto the screen. */
   const flush = useCallback(
     (now: number) => {
-      const due = queue.current.take(now);
-      for (const item of due) append('agent', item.text, item.done);
+      const spoken = reveal(queue.current.take(now));
       // The right side of the queue to read a question off, and the only one.
       // Deltas arrive here seconds before the voice reaches them and anything
       // still waiting is thrown away on barge-in — so a mark seen on the way in
@@ -602,9 +671,9 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
       // the user cut in, never asked at all. Everything in `due` has just been
       // heard, which is the moment the gesture belongs to.
       const asks = asksIn(language);
-      if (due.some((item) => asks.test(item.text))) cue('question');
+      if (asks.test(spoken)) cue('question');
     },
-    [append, cue, language],
+    [cue, language, reveal],
   );
 
   useEffect(() => {
@@ -678,6 +747,7 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
     setDetail(null);
     setMuted(false);
     queue.current.discard();
+    said.current = { heard: '', shown: 0, stray: false };
 
     const handlers = {
       onStatus: (next: SessionStatus, message?: string) => {
@@ -691,7 +761,7 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
         if (next === 'closed' || next === 'error') {
           // Whatever was still queued was said, or was a word away from it.
           // Dropping it silently would lose the end of every conversation.
-          for (const item of queue.current.drain()) append('agent', item.text, item.done);
+          reveal(queue.current.drain());
           // The learner's turn is closed by the tutor beginning to answer, so
           // the last thing said before hanging up has nothing to close it. No-op
           // unless one is open, and worth the line: without it the sentence
@@ -793,6 +863,10 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
       onInterrupted: () => {
         record('interrupted', 'the learner talked over the tutor; unheard words were dropped');
         queue.current.discard();
+        // The turn those words belonged to is over, so the note test starts
+        // again with the next one. What is already on screen was audible and
+        // stays; this is only the part that never got there.
+        said.current = { heard: '', shown: 0, stray: false };
       },
       // Every report, unexamined, straight to the one place allowed to
       // examine it. See `acceptProgress`.
@@ -821,7 +895,7 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
       setStatus('error');
       setDetail(error instanceof Error ? error.message : 'Could not start the session');
     }
-  }, [acceptProgress, append, cue, onTranscript, record]);
+  }, [acceptProgress, append, cue, onTranscript, record, reveal]);
 
   const say = useCallback(
     (text: string, label?: string) => {
