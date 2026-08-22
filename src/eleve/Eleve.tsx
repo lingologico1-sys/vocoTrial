@@ -954,6 +954,7 @@ export default function Eleve() {
               speaking={call.speaking}
               heard={call.heard}
               live={call.live}
+              openingDone={call.openingDone}
               busy={call.busy}
               tiltCue={call.tiltCue}
               idleHint={idleHint}

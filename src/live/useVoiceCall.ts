@@ -276,6 +276,16 @@ export interface VoiceCall {
   tap: AudioTap | null;
   speaking: boolean;
   heard: boolean;
+  /**
+   * Whether the tutor has finished its opening turn and handed over the floor.
+   *
+   * FALSE FOR THE WHOLE OF A CALL'S FIRST STRETCH — the dialling, and then the
+   * tutor's own greeting — and true from the end of that greeting until the
+   * call closes. It is not a running claim about who has the floor: later turns
+   * do not put it back. See LearnerPill, which is the one thing that reads it,
+   * and which uses it to decide whether the button may promise a microphone.
+   */
+  openingDone: boolean;
   muted: boolean;
   tiltCue: TiltCue | null;
   live: boolean;
@@ -376,6 +386,16 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
    * mid-sentence cannot leave the face believing it is still being spoken to.
    */
   const [heard, setHeard] = useState(false);
+  /**
+   * See `openingDone` on VoiceCall for what this means. The ref beside it is
+   * the guard that keeps it honest: it flips on an *end* of tutor audio, and
+   * only an end that had a beginning. A provider that reports `false` once on
+   * connect — before it has said anything — would otherwise be taken for a
+   * greeting that had already happened, which is exactly the moment the flag
+   * exists to not get wrong.
+   */
+  const [openingDone, setOpeningDone] = useState(false);
+  const tutorHasSpoken = useRef(false);
   const [turns, setTurns] = useState<Turn[]>([]);
   /**
    * The tap is state, not a ref: the mouth is a component that has to re-run
@@ -925,6 +945,8 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
     setMuted(false);
     clearStall();
     queue.current.discard();
+    setOpeningDone(false);
+    tutorHasSpoken.current = false;
     said.current = { heard: '', shown: 0, stray: false };
 
     const handlers = {
@@ -950,6 +972,8 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
           setTap(null);
           setSpeaking(false);
           setHeard(false);
+          setOpeningDone(false);
+          tutorHasSpoken.current = false;
           // Measured from the moment the call went live rather than from the
           // press, so a slow connect is not credited to the conversation. The
           // student page gates its report on this.
@@ -964,6 +988,12 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
         // The turn arrived after all, which is the ordinary end of a wait.
         if (next) clearStall();
         setSpeaking(next);
+        if (next) tutorHasSpoken.current = true;
+        // The end of the tutor's first stretch of audio, which is the moment
+        // the call stops being something the learner is listening to and starts
+        // being something they are in. Every later end passes through here too
+        // and costs nothing: the flag is already true.
+        else if (tutorHasSpoken.current) setOpeningDone(true);
         // Every false, barge-in included, and no attempt to tell them apart:
         // both are the agent's audio ending and the floor going back to the
         // user, which is the whole of what a listening tilt responds to. The
@@ -990,6 +1020,11 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
         // A silence the learner has filled themselves. Nudging into it would
         // put a note on the wire in the middle of their sentence.
         if (active) clearStall();
+        // A learner talking is proof the floor is theirs, whatever the audio
+        // channel did or failed to report. Belt and braces for the one failure
+        // that would matter — a greeting whose end never arrives, leaving the
+        // button promising a tutor that has plainly already finished.
+        if (active) setOpeningDone(true);
         setHeard(active);
       },
       /*
@@ -1113,6 +1148,7 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
     tap,
     speaking,
     heard,
+    openingDone,
     muted,
     tiltCue,
     live: status === 'live',

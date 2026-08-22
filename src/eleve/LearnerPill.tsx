@@ -1,5 +1,5 @@
 import { useRef } from 'react';
-import { Mic, PhoneOff } from 'lucide-react';
+import { Mic, PhoneOff, Play } from 'lucide-react';
 import { FR } from './strings';
 import { useLongPress } from './useLongPress';
 
@@ -21,6 +21,17 @@ import { useLongPress } from './useLongPress';
  * heard is to stop the call, and a second mode on the same button would make
  * the state it shows ambiguous exactly when it matters most.
  *
+ * WHICH IS WHY IT DOES NOT START AS A MICROPHONE. Pressing it does not open the
+ * learner's mouth; it opens the tutor's. The call connects, and then the tutor
+ * greets them and sets the first question — a good few seconds in which a mic
+ * glyph is telling somebody to speak into a floor they do not have. So the
+ * button begins as a play triangle, which promises only that something will
+ * start, and becomes the microphone at the end of that greeting, which is the
+ * moment the promise comes true. See `openingDone` in useVoiceCall for how that
+ * moment is found. It does not turn back on the tutor's later turns: the mic is
+ * live for the rest of the call, a press means hang up throughout, and a glyph
+ * that flickered turn by turn would make both of those harder to read.
+ *
  * THE RED STAYS INSIDE THE BUTTON. The pulse used to be a ring on the pill
  * itself, scaling a wash of accent out past all four rims — which spent the
  * widest element on the page to say something about a 44px control. Now the
@@ -37,6 +48,13 @@ interface LearnerPillProps {
   /** The last completed utterance, or empty before there is one. */
   text: string;
   live: boolean;
+  /**
+   * Whether the tutor has finished its opening turn.
+   *
+   * Decided by the call rather than here — the pill cannot see an audio queue —
+   * and it is the whole of what picks the glyph. See the note above.
+   */
+  openingDone: boolean;
   /** Mid-connect: the one moment the button cannot be pressed. */
   busy: boolean;
   /** Whether the microphone is hearing a voice right now. */
@@ -56,6 +74,7 @@ interface LearnerPillProps {
 export default function LearnerPill({
   text,
   live,
+  openingDone,
   busy,
   heard,
   idleHint,
@@ -78,7 +97,23 @@ export default function LearnerPill({
 
   useLongPress(body, onWord, showText);
 
-  const hint = busy ? FR.starting : !live ? idleHint : heard ? FR.pillListening : FR.pillWaiting;
+  /*
+   * The words follow the glyph, including through the greeting.
+   *
+   * "À toi de parler" the instant a call goes live was the same false promise
+   * the microphone was making, said out loud: for the length of the tutor's
+   * opening it is addressed to somebody who should be listening. So the pill
+   * names what is actually happening until the floor changes hands.
+   */
+  const hint = busy
+    ? FR.starting
+    : !live
+      ? idleHint
+      : !openingDone
+        ? FR.pillOpening
+        : heard
+          ? FR.pillListening
+          : FR.pillWaiting;
 
   /*
     Tone by state, and the two filled ones are told apart by the halo rather
@@ -136,11 +171,33 @@ export default function LearnerPill({
           >
             {live ? (
               <>
-                <Mic size={28} className="group-hover:hidden group-focus-visible:hidden" />
+                {/*
+                  Filled, and nudged a hair right: a triangle's visual centre
+                  sits behind its geometric one, so a centred play glyph reads
+                  as leaning left inside a circle.
+                */}
+                {openingDone ? (
+                  <Mic size={28} className="group-hover:hidden group-focus-visible:hidden" />
+                ) : (
+                  <Play
+                    size={26}
+                    fill="currentColor"
+                    className="ml-0.5 group-hover:hidden group-focus-visible:hidden"
+                  />
+                )}
                 <PhoneOff size={26} className="hidden group-hover:block group-focus-visible:block" />
               </>
             ) : (
-              <Mic size={28} className={busy ? 'animate-pulse' : undefined} />
+              /*
+                Before the call, and while it is connecting. The pulse is the
+                connecting one — the glyph does not change for it, because
+                dialling is the front half of the same act the triangle names.
+              */
+              <Play
+                size={26}
+                fill="currentColor"
+                className={`ml-0.5 ${busy ? 'animate-pulse' : ''}`}
+              />
             )}
           </button>
         </div>

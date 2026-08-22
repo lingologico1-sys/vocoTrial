@@ -32,6 +32,8 @@ interface TutorStageProps {
   speaking: boolean;
   heard: boolean;
   live: boolean;
+  /** Whether the tutor's opening turn is over. The pill's glyph turns on it. */
+  openingDone: boolean;
   /** Mid-connect. The microphone carries this too — see LearnerPill. */
   busy: boolean;
   tiltCue: TiltCue | null;
@@ -50,6 +52,7 @@ export default function TutorStage({
   speaking,
   heard,
   live,
+  openingDone,
   busy,
   tiltCue,
   idleHint,
@@ -172,6 +175,7 @@ export default function TutorStage({
       <LearnerPill
         text={learnerText}
         live={live}
+        openingDone={openingDone}
         busy={busy}
         heard={heard}
         idleHint={idleHint}

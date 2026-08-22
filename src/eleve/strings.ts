@@ -69,6 +69,7 @@ export const FR = {
   micStart: 'Commencer la conversation',
   pillStart: 'Clique ici pour commencer',
   pillAgain: 'Clique ici pour recommencer',
+  pillOpening: 'Le tuteur commence…',
   pillListening: 'Je t’écoute…',
   pillWaiting: 'À toi de parler.',
   bubbleIdle: 'Ton tuteur te parlera ici.',
