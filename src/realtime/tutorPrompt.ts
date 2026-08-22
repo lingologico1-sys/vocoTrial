@@ -33,7 +33,7 @@
  * from the old text. "Never open a subject of your own" is checkable against
  * the turn being composed; "keep the conversation focused" is not.
  *
- * FOUR OF THESE SENTENCES WERE WRITTEN AGAINST MEASUREMENTS rather than from
+ * FIVE OF THESE SENTENCES WERE WRITTEN AGAINST MEASUREMENTS rather than from
  * first principles, and `npm run probe` and the student page's own diagnostic
  * are where the measurements came from. Each replaced a milder version the
  * model had already been observed ignoring, or an absence it walked through:
@@ -100,6 +100,25 @@
  *    beginner. withoutSystemNote keeps the invention off the screen and out of
  *    the report, and nothing can keep it out of the audio, which is why the
  *    prompt argues the point instead of forbidding it.
+ *
+ *  - "two of your turns end without a question" was "answering the last
+ *    question does not end it either", and it lost to a rule in the lesson
+ *    block that is not wrong: every turn ends with a question, and the goodbye
+ *    is the only one that does not. A tutor holding both, with no question left
+ *    to ask, has been told in so many words that the turn it is composing is
+ *    the goodbye. It closed on the last answer — "j'espère qu'on pourra
+ *    discuter de nouveau bientôt" — then sat through five and a half seconds of
+ *    silence while the page counted the last report and sent the note, and said
+ *    goodbye again properly. From the learner's side the conversation ended,
+ *    paused, and ended a second time.
+ *
+ *    SO THE PROTOCOL NAMES THE THIRD KIND OF TURN, which is the one thing the
+ *    lesson block cannot do for itself: it is the teacher's text, it is right
+ *    about the lesson, and it knows nothing about a note arriving afterwards.
+ *    The comment on the last answer ends without a question and is not a
+ *    goodbye, and saying that outright is cheaper than arguing with a rule that
+ *    should stay. The closing note carries the other half — see
+ *    LESSON_DONE_SIGNAL on why it cannot simply arrive sooner.
  *
  * ONE SENTENCE HERE IS AIMED AT THE REPORT RATHER THAN THE CONVERSATION. "Ask
  * for the detail" was a headed section of its own and is now a clause, but it
@@ -306,8 +325,19 @@ const OPENING_NOTE = `${NOT_THE_LEARNER} — act on it, but do not read it out]`
  * signs off warmly there, as though the work were done, tells a learner they
  * finished something they did not. The learner can see the list on their own
  * screen, so it is a lie they can check.
+ *
+ * "IF YOU HAVE ALREADY BEGUN WINDING UP" IS THE HALF THAT ADMITS DEFEAT. The
+ * prompt tells the tutor not to close on the last answer, and a tutor that
+ * closes anyway then gets this note asking for a warm goodbye — which is the
+ * second ending, arriving five seconds after the first. The clause cannot stop
+ * the first goodbye; it stops the note demanding a full one on top of it. What
+ * the note cannot do is arrive earlier: the page counts the last question from
+ * the tutor's own report, and on this model that report lands a second or two
+ * after the tutor has already started speaking. By the time the count is
+ * complete there is a turn in flight, and interrupting it would cut the
+ * learner's last answer off without a reply.
  */
-export const LESSON_DONE_SIGNAL = `${SYSTEM_NOTE} Every question on the list has now been answered, so the lesson is over. Say goodbye: one warm, specific sentence about how the learner did, quoting back something they actually said, and then goodbye. Do not ask another question.`;
+export const LESSON_DONE_SIGNAL = `${SYSTEM_NOTE} Every question on the list has now been answered, so the lesson is over. Say goodbye: one warm, specific sentence about how the learner did, quoting back something they actually said, and then goodbye. Keep it to that — this is the only goodbye in the conversation, and if you have already begun winding up, do not do it a second time. Do not ask another question.`;
 
 export const TIME_UP_SIGNAL = `${SYSTEM_NOTE} This lesson has run out of time with questions still unanswered. Stop there: say plainly that you have to stop, then one warm, specific sentence about the part you did get through, and goodbye. Do not suggest the lesson was finished, because it was not, and do not ask another question.`;
 
@@ -563,9 +593,15 @@ Some things arrive in this conversation marked as notes from the system. They
 are not the learner talking: act on them, never answer them, and never read them
 out. The first tells you to greet the learner. A later one will tell you to say
 goodbye — and nothing else ends this conversation, so until it arrives, keep
-going. Answering the last question on the list does not end it either: say
-something about that answer, then stop and wait. The goodbye is never yours to
-start.
+going. The goodbye is never yours to start.
+
+The last answer is where that goes wrong, so read this twice. Two of your turns
+end without a question: your comment on the answer to the last question, and the
+goodbye. Only the second one is a goodbye. When the list runs out, comment on
+that last answer exactly as you commented on the others and stop there — no
+thanks for talking, no good luck, no hoping to speak again, nothing that sounds
+like leaving. Then wait. A goodbye you were not asked for is one the learner has
+to sit through twice, because the real one is still coming.
 
 Notes only ever arrive, and you have no way to write one. Everything you produce
 in a turn is spoken aloud to the learner, brackets and all — so a note in your
