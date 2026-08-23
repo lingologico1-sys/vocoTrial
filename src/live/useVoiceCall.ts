@@ -8,7 +8,7 @@ import {
   withoutSystemNote,
   wroteASystemNote,
 } from '../realtime/tutorPrompt';
-import type { AudioTap, SessionStatus, TranscriptDelta, VoiceSession } from '../realtime/types';
+import type { AudioGap, AudioTap, SessionStatus, TranscriptDelta, VoiceSession } from '../realtime/types';
 import { RevealQueue, type StampedText } from './reveal';
 import type { TiltCue } from './headMotion';
 
@@ -189,6 +189,23 @@ export interface CallEvent {
      * would show a tutor doing nothing unusual at all. See withoutSystemNote.
      */
     | 'stray'
+    /**
+     * The audio queue thinned or ran dry: the tutor's voice broke up, or came
+     * within half a cushion of it.
+     *
+     * THE ONLY LINE HERE ABOUT THE PIPE RATHER THAN THE CONVERSATION, and it is
+     * on the timeline for the reason everything else is. A dry queue is heard
+     * as a pause in the middle of a sentence, which is indistinguishable from a
+     * tutor hesitating unless you know where the seams fell — and *where* is
+     * the whole of it. Sitting inside a turn it is a hole the learner heard in
+     * a word; sitting at a boundary it is nothing at all. A count could not
+     * tell those apart and a timeline does it by construction.
+     *
+     * Written from `onAudioGap`, which is fed by PcmPlayer.watch. The console
+     * gets a line for every drop in the lead; this gets only the ones worth
+     * putting in front of somebody reading a report.
+     */
+    | 'audio'
     /** Something asked for the call to stop, and said why. */
     | 'hung-up';
   detail: string;
@@ -1186,6 +1203,24 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
         // again with the next one. What is already on screen was audible and
         // stays; this is only the part that never got there.
         said.current = { heard: '', shown: 0, stray: false };
+      },
+      /**
+       * Written down, never shown.
+       *
+       * There is nothing to do about this while the call is running: the
+       * cushion cannot be raised mid-sentence, and a learner told their
+       * connection is poor is a learner no longer thinking about French. It
+       * goes on the timeline so that the lesson which "kept cutting out" has
+       * something in its account saying so — and so that the one which did not
+       * has the absence, which is the more useful half.
+       */
+      onAudioGap: (gap: AudioGap) => {
+        record(
+          'audio',
+          gap.kind === 'starved'
+            ? `the tutor's voice broke off for ${gap.ms}ms — the audio queue ran dry mid-sentence (${gap.count} so far this call)`
+            : `the audio queue is thin: ${gap.ms}ms of lead left, so the next hiccup is likely to be heard`,
+        );
       },
       // Every report, unexamined, straight to the one place allowed to
       // examine it. See `acceptProgress`.

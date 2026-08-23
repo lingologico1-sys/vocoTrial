@@ -122,7 +122,10 @@ export async function startGeminiSession(
   const silentResponses = findModel(modelKey)?.surface === 'aistudio';
 
   const mic = new MicCapture();
-  const player = new PcmPlayer();
+  // The player reports its own queue running out, straight through to whoever
+  // is keeping the account of the call — the one fault in here the learner
+  // hears and no log the developer can reach ever records.
+  const player = new PcmPlayer((gap) => handlers.onAudioGap?.(gap));
   // Creating the output context inside the click that started the session is
   // what keeps autoplay policy from suspending it later. Nothing may be awaited
   // before this line, or the resume lands in a later task than the click.

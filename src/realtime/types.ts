@@ -1,8 +1,8 @@
 import type { SessionSettings } from './settings';
 import type { UsageTotals } from './cost';
-import type { AudioTap } from './audio';
+import type { AudioGap, AudioTap } from './audio';
 
-export type { AudioTap };
+export type { AudioGap, AudioTap };
 
 /**
  * What the user configured, on its way to Google.
@@ -73,6 +73,23 @@ export interface SessionHandlers {
    * that were cut off and never spoken.
    */
   onInterrupted?: () => void;
+  /**
+   * The audio queue thinned or ran dry, so the voice is about to break up or
+   * just did.
+   *
+   * THE ONLY FAULT HERE THE LEARNER CAN HEAR AND NOBODY ELSE CAN SEE. Every
+   * other signal on this interface describes something said; this one describes
+   * the pipe it was said down, and a pause in the middle of a sentence looks
+   * from the outside exactly like a tutor hesitating. The two have nothing in
+   * common and one of them is ours.
+   *
+   * A consumer is expected to write it down rather than show it. There is
+   * nothing to do about it while the call is running — the cushion cannot be
+   * raised mid-sentence, and a learner told their connection is poor is a
+   * learner distracted from the lesson — but a report that says the voice broke
+   * off twice is the difference between fixing this and guessing at it.
+   */
+  onAudioGap?: (gap: AudioGap) => void;
   /**
    * Running totals for the call so far, pushed every time Google reports usage
    * rather than once at the end. A call that dies mid-flight never sends a

@@ -350,6 +350,49 @@ const UNDERRUN_GAP_SECONDS = 1;
 const LOW_WATER_STEP_SECONDS = 0.02;
 
 /**
+ * The lead below which a thinning queue is worth telling somebody about.
+ *
+ * Every drop goes to the console, because a developer with devtools open wants
+ * the whole descent. The account of the call is read by somebody who is not a
+ * developer and is looking for a fault, so it gets only the part that is one:
+ * half the cushion eaten means the next hiccup is likely to be audible, and
+ * that is worth a line whether or not anything has broken yet.
+ */
+const THIN_LEAD_SECONDS = PRIME_SECONDS / 2;
+
+/**
+ * A report that the output queue is running out, or has.
+ *
+ * IT EXISTS BECAUSE THE CONSOLE IS NOT WHERE THE FAULT IS SEEN. A pause in the
+ * middle of the tutor's sentence is something the learner hears and nobody else
+ * does — the student page has no devtools, and the person who could read a
+ * console line is not the person in the room. So this goes out as an event on
+ * the call's own timeline instead, where it lands *beside the turn it spoilt*
+ * and reaches whoever reads the diagnostic afterwards. See CallEvent's `audio`
+ * kind, and diagnostic.ts on why the timeline is the point.
+ *
+ * The two cases are one subject and opposite urgencies. `starved` already
+ * happened and the learner heard it. `thin` has not happened yet and is the
+ * warning that it is about to — which is the more useful of the two, because it
+ * is the one that arrives while there is still a cushion to raise.
+ */
+export type AudioGap =
+  | {
+      /** The queue emptied mid-speech and the voice broke off. */
+      kind: 'starved';
+      /** How long the silence lasted, in ms. */
+      ms: number;
+      /** How many times this has happened so far in the call. */
+      count: number;
+    }
+  | {
+      /** The queue is still ahead, but by less than half the cushion. */
+      kind: 'thin';
+      /** The lead that is left, in ms. */
+      ms: number;
+    };
+
+/**
  * Plays the 24 kHz int16 stream the model sends back.
  *
  * Chunks arrive faster than real time, so they are scheduled end to end on the
@@ -406,7 +449,12 @@ export class PcmPlayer {
   /** Output-clock time of residue[0]. */
   private residueAt = 0;
 
-  constructor() {
+  /**
+   * @param report Told when the queue thins or runs dry. Optional, and the
+   * player works identically without it — a call with nobody listening is still
+   * played correctly, it is only unexplained afterwards.
+   */
+  constructor(private readonly report?: (gap: AudioGap) => void) {
     for (let i = 0; i < ENVELOPE_WINDOW; i++) {
       this.hann[i] = 0.5 * (1 - Math.cos((2 * Math.PI * i) / (ENVELOPE_WINDOW - 1)));
     }
@@ -488,10 +536,15 @@ export class PcmPlayer {
 
     const lead = this.playhead - context.currentTime;
     if (lead >= 0) {
-      if (lead < this.lowWater - LOW_WATER_STEP_SECONDS) {
-        console.info(`PcmPlayer: lead low-water ${Math.round(lead * 1000)}ms`);
-      }
+      const dropped = lead < this.lowWater - LOW_WATER_STEP_SECONDS;
       this.lowWater = Math.min(this.lowWater, lead);
+      if (!dropped) return;
+
+      const ms = Math.round(lead * 1000);
+      console.info(`PcmPlayer: lead low-water ${ms}ms`);
+      // Only the part that is a fault reaches the call's account — see
+      // THIN_LEAD_SECONDS. The console above gets the whole descent.
+      if (lead < THIN_LEAD_SECONDS) this.report?.({ kind: 'thin', ms });
       return;
     }
 
@@ -500,10 +553,12 @@ export class PcmPlayer {
 
     this.underruns++;
     this.lowWater = 0;
+    const ms = Math.round(gap * 1000);
     console.warn(
-      `PcmPlayer: underrun #${this.underruns} — queue dry for ${Math.round(gap * 1000)}ms ` +
+      `PcmPlayer: underrun #${this.underruns} — queue dry for ${ms}ms ` +
         'mid-speech; that is the pause you heard.',
     );
+    this.report?.({ kind: 'starved', ms, count: this.underruns });
   }
 
   /**
