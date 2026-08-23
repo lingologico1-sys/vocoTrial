@@ -1197,13 +1197,26 @@ export default function Eleve() {
                       error={reportError}
                       under={consigne}
                       onEvaluate={() => {
-                        // Pressing it during the goodbye means they have heard
-                        // enough. The call would hang up on its own a beat after
-                        // the tutor stops, but leaving it open while the report
-                        // renders bills for a farewell nobody is listening to.
-                        if (call.live) {
-                          call.hangUp(undefined, 'closed — the learner asked to be marked during the close');
-                        }
+                        /*
+                          PRESSING IT DOES NOT END THE CALL, and it briefly did.
+                          The argument for hanging up was that a learner asking
+                          to be marked has heard enough and the call was costing
+                          money — but what it actually did was cut the tutor off
+                          mid-goodbye, and the goodbye is the turn the prompt
+                          goes to the most trouble over: a sentence about their
+                          answer, a specific word of praise quoting them back,
+                          farewell. Ending it to save three seconds of socket
+                          throws away the warmest thing in the lesson.
+
+                          Nothing needs the call closed anyway. The marking runs
+                          off the transcript as it stands, which already holds
+                          every word the learner said — what is still to come is
+                          the tutor talking, and the tutor is not who is being
+                          marked. The close effect hangs up on its own a beat
+                          after the farewell finishes, exactly as it would have.
+                          So the report renders in the panel while the face
+                          finishes speaking, and both land in their own time.
+                        */
                         void evaluate();
                       }}
                     />
