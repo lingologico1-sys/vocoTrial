@@ -70,6 +70,90 @@ export interface Evaluator {
 /** Custom ids are namespaced so they can never collide with the built-in's. */
 export const BUILTIN_EVALUATOR_ID = 'builtin:cefr';
 
+/**
+ * THE ADVANCED MARKER: two more reserved ids, and a different kind of thing.
+ *
+ * Everything above this line is a *scale* — a ladder somebody authored, read
+ * against a transcript by one prompt that walks it. These two are not scales.
+ * They select a whole second pipeline: deterministic statistics, one call
+ * against a fixed IB ab initio / DELF rubric, then deterministic weighting,
+ * guards and verdict. Nothing about it is authorable, which is the point — a
+ * rubric calibrated against worked anchors stops being calibrated the moment
+ * somebody edits a band. See oralMarker.ts and docs/oral-marking.md.
+ *
+ * WHY THEY LIVE IN THIS PICKER ANYWAY, rather than in a field of their own.
+ * "What is this lesson marked against?" is one question with one answer, and a
+ * teacher who has to answer it twice — once for the scale, once for a mode that
+ * makes the scale irrelevant — is being asked to hold the implementation in
+ * their head. Riding `evaluatorId` also means the two ids travel the entire
+ * existing chain for free: saved on the Voco Session, snapshotted at publish,
+ * resolved server-side at report time, never trusted off the wire.
+ *
+ * TWO IDS FOR ONE PIPELINE, AND THAT IS DELIBERATE. Both run exactly the same
+ * marking call and the same arithmetic; they differ only in which of the two
+ * results the student's page leads with. IB is a ceiling-referenced grade out
+ * of 7. CEFR is a criterion-referenced verdict computed from the profile of the
+ * three criteria, NOT from the mark — see `computeCefrVerdict`, which carries
+ * the argument for why deriving one from the other would throw away the only
+ * information showing both scales adds. Both are always computed and both are
+ * always shown; the pick decides which one is big.
+ *
+ * FRENCH ONLY, AND ENFORCED AT THE PICKER. The rubric is French throughout —
+ * the imparfait/passé composé contrast it turns on, the tense vocabulary the
+ * schema enumerates, the B1 inventory, and all five calibration anchors. Read
+ * against Spanish it would produce a confident mark meaning nothing. So
+ * `advancedAvailableFor` gates the options and /teach says why they are absent.
+ */
+export const ADVANCED_IB_ID = 'advanced:ib';
+export const ADVANCED_CEFR_ID = 'advanced:cefr';
+
+/** Which scale the student's page leads with. Both are always computed. */
+export type AdvancedFace = 'ib' | 'cefr';
+
+/** The only target language the advanced rubric has been calibrated for. */
+export const ADVANCED_LANGUAGE = 'fr';
+
+/**
+ * What the picker shows for the two advanced entries.
+ *
+ * Shaped like an `Evaluator` as far as the picker is concerned — an id, a name
+ * and a note — and deliberately NOT one, because it has no `bands`. Anything
+ * that walks bands must not be handed one of these.
+ */
+export const ADVANCED_OPTIONS: { id: string; name: string; note: string; face: AdvancedFace }[] = [
+  {
+    id: ADVANCED_IB_ID,
+    name: 'Advanced IB (French, 1–7)',
+    note: 'IB ab initio general conversation, marked out of 7 across three criteria.',
+    face: 'ib',
+  },
+  {
+    id: ADVANCED_CEFR_ID,
+    name: 'Advanced CEFR (French, A1–B1)',
+    note: 'The same three criteria, reported as a DELF-style level rather than a grade.',
+    face: 'cefr',
+  },
+];
+
+/** True for the two ids that select the advanced pipeline. */
+export function isAdvancedEvaluator(id: string | undefined | null): boolean {
+  return id === ADVANCED_IB_ID || id === ADVANCED_CEFR_ID;
+}
+
+/** Which face an advanced id asks for, or null if it is not an advanced id. */
+export function advancedFaceOf(id: string | undefined | null): AdvancedFace | null {
+  return ADVANCED_OPTIONS.find((option) => option.id === id)?.face ?? null;
+}
+
+/**
+ * Whether the advanced modes may be offered for this target language.
+ *
+ * Absent means the lesson has no language picked yet, which is not French.
+ */
+export function advancedAvailableFor(languageCode: string | undefined | null): boolean {
+  return languageCode === ADVANCED_LANGUAGE;
+}
+
 /** A ceiling on one authored evaluator, in characters of JSON. */
 export const MAX_EVALUATOR = 20_000;
 

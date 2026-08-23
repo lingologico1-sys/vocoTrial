@@ -381,6 +381,79 @@ See [src/realtime/vocoSessions.ts](src/realtime/vocoSessions.ts),
 [functions/api/voco-sessions/](functions/api/voco-sessions/) and
 [src/teach/Teach.tsx](src/teach/Teach.tsx).
 
+## Advanced marking, and the two scales it reports
+
+**Marked against** on /teach gained a second group. The **Scales** group is what
+was always there — the built-in CEFR ladder and anything authored in the
+workshop — and it is still the default. Under it sit two entries that are not
+scales at all: **Advanced IB** and **Advanced CEFR**, which select the IB
+Language ab initio / DELF *entretien dirigé* rubric.
+
+**They are one pipeline, not two.** Deterministic statistics over the
+transcript, one model call that returns quoted evidence and exactly three
+integers, then deterministic weighting, guards, verdict and confidence. The
+model never counts and never does arithmetic — every number in the result is
+computed either side of it. The two ids differ only in which result the
+student's page leads with.
+
+**Both results are always computed, and neither is derived from the other.** The
+IB mark weights the three criteria 40/30/30 and rounds to a grade out of 7. The
+CEFR verdict reads the *profile* of the same three criteria and says what the
+learner can do. A6/B6/C6 and A5/B7/C7 are both a 6, and they are B1 confirmed
+and B1 emerging respectively — the second has fluency its grammar has not caught
+up with. A mark-to-level table would collapse those into one answer and make the
+CEFR output a relabelled 1-7, so there is no such table anywhere in the code or
+the UI. What the student gets is both, side by side, with one line saying they
+measure different things and will not always agree.
+
+**French only, and re-checked server-side.** The rubric is French throughout —
+the imparfait/passé composé contrast it turns on, the tense vocabulary, the B1
+inventory, all five anchors. /teach hides the options on a non-French lesson as
+a courtesy; `analyse.ts` refuses them as a control, because the id arrives from
+a browser and a browser can post anything.
+
+**A boundary mark is a band with a direction.** Students hear "6/7" as "7", so
+it never renders as a fraction: it renders as *Bande 6-7*, with what it is
+currently marking as underneath, and the criterion holding it there named. A
+mark is motivating; a mark plus the one behaviour that closes the gap is
+actionable.
+
+**The tier hint is advisory and says what it actually costs.** Under an advanced
+pick, /teach reads the question list as it is typed and names any of the two
+discriminating tiers it cannot find, offering tagged bank questions for one-tap
+insertion. It never blocks publishing, and it never claims a narrow lesson will
+mark low — rule R3 scores what was elicited with no ceiling applied. What a
+present-tense-only list costs is the ability to tell a 5 from a 7, which is a
+fact about the lesson rather than about the students.
+
+**What the mark is honestly worth.** Criterion A is grammatical accuracy, and it
+is only as good as the transcript's fidelity to the errors the learner actually
+made — and this transcript comes from a live speech model that repairs learner
+grammar as it listens. Nothing here cleans a transcript; nothing here can undo
+cleaning that already happened upstream. So the student panel carries two
+caveats rather than one: the IB disclaimer about what section this reads, and a
+plainer line about what the transcript under it is worth. These are practice
+feedback, not certification.
+
+```
+npm run anchors
+```
+
+Five calibration anchors through the real `computeStats` and `computeFinal`,
+asserting that every quote appears in its own transcript, that Stage 3
+reproduces each expected result field for field, and that the weights still sum
+to 1.00. It proves the arithmetic; it says nothing about whether the model picks
+the right bands. The anchors are synthetic and should be replaced with
+hand-marked real transcripts — see [docs/oral-marking.md](docs/oral-marking.md),
+which also records the deviations from the spec and one stale block inside the
+spec itself.
+
+See [src/realtime/oralMarker.ts](src/realtime/oralMarker.ts),
+[src/realtime/oralRubric.ts](src/realtime/oralRubric.ts),
+[src/realtime/questionBank.ts](src/realtime/questionBank.ts),
+[functions/api/report/_advanced.ts](functions/api/report/_advanced.ts) and
+[src/eleve/AdvancedPanel.tsx](src/eleve/AdvancedPanel.tsx).
+
 ## The diagnostic, and how to get one
 
 **Tap the microphone badge in the header three times.** Not the big microphone

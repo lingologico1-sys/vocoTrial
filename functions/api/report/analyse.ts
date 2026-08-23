@@ -1,5 +1,13 @@
 import { findLanguage } from '../../../src/realtime/languages';
-import { BUILTIN_EVALUATOR, BUILTIN_EVALUATOR_ID, type Evaluator } from '../../../src/realtime/evaluators';
+import {
+  advancedAvailableFor,
+  advancedFaceOf,
+  BUILTIN_EVALUATOR,
+  BUILTIN_EVALUATOR_ID,
+  isAdvancedEvaluator,
+  type Evaluator,
+} from '../../../src/realtime/evaluators';
+import { markAdvanced } from './_advanced';
 import {
   MAX_TRANSCRIPT,
   REPORT_MODEL,
@@ -151,6 +159,67 @@ export async function onRequestPost(
    * produce a report. Only a saved id pays for a read.
    */
   const evaluatorId = typeof body?.evaluatorId === 'string' ? body.evaluatorId : '';
+
+  /*
+   * THE ADVANCED MARKER FORKS HERE, before a scale is resolved, because it does
+   * not use one. Two reserved ids select a whole second pipeline — statistics,
+   * a fixed IB ab initio / DELF rubric, then arithmetic — and everything below
+   * this block is about walking an authored ladder, which that pipeline never
+   * does. See _advanced.ts and evaluators.ts on why the two ride one field.
+   *
+   * THE FRENCH CHECK IS MADE HERE AND NOT ONLY IN THE PICKER. /teach hides the
+   * options on a non-French lesson, and that is a courtesy to a teacher rather
+   * than a control: the id arrives from a browser, and a browser can post
+   * `advanced:ib` with a Spanish lesson. The rubric is French throughout, so
+   * marking Spanish against it would produce a confident number meaning
+   * nothing. Same posture as the model allowlist and the evaluator lookup — the
+   * thing that decides what gets spent is not the client.
+   */
+  if (isAdvancedEvaluator(evaluatorId)) {
+    const face = advancedFaceOf(evaluatorId);
+    if (!face) {
+      return json({ error: 'Unknown marking mode', code: 'bad_evaluator' }, 400);
+    }
+    if (!advancedAvailableFor(language.code)) {
+      return json(
+        {
+          error: 'Advanced marking has only been calibrated for French.',
+          code: 'advanced_language',
+        },
+        400,
+      );
+    }
+
+    const advancedTurns = readTurns(body?.turns);
+    if (!advancedTurns) {
+      return json({ error: 'A transcript is required', code: 'bad_turns' }, 400);
+    }
+    if (!advancedTurns.some((turn) => turn.role === 'user' && turn.text.trim())) {
+      return json({ error: 'The learner did not say anything', code: 'no_learner_turns' }, 400);
+    }
+
+    const advancedKey = vertexKey(env);
+    if (!advancedKey) {
+      return json({ error: `${VERTEX_KEY_NAMES} is not configured`, code: 'no_key' }, 500);
+    }
+
+    const result = await markAdvanced({
+      key: advancedKey,
+      language,
+      l1,
+      face,
+      turns: advancedTurns,
+    });
+
+    if (!result.ok) {
+      return json(
+        { error: result.error, code: result.code, reason: result.reason ?? null },
+        result.status,
+      );
+    }
+    return json({ advanced: result.report, usd: result.usd, cached: result.cached });
+  }
+
   let evaluator: Evaluator | undefined;
   if (!evaluatorId || evaluatorId === BUILTIN_EVALUATOR_ID) {
     evaluator = BUILTIN_EVALUATOR;

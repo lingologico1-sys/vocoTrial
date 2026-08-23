@@ -5,6 +5,8 @@ import { loadBundledKit } from '../facekit/bundled';
 import { publishedKit } from '../facekit/store';
 import { L1_CHOICES, resolveL1 } from '../realtime/l1';
 import type { SessionReport } from '../realtime/report';
+import type { AdvancedReport } from '../realtime/oralRubric';
+import AdvancedPanel from './AdvancedPanel';
 import { LESSON_CODE_LENGTH, normaliseLessonCode } from '../realtime/lessonCodes';
 import { hasLesson, type PublishedSetup } from '../realtime/session';
 import { capMinutesOf } from '../realtime/vocoSessions';
@@ -240,6 +242,16 @@ export default function Eleve() {
   const lookupSeq = useRef(0);
 
   const [report, setReport] = useState<SessionReport | null>(null);
+  /**
+   * The advanced marker's result, when the teacher picked one.
+   *
+   * A SECOND SLOT RATHER THAN A UNION, because the two are different objects
+   * read by different panels, and only the route decides which one arrives.
+   * Held separately, neither renderer has to narrow anything, and the pair
+   * being mutually exclusive is enforced in one place — `evaluate` below,
+   * which clears the other whichever comes back.
+   */
+  const [advanced, setAdvanced] = useState<AdvancedReport | null>(null);
   const [reporting, setReporting] = useState(false);
   const [reportError, setReportError] = useState<string | null>(null);
 
@@ -494,6 +506,7 @@ export default function Eleve() {
    */
   const start = async () => {
     setReport(null);
+    setAdvanced(null);
     setReportError(null);
     await call.connect();
     call.say(openingSignal(), 'opening — greet the learner');
@@ -514,13 +527,26 @@ export default function Eleve() {
           turns: call.turns.map((turn) => ({ role: turn.role, text: turn.text })),
         }),
       });
+      /*
+        ONE ROUTE, TWO SHAPES. Which one comes back is decided server-side by
+        the evaluator id the teacher published, not by anything this page asks
+        for — see analyse.ts, which forks before it resolves a scale. So the
+        page reads whichever key is present rather than predicting one, and a
+        lesson republished onto the other kind of marking needs no change here.
+      */
       const answer = (await response.json().catch(() => null)) as
-        | { report?: SessionReport; error?: string }
+        | { report?: SessionReport; advanced?: AdvancedReport; error?: string }
         | null;
-      if (!response.ok || !answer?.report) {
+      if (!response.ok || !(answer?.report || answer?.advanced)) {
         throw new Error(answer?.error || FR.evalFailed);
       }
-      setReport(answer.report);
+      if (answer.advanced) {
+        setAdvanced(answer.advanced);
+        setReport(null);
+      } else {
+        setReport(answer.report ?? null);
+        setAdvanced(null);
+      }
     } catch (problem) {
       setReportError(problem instanceof Error ? problem.message : FR.evalFailed);
     } finally {
@@ -796,7 +822,7 @@ export default function Eleve() {
    * selection at the moment a call ends, which is the one moment they are
    * looking at it.
    */
-  const consigne = hasLesson(session) && !report;
+  const consigne = hasLesson(session) && !report && !advanced;
   const firstTab = consigne && call.lastCallMs === null ? FR.tabConsignes : FR.tabEvaluation;
 
   const TABS: Array<{ id: Tab; label: string }> = [
@@ -1036,7 +1062,9 @@ export default function Eleve() {
             */}
             {tab === 'evaluation' && (
               <div className="min-h-0 flex-1 overflow-y-auto">
-                {report ? (
+                {advanced ? (
+                  <AdvancedPanel report={advanced} />
+                ) : report ? (
                   <EvaluationPanel report={report} />
                 ) : (
                   <>

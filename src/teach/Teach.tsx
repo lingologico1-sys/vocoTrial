@@ -3,8 +3,20 @@ import { Check, Copy, Loader2, Plus, X } from 'lucide-react';
 import BrandBar from '../lingo/BrandBar';
 import BuildBadge from '../BuildBadge';
 import { LANGUAGES, defaultLanguageCode, findLanguage } from '../realtime/languages';
-import { BUILTIN_EVALUATOR_ID, type Evaluator } from '../realtime/evaluators';
+import {
+  ADVANCED_OPTIONS,
+  advancedAvailableFor,
+  BUILTIN_EVALUATOR_ID,
+  isAdvancedEvaluator,
+  type Evaluator,
+} from '../realtime/evaluators';
 import { listEvaluators } from '../realtime/evaluatorStore';
+import {
+  bankFor,
+  missingDiscriminatingTiers,
+  tierHint,
+  TIER_NOTES,
+} from '../realtime/questionBank';
 import { fetchHouse, resolveStyle } from '../realtime/houseStore';
 import type { TutorStyle } from '../realtime/house';
 import { listPublished } from '../facekit/library';
@@ -300,6 +312,49 @@ export default function Teach() {
   const tightCap = capLooksTight(questions.length, capMinutes);
 
   /*
+    THE ADVANCED MARKER, and the two things this page has to know about it.
+
+    It is offered only on a French lesson, because the rubric it runs is French
+    throughout — see evaluators.ts. `advancedPicked` can therefore be true while
+    `advancedOffered` is false, and that combination is not a bug: it is a
+    teacher who picked advanced marking and then changed the language. Rather
+    than silently resetting the pick — which would leave them handing out a
+    lesson marked against something they did not choose — it stays selected,
+    says what is wrong, and blocks publishing until one of the two moves.
+  */
+  const advancedOffered = advancedAvailableFor(language);
+  const advancedPicked = isAdvancedEvaluator(evaluatorId);
+  const advancedMismatch = advancedPicked && !advancedOffered;
+
+  /*
+    Which of the two discriminating tiers this list does not reach.
+
+    ADVISORY, AND ONLY WHEN IT IS ACTIONABLE. It is computed only under an
+    advanced pick, because tier coverage decides nothing for an authored scale
+    and a warning about it there would be noise. It never blocks: a
+    present-tense-only list is a legitimate lesson early in the year, and what
+    the gap actually costs is the marker's ability to tell one band from
+    another, not the marks themselves. See questionBank.ts, which owns the
+    wording so the claim cannot drift into "this will mark low".
+  */
+  const missingTiers =
+    advancedPicked && questions.length > 0 ? missingDiscriminatingTiers(questions) : [];
+
+  /**
+   * Drop a bank question into the first empty row, or add a row for it.
+   *
+   * The one-tap half of the hint. A hint that names a gap and leaves a teacher
+   * to type their way out of it is a hint most people close.
+   */
+  const insertQuestion = (text: string) =>
+    setRows((current) => {
+      const blank = current.findIndex((row) => !row.trim());
+      if (blank !== -1) return current.map((row, at) => (at === blank ? text : row));
+      if (current.length >= MAX_QUESTIONS) return current;
+      return [...current, text];
+    });
+
+  /*
     Why Publish is greyed out, said next to the greyed button. Each of these
     used to disable it in silence, and the two that a teacher can act on are
     both settled in the other panel — an unpicked face reads as nothing wrong
@@ -311,6 +366,7 @@ export default function Teach() {
     !questions.length && 'write a question',
     !styles.length && 'wait for an administrator to publish a manner',
     faces.length > 0 && !faceId && 'pick a face',
+    advancedMismatch && 'set the language to French, or pick a scale instead',
   ].filter((blocker): blocker is string => typeof blocker === 'string');
 
   const setRow = (index: number, value: string) =>
@@ -620,6 +676,69 @@ export default function Teach() {
                     {questions.length} written
                   </span>
                 </div>
+
+                {/*
+                  WHAT THIS LIST CAN MEASURE, said while it is being written.
+
+                  Only under an advanced pick, and only about the two tiers that
+                  discriminate. The claim is deliberately narrow: a list that
+                  never asks for past narration cannot tell a 5 from a 7,
+                  because the imparfait it would need to see was never asked
+                  for. That is not the same as the lesson marking low, and this
+                  block must never say it is — R3 scores what was elicited with
+                  no ceiling applied. See questionBank.ts, which owns the
+                  sentences for exactly that reason.
+
+                  Every suggestion is a tagged question from the bank, inserted
+                  on one tap. A hint that names a gap and then leaves somebody
+                  to type their own way out of it is a hint most people close.
+                */}
+                {advancedPicked && questions.length > 0 && (
+                  <div className="mt-1 rounded-2xl border-2 border-lingo-border-strong bg-lingo-panel-warm px-4 py-3">
+                    <p className="text-[11px] font-bold uppercase tracking-wider text-lingo-muted">
+                      What this lesson can measure
+                    </p>
+
+                    {missingTiers.length === 0 ? (
+                      <p className="mt-1.5 text-xs leading-relaxed text-lingo-ink">
+                        Past narration and opinion are both covered, so this lesson can separate a
+                        5 from a 7.
+                      </p>
+                    ) : (
+                      <>
+                        {missingTiers.map((tier) => (
+                          <div key={tier} className="mt-2.5">
+                            <p className="text-xs leading-relaxed text-lingo-ink">
+                              {tierHint(tier)}
+                            </p>
+                            <p className="mt-1.5 text-[11px] text-lingo-muted">
+                              Add one? — {TIER_NOTES[tier].name.toLowerCase()}
+                            </p>
+                            <ul className="mt-1 flex flex-col gap-1">
+                              {bankFor(tier).slice(0, 3).map((question) => (
+                                <li key={question.text}>
+                                  <button
+                                    type="button"
+                                    onClick={() => insertQuestion(question.text)}
+                                    disabled={busy}
+                                    className="flex w-full items-start gap-1.5 rounded-lg border-2 border-transparent px-2 py-1 text-left text-xs text-lingo-muted transition-colors hover:border-lingo-border-strong hover:text-lingo-ink disabled:opacity-40"
+                                  >
+                                    <Plus size={13} className="mt-0.5 shrink-0" />
+                                    <span>{question.text}</span>
+                                  </button>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        ))}
+                        <p className="mt-2.5 text-[11px] leading-relaxed text-lingo-muted">
+                          Nothing here stops you handing this out. A present-tense lesson is a fair
+                          lesson — it just measures a narrower thing.
+                        </p>
+                      </>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/*
@@ -985,13 +1104,62 @@ export default function Teach() {
                   disabled={busy}
                   className={`${field} cursor-pointer`}
                 >
-                  {evaluators.map((entry) => (
-                    <option key={entry.id} value={entry.id}>
-                      {entry.name}
-                      {entry.id === BUILTIN_EVALUATOR_ID ? ' (built in)' : ''}
-                    </option>
-                  ))}
+                  <optgroup label="Scales">
+                    {evaluators.map((entry) => (
+                      <option key={entry.id} value={entry.id}>
+                        {entry.name}
+                        {entry.id === BUILTIN_EVALUATOR_ID ? ' (built in)' : ''}
+                      </option>
+                    ))}
+                  </optgroup>
+                  {/*
+                    A second group rather than more entries in the first,
+                    because these are not scales. A scale is a ladder somebody
+                    authored and the report walks it; these two select a fixed
+                    exam rubric with its own pipeline behind it. Grouping is the
+                    cheapest way to say "different kind of thing" in a select.
+
+                    Rendered when French is picked — or when one of them is
+                    already selected, so that switching the language away does
+                    not leave this control showing a value it has no option for.
+                  */}
+                  {(advancedOffered || advancedPicked) && (
+                    <optgroup label="Advanced — exam rubric (French only)">
+                      {ADVANCED_OPTIONS.map((option) => (
+                        <option key={option.id} value={option.id}>
+                          {option.name}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
                 </select>
+
+                {/*
+                  One line on what the pick means. The advanced entries need it
+                  more than the scales do: their names say which scale a student
+                  reads, and nothing in a dropdown can say that both are always
+                  computed or that they are allowed to disagree.
+                */}
+                {advancedPicked ? (
+                  <p className="text-[11px] leading-relaxed text-lingo-muted">
+                    {ADVANCED_OPTIONS.find((option) => option.id === evaluatorId)?.note} The IB mark
+                    and the CEFR level are both worked out either way — this picks which one the
+                    student reads first. They measure different things and will not always agree.
+                  </p>
+                ) : (
+                  !advancedOffered && (
+                    <p className="text-[11px] leading-relaxed text-lingo-muted">
+                      Advanced exam marking is available on French lessons.
+                    </p>
+                  )
+                )}
+
+                {advancedMismatch && (
+                  <p className="text-[11px] leading-relaxed text-lingo-error">
+                    Advanced marking has only been calibrated for French. Set the language to
+                    French, or pick a scale instead.
+                  </p>
+                )}
               </div>
             </div>
           </section>

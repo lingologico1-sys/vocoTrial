@@ -163,6 +163,121 @@ export const FR = {
   evalSaid: 'Tu as dit',
   evalBetter: 'Mieux',
 
+  /*
+    --- The advanced marker
+
+    A SECOND READING, NOT A SECOND VOICE. Everything below belongs to the exam
+    rubric a teacher can pick instead of a scale — see evaluators.ts — and it
+    follows the same division as the rest of this file: French chrome, and
+    anything explaining a mistake arriving from the model in the learner's own
+    language. Nothing here is generated.
+
+    THE DETERMINISTIC PROSE IS TRANSLATED HERE RATHER THAN SHIPPED IN ENGLISH.
+    Stage 3 computes its can-do statements and its confidence note as English
+    strings — they are the same on every run, so a model has no business
+    rewriting them — and rendering those raw would put English paragraphs under
+    a French heading. The panel keys off `can_do_key`, `confidence_coverage` and
+    `confidence_sample` instead, and the English originals stay in oralMarker.ts
+    for whatever teacher-facing surface comes later.
+  */
+  advTitleIb: 'Ta note',
+  advTitleCefr: 'Ton niveau',
+  advAlsoIb: 'Sur l’échelle IB',
+  advAlsoCefr: 'Sur l’échelle CECRL',
+  /*
+    The one line that keeps two answers from competing.
+
+    A student who reads a 6 and "B1 emerging" in the same panel will try to make
+    one explain the other, and they do not: the mark is a grade out of 7, the
+    level is a list of things you can do. They are computed from the same three
+    criteria and never from each other, so they are free to disagree — and when
+    they do, the disagreement is the informative part.
+  */
+  advTwoScales:
+    'Ces deux résultats ne mesurent pas la même chose : la note situe ta performance sur 7, le niveau décrit ce que tu sais faire. Il arrive qu’ils ne disent pas exactement la même chose.',
+  /* A boundary mark is a band with a direction, never a grade. See §9.1b. */
+  advBandRange: (low: string, high: string) => `Bande ${low}–${high}`,
+  advLeaning: (mark: string) => `noté ${mark} pour l’instant`,
+  advLimiting: (names: string) => `${names} : c’est ce qui te retient en bas de la bande.`,
+  advCriteriaTitle: 'Le détail',
+  advCriterionA: 'Langue',
+  advCriterionB: 'Vocabulaire et pertinence',
+  advCriterionC: 'Interaction',
+  advOutOf: (score: number) => `${score}/7`,
+  advStrengthTitle: 'Ce que tu as bien fait',
+  advFixesTitle: 'À corriger',
+  advPractiseTitle: 'À travailler',
+  advPractisePrompt: 'Essaie de répondre à ça',
+  advCanDoTitle: 'Ce que tu sais faire',
+  /*
+    CAN_DO from oralMarker.ts, in French, keyed the same way.
+
+    Written to the student rather than about a candidate — the CEFR originals
+    are "Can narrate past events", which is a descriptor an examiner reads. A
+    learner reads "tu sais raconter", and the difference between those two
+    sentences is most of what makes a level feel like an achievement rather
+    than a classification.
+  */
+  advCanDo: {
+    B1: [
+      'Tu sais raconter des événements passés et décrire comment c’était.',
+      'Tu sais parler de tes projets et expliquer tes choix.',
+      'Tu sais tenir une conversation imprévue sur des sujets familiers sans beaucoup d’aide.',
+      'Tu sais donner ton avis et le justifier brièvement.',
+    ],
+    B1_EMERGING: [
+      'Tu es à l’aise sur les sujets familiers et tu commences à raconter au passé.',
+      'Tu sais donner des raisons simples pour tes opinions, mais pas encore à chaque fois.',
+      'Tu comptes encore sur ton interlocuteur pour ouvrir de nouveaux sujets.',
+    ],
+    A2: [
+      'Tu sais décrire ta famille, tes études, ton environnement et ta routine en termes simples.',
+      'Tu sais parler d’événements récents en phrases courtes et reliées.',
+      'Tu sais participer à de courts échanges sur des sujets familiers, avec un peu d’aide.',
+    ],
+    A2_EMERGING: [
+      'Tu sais répondre brièvement sur des sujets proches et familiers.',
+      'Tu sais faire des phrases simples au présent ; le passé et le futur sont encore fragiles.',
+      'Tu as encore besoin qu’on répète ou qu’on simplifie assez souvent.',
+    ],
+    A1: [
+      'Tu sais utiliser des mots isolés et des phrases apprises sur des sujets très familiers.',
+      'Tu as besoin de répétitions, de reformulations et d’aide pour avancer.',
+    ],
+  },
+  advUnplaced:
+    'Tu n’as pas assez parlé pour recevoir une note. Recommence et parle plus longtemps.',
+
+  /* What a narrow conversation cost. Never phrased as a penalty — see R3. */
+  advConfidenceTitle: 'Ce que cette conversation pouvait mesurer',
+  advCoveragePartial:
+    'Une partie seulement des questions difficiles a été posée, donc certaines structures n’ont jamais eu l’occasion d’apparaître.',
+  advCoverageMinimal:
+    'Aucune question ne demandait de raconter au passé ni de donner un avis, donc ces structures n’ont jamais eu l’occasion d’apparaître. Ta note reflète ce que les questions permettaient de montrer.',
+  advSampleThin: 'La conversation était courte : quelques questions de plus donneraient une image plus complète.',
+  advSampleShort: 'La conversation était trop courte pour juger avec certitude.',
+  /* R3 again, said to the student in one sentence. Nothing was taken away. */
+  advNoPenalty:
+    'Rien ne t’a été retiré pour autant : on n’évalue que ce que la conversation a permis de montrer.',
+
+  /*
+    The two caveats this mode owes a student, and neither is optional.
+
+    The first is spec §1.1, which asks for a fixed disclaimer beside any mark:
+    this reads one section of one exam, and pronunciation is not in it. Rendered
+    in French rather than the spec's English, because the page is French and a
+    disclaimer nobody reads protects nobody.
+
+    The second is §3b, and it is the more honest of the two. The transcript came
+    from a speech model that quietly repairs learner grammar as it listens, so
+    the grammar mark is only as good as what survived. Saying so is what makes
+    this practice feedback rather than a grade.
+  */
+  advDisclaimer:
+    'Note projetée pour la conversation générale seulement. Ce n’est pas une note officielle d’évaluation interne IB. La prononciation et l’intonation ne sont pas évaluées.',
+  advTranscriptCaveat:
+    'Cette lecture se fait sur la transcription de ce que tu as dit, et la transcription corrige parfois les petites erreurs toute seule. À utiliser pour progresser, pas comme une note définitive.',
+
   // --- Dictionary
   dictPlaceholder: 'Tape un mot français…',
   dictSearch: 'Chercher',
