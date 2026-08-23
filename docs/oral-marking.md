@@ -151,6 +151,56 @@ teacher-facing surface comes later.
 English string. The student page is French, and a disclaimer nobody reads
 protects nobody.
 
+**7. Criterion A's ladder is read with unelicitable clauses struck out.** This
+is the one deviation that changes marks, and it exists because the spec
+contradicts itself. R3 says the absence of a structure no question called for
+"must NOT lower Criterion A". The A ladder then makes band 6 require "at least
+three tenses including one past tense" and band 7 require si clauses and
+relative pronouns. On a lesson that never asks about the past, those cannot both
+hold — and the ladder wins, because the ladder is what the model bands against.
+
+A lesson here is five fixed questions written by a teacher, so this is the
+common case rather than an edge one. A tier-1 question list capped Criterion A
+at 5 no matter how good the French was, and A carries 40% of the mark, so it
+capped the whole result near 6. A real marked lesson — five present-tense and
+future questions, answered with accurate `on fera`, correct `y`, and unprompted
+topic-specific vocabulary — came back A5 "without relative clauses (qui/que/où)
+or complex subordination", for structures nothing in the lesson gave the student
+a reason to produce. An IB teacher reading it called it unfair, and it was.
+
+So the prompt now states a procedure before the ladder: work out from
+`tiers_probed` which named structures had an obligatory context, strike every
+descriptor clause naming one that did not, and band on what is left. Striking
+cuts both ways — a struck structure is never credited either — and a clause is
+only struck when the questions genuinely left no room for it, since extended
+subordination is available in almost any developed answer.
+
+The spec's own §10 wording is untouched. What is added is the procedure that
+makes R3 reachable instead of decorative.
+
+**8. The student is shown a half mark, not a boundary band.** §9.1b renders a
+disagreeing profile as `"5/6"` with a leaning. Stage 3 still computes it and the
+anchors still assert it, but the student page shows `half_mark` — the weighted
+score to the nearest half point, always to one decimal: **6,0 / 7**, **6,5 / 7**.
+
+A band is arithmetically honest: it is exactly the set of profiles where the
+three criteria disagree and no criterion sits below the lower integer. It is
+also read by students as its lower number and by teachers as a hedge, and it is
+neither — a student at "Bande 5–6, noté 6" is a 6. The half point carries the
+same "where in the grade am I" information with nothing to decode, and the
+halves make plain that this is a projected practice mark rather than an IB
+grade, which nobody is ever awarded at 6.5.
+
+What survives from the band is its actionable half, now shown unconditionally
+rather than only on a boundary: the weakest of the three criteria, named
+directly under the number.
+
+Two consequences worth knowing. A guarded mark never gets a half — a guard means
+the weighted average stopped describing the profile, so the guarded integer is
+the finding. And the half mark can sit *below* the IB integer: raw 5.6 shows as
+**5,5** while `final_ib_mark` is 6, because 5.6 is nearer 5.5 than 6. That is
+correct for what it is, and it is not a grade.
+
 ### One discrepancy inside the spec itself
 
 §12 prints a "verified Stage 1 and Stage 3 output" block reporting confidence
@@ -228,7 +278,10 @@ Three rules the copy follows, enforced by keeping the wording in
 - **Low coverage is not a cap.** R3 scores what was elicited with no ceiling
   applied. The hint says the lesson "will not separate a 5 from a 7" — it must
   never say the lesson "will mark low", which is false and reads as the tool
-  penalising a teacher's students for the teacher's question list.
+  penalising a teacher's students for the teacher's question list. This copy was
+  written true and was then false for as long as Criterion A's ladder imposed
+  the ceiling R3 forbade; deviation 7 above is what makes it true again. If the
+  ladder is ever edited, this sentence is the thing to re-check.
 - **Tags first, cues only as a fallback.** Bank questions carry their tier, so
   insertion gives a reading that cannot false-positive. Cue matching runs only
   over free-typed questions, only for tiers 3 and 4, and only on phrases hard to

@@ -77,7 +77,8 @@ function main(): void {
     console.log(
       `        A${final.criterion_scores?.A} B${final.criterion_scores?.B} ` +
       `C${final.criterion_scores?.C} | raw ${final.raw_weighted_score} | ` +
-      `display "${final.display_mark}" | ${final.cefr_verdict} | ` +
+      `shown ${final.half_mark?.toFixed(1)} | display "${final.display_mark}" | ` +
+      `${final.cefr_verdict} | ` +
       `confidence ${final.confidence} (${final.confidence_coverage}/${final.confidence_sample})`,
     );
     console.log(

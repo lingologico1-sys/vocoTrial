@@ -312,6 +312,35 @@ function roundHalfUp(n: number): number {
   return Math.floor(n + 0.5);
 }
 
+/**
+ * The mark a student is actually shown: the raw weighted score to the nearest
+ * half point.
+ *
+ * WHY THE STUDENT-FACING MARK IS NOT `final_ib_mark`. The integer is the IB
+ * grade and it stays exactly as it was — every guard, every anchor and every
+ * downstream reading of it is unchanged. But rounding three criteria to one
+ * integer throws away the only thing a practising student wants to know, which
+ * is where in the grade they are sitting: 6.3 and 5.9 are both "6" and they are
+ * not the same conversation. The old answer to that was a band ("Bande 5–6"),
+ * and a band is read by students as the lower number and by teachers as a
+ * hedge. A half point says the same thing in a form nobody has to decode.
+ *
+ * IT IS NOT AN IB GRADE AND THE PANEL SAYS SO. Nobody is awarded a 6.5. This is
+ * a projected practice mark, which is what the disclaimer under it has always
+ * called it, and a scale with halves in it is the clearest possible signal that
+ * you are not holding an official grade.
+ *
+ * A GUARDED MARK NEVER GETS A HALF. Both guards mean the profile was lopsided
+ * enough that the weighted average stopped describing it — `spread_clamp` takes
+ * A7/B7/C2 from 5.5 down to 4 — so the guarded integer IS the finding, and
+ * decorating it with a half point taken from the average it just overrode would
+ * be reporting the number the guard exists to suppress.
+ */
+function computeHalfMark(raw: number, final: number, guardsApplied: string[]): number {
+  if (guardsApplied.length > 0) return final;
+  return Math.min(7, Math.round(raw * 2) / 2);
+}
+
 export type CanDoKey = 'B1' | 'B1_EMERGING' | 'A2' | 'A2_EMERGING' | 'A1';
 
 /**
@@ -543,6 +572,12 @@ interface DisplayMark {
  *      not a borderline 7.
  * A guarded result never gets a slash mark, because a clamp means the profile
  * was lopsided, which is the opposite of borderline.
+ *
+ * THE STUDENT PAGE NO LONGER RENDERS THIS. It shows `half_mark`, which says the
+ * same thing without a range for a student to read as its lower number. This
+ * stays computed because it is the honest description of a profile whose
+ * criteria disagree, the anchors assert it, and a teacher-facing surface asking
+ * "is this 6 safe?" wants exactly this field rather than the half point.
  */
 function computeDisplayMark(
   raw: number,
@@ -588,6 +623,11 @@ export interface OralFinal {
   criterion_scores?: { A: number; B: number; C: number };
   raw_weighted_score?: number;
   final_ib_mark: number | null;
+  /**
+   * The same result to the nearest half point, and the only mark the student
+   * page shows. See `computeHalfMark` for why it exists beside the integer.
+   */
+  half_mark?: number;
   display_mark?: string;
   is_boundary?: boolean;
   boundary_leaning?: string | null;
@@ -644,6 +684,7 @@ export function computeFinal(llm: OralLlmOutput, stats: OralStats): OralFinal {
       criterion_scores: { A, B, C },
       raw_weighted_score: 0,
       final_ib_mark: 0,
+      half_mark: 0,
       display_mark: '0',
       is_boundary: false,
       boundary_leaning: null,
@@ -686,6 +727,7 @@ export function computeFinal(llm: OralLlmOutput, stats: OralStats): OralFinal {
     criterion_scores: { A, B, C },
     raw_weighted_score: Number(raw.toFixed(2)),
     final_ib_mark: final,
+    half_mark: computeHalfMark(raw, final, guardsApplied),
     display_mark: display.display_mark,
     is_boundary: display.is_boundary,
     boundary_leaning: display.leaning,

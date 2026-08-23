@@ -195,10 +195,29 @@ export const FR = {
   */
   advTwoScales:
     'Ces deux résultats ne mesurent pas la même chose : la note situe ta performance sur 7, le niveau décrit ce que tu sais faire. Il arrive qu’ils ne disent pas exactement la même chose.',
-  /* A boundary mark is a band with a direction, never a grade. See §9.1b. */
-  advBandRange: (low: string, high: string) => `Bande ${low}–${high}`,
-  advLeaning: (mark: string) => `noté ${mark} pour l’instant`,
-  advLimiting: (names: string) => `${names} : c’est ce qui te retient en bas de la bande.`,
+  /*
+    The mark, to the nearest half point, with a French decimal comma.
+
+    ALWAYS ONE DECIMAL, including on a whole number: "6,0 / 7", never "6 / 7".
+    The zero is what tells a student the scale has halves in it, and a scale
+    that shows halves only sometimes teaches nobody where 6,5 came from.
+
+    This replaced "Bande 5–6 / noté 6 pour l’instant". A band is arithmetically
+    honest — it is exactly the set of profiles where the three criteria
+    disagree — and students read it as its lower number, which is the one thing
+    it does not mean. The half point carries the same information with nothing
+    left to interpret. See `computeHalfMark`.
+  */
+  advHalfMark: (mark: number) => `${mark.toFixed(1).replace('.', ',')} / 7`,
+  /*
+    The weakest criterion, named.
+
+    This is what survived the band. "Bande 5–6" was never the useful half of
+    that display — the useful half was the sentence saying which of three things
+    was holding the mark down, and that sentence works just as well under a
+    number as under a range.
+  */
+  advLimiting: (names: string) => `${names} : c’est ce qui te coûte le plus de points.`,
   advCriteriaTitle: 'Le détail',
   advCriterionA: 'Langue',
   advCriterionB: 'Vocabulaire et pertinence',

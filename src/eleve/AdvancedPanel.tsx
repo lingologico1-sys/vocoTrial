@@ -34,12 +34,18 @@ import { FR } from './strings';
  * showing both adds. They are free to disagree, and `advTwoScales` is the line
  * that stops a student on that face trying to make one explain the other.
  *
- * A BOUNDARY MARK IS A BAND WITH A DIRECTION, NEVER A GRADE. Students hear
- * "6/7" as "7". So it is never rendered as a fraction: it renders as
- * "Bande 6–7", with what it is currently marking as underneath, and the
- * criterion holding it there named — spec §9.1b. "You're a 6/7" is motivating;
- * "you're a 6/7 and the gap is that you never opened a topic nobody asked
- * about" is actionable.
+ * THE MARK IS A HALF POINT, NOT A BAND. This panel used to render a disagreeing
+ * profile as "Bande 5–6 / noté 6 pour l'instant", which is what spec §9.1b
+ * describes and what `display_mark` still computes. It was read as "5" by
+ * students and as a hedge by teachers, and it was neither: the student was a 6.
+ * So the number here is `half_mark` — the weighted score to the nearest half —
+ * shown always to one decimal so the halves in the scale are visible. See
+ * `computeHalfMark` for what it is and is not.
+ *
+ * What survives from the band is its actionable half, and it is now shown
+ * unconditionally: the weakest of the three criteria, named directly under the
+ * number. "You're a 6,5" is motivating; "you're a 6,5 and Langue is what costs
+ * you most" is something to do on Tuesday.
  *
  * WHAT IS DROPPED, AND WHY. The evidence block arrives in full and almost none
  * of it is rendered. `problem_turns`, `l1_insertions`,
@@ -90,14 +96,9 @@ export default function AdvancedPanel({ report }: AdvancedPanelProps) {
     );
   }
 
-  const mark = final.display_mark ?? String(final.final_ib_mark ?? '');
+  const half = final.half_mark ?? final.final_ib_mark ?? 0;
+  const mark = FR.advHalfMark(half);
   const level = final.cefr_verdict ?? '';
-  const boundary = final.is_boundary === true;
-  const [low, high] = boundary ? mark.split('/') : ['', ''];
-
-  const limiting = (final.limiting_criteria_keys ?? [])
-    .map((key) => CRITERION_LABELS[key])
-    .join(' et ');
 
   const rows: { key: 'A' | 'B' | 'C'; score: number; why: string; quotes: string[] }[] = [
     { key: 'A', score: scores.a_language.score, why: scores.a_language.why, quotes: scores.a_language.quotes },
@@ -116,6 +117,22 @@ export default function AdvancedPanel({ report }: AdvancedPanelProps) {
   ];
 
   const canDo = final.can_do_key ? FR.advCanDo[final.can_do_key] : [];
+
+  /*
+    The weakest criterion, worked out here rather than read off the report.
+
+    Stage 3 emits `limiting_criteria_keys`, but only on a boundary profile —
+    that field answers "what is holding this student at the bottom of a band",
+    and there are no bands on this page any more. The question worth answering
+    under a half mark is the plainer one: of the three, which scored lowest. The
+    panel already has all three scores, so it answers it, and says nothing when
+    the three agree and there is no weakest.
+  */
+  const lowest = Math.min(...rows.map((row) => row.score));
+  const limiting =
+    lowest < Math.max(...rows.map((row) => row.score))
+      ? rows.filter((row) => row.score === lowest).map((row) => CRITERION_LABELS[row.key]).join(' et ')
+      : '';
 
   /*
     What the conversation could not reach, if anything. Assembled from the two
@@ -138,20 +155,7 @@ export default function AdvancedPanel({ report }: AdvancedPanelProps) {
         <Heading>{face === 'ib' ? FR.advTitleIb : FR.advTitleCefr}</Heading>
 
         {face === 'ib' ? (
-          <>
-            {boundary ? (
-              <>
-                <p className="font-lingo-brand text-3xl leading-none text-lingo-ink">
-                  {FR.advBandRange(low, high)}
-                </p>
-                <p className="mt-1 text-sm text-lingo-muted">
-                  {FR.advLeaning(final.boundary_leaning ?? String(final.final_ib_mark))}
-                </p>
-              </>
-            ) : (
-              <p className="font-lingo-brand text-4xl leading-none text-lingo-ink">{mark}/7</p>
-            )}
-          </>
+          <p className="font-lingo-brand text-4xl leading-none text-lingo-ink">{mark}</p>
         ) : (
           <>
             <p className="font-lingo-brand text-3xl leading-none text-lingo-ink">{level}</p>
@@ -160,19 +164,17 @@ export default function AdvancedPanel({ report }: AdvancedPanelProps) {
             )}
             <p className="mt-2.5 text-sm text-lingo-ink">
               <span className="text-lingo-muted">{FR.advAlsoIb} : </span>
-              <span className="font-semibold">
-                {boundary ? FR.advBandRange(low, high) : `${mark}/7`}
-              </span>
+              <span className="font-semibold">{mark}</span>
             </p>
           </>
         )}
 
         {/*
           Named right under the mark rather than in the criterion list, because
-          on a boundary it is the single most actionable sentence in the panel:
-          it says which of three things to work on to close the band.
+          it is the single most actionable sentence in the panel: it says which
+          of three things to work on to move the number above it.
         */}
-        {boundary && limiting && (
+        {limiting && (
           <p className="mt-2.5 text-xs leading-relaxed text-lingo-ink">{FR.advLimiting(limiting)}</p>
         )}
 

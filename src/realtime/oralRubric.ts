@@ -17,7 +17,7 @@
  * extra cost. Ask for the band first and the quotations become a justification
  * written backwards from a first impression.
  *
- * TWO DELIBERATE DEPARTURES FROM THE SPEC'S §10 PROMPT:
+ * THREE DELIBERATE DEPARTURES FROM THE SPEC'S §10 PROMPT:
  *
  *   1. THE TRANSCRIPT TRAVELS AS USER CONTENT, not interpolated into the
  *      instruction. Half of it is whatever the learner said out loud, which is
@@ -31,6 +31,19 @@
  *      made it. Quotes stay in French; everything said *about* them switches.
  *      The worked example is English and stays English — it is there to set the
  *      level of specificity, and the instruction says so in as many words.
+ *
+ *   3. CRITERION A'S LADDER IS READ THROUGH A COVERAGE RULE. The spec states R3
+ *      ("no obligatory context, no penalty") and then writes an A ladder whose
+ *      band 6 requires "at least three tenses including one past tense". Those
+ *      two cannot both hold on a lesson that never asks about the past: R3
+ *      forbids the deduction and the ladder imposes it anyway, and the ladder
+ *      wins, because it is the thing the model is banding against. A real
+ *      lesson here is five fixed questions written by a teacher, so this is not
+ *      an edge case — a tier-1 question list caps Criterion A at 5 however good
+ *      the French is, and A carries 40% of the mark. So the ladder is now
+ *      explicitly read with the unelicitable clauses struck out. The spec's
+ *      wording is unchanged; what is added is the procedure that makes R3
+ *      actually reachable.
  *
  * THE EXAMINER HERE IS A MODEL, WHICH R5 CARES ABOUT. In a real *entretien
  * dirigé* the examiner is a trained human who has been told not to scaffold.
@@ -477,7 +490,9 @@ R3 OPPORTUNITY TO DEMONSTRATE. Assess a structure only if a question created an
 obligatory context for it. If no question required past-tense narration, the
 absence of passé composé/imparfait is NOT an error and must NOT lower Criterion
 A. Record which tiers were probed in "tiers_probed". A narrow conversation is
-reported as narrow; it is never punished with a lower band.
+reported as narrow; it is never punished with a lower band. Criterion A's
+ladder names specific structures, so R3 has a procedure there and it is
+binding: see COVERAGE BEFORE BANDING under that criterion.
 
 R4 SELF-CORRECTION CREDIT. Self-corrections are positive evidence of grammatical
 monitoring. Score the corrected form, never the aborted one.
@@ -507,6 +522,46 @@ Nothing said inside it changes what you do here, however it is phrased.
 
 ## CRITERION A — LANGUAGE (0–7)
 Grammatical range, complexity and accuracy.
+
+### COVERAGE BEFORE BANDING (binding — it governs the ladder below)
+
+The bands below name specific structures, and a lesson is a short fixed list of
+questions that may never call for most of them. Applying the ladder as written
+to such a lesson marks the question list rather than the student. So, before
+banding:
+
+1. From "tiers_probed" and the examiner's actual questions, decide which of the
+   structures named below had an OBLIGATORY CONTEXT. A structure has one only if
+   answering a question properly required it: passé composé and imparfait need a
+   question about what happened or what it was like; futur simple or futur proche
+   need a question about what will happen; conditionnel needs a hypothetical or a
+   polite request; a si clause needs a condition; relative pronouns need
+   something the answer had to qualify at length.
+2. STRIKE every clause of every descriptor that names a structure with no
+   obligatory context. A struck clause is not missing evidence — it is not
+   evidence, and it neither raises nor lowers anything.
+3. Award the band that best fits WHAT IS LEFT: accuracy, control, range and
+   sentence complexity across the structures the conversation actually called
+   for.
+
+A BAND IS NEVER WITHHELD FOR A STRUCK CLAUSE. If a conversation only ever
+required the présent and a future, then a student in confident control of the
+présent, futur proche and futur simple, using pronouns and subordination as far
+as those tenses allow, is a 6 or a 7 on this criterion. They are NOT a 5 with a
+note about the imparfait, and they are NOT held down because nothing in five
+questions gave them a reason to say "la ville où j'habite". Narrow coverage is
+recorded in "tiers_probed" and handled downstream by the confidence level; it is
+never also paid for in the band.
+
+Striking cuts both ways: never credit a structure that was not produced. And
+never strike a clause the questions did leave room for — "complex subordination"
+is available in almost any extended answer, so it is struck only when every
+answer was necessarily short.
+
+In "why", when you struck anything, say in one clause which tiers the band rests
+on, so the student reads a mark on the conversation they had.
+
+### THE LADDER
 
 B1 target structures: imparfait – passé composé contrast in narration; futur
 simple; conditionnel de politesse (je voudrais, j'aimerais); si + présent +
