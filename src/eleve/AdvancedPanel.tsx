@@ -17,14 +17,22 @@ import { FR } from './strings';
  * words, so the corrections underneath are read as advice about real French
  * rather than as the itemisation of a verdict.
  *
- * BOTH SCALES ARE ALWAYS SHOWN, AND NEITHER IS DERIVED FROM THE OTHER. `face`
- * decides which one is large. The IB mark is a grade out of 7 computed by
- * weighting three criteria; the CEFR verdict is a criterion-referenced reading
- * of the same three, computed from their profile — see `computeCefrVerdict`,
- * which carries the argument for why mapping one onto the other would throw
- * away the only thing showing both adds. They are free to disagree, and
- * `advTwoScales` is the line that stops a student trying to make one explain
- * the other.
+ * THE IB FACE SHOWS THE IB MARK AND NOTHING ELSE. An IB student has never met
+ * the CEFR, so a second verdict beside their grade is not a richer answer —
+ * it is a scale they have to decode before they can trust the one they asked
+ * for. So on `face === 'ib'` the CEFR line, the two-scales caveat that exists
+ * only to keep two answers from competing, and the can-do list (which is the
+ * CEFR verdict written out) are all absent. The report still carries all of
+ * them; this panel simply does not render them on that face.
+ *
+ * The CEFR face is unchanged and still shows both, because a student reading a
+ * level does benefit from the mark beside it. Neither scale is derived from the
+ * other: the IB mark is a grade out of 7 computed by weighting three criteria;
+ * the CEFR verdict is a criterion-referenced reading of the same three,
+ * computed from their profile — see `computeCefrVerdict`, which carries the
+ * argument for why mapping one onto the other would throw away the only thing
+ * showing both adds. They are free to disagree, and `advTwoScales` is the line
+ * that stops a student on that face trying to make one explain the other.
  *
  * A BOUNDARY MARK IS A BAND WITH A DIRECTION, NEVER A GRADE. Students hear
  * "6/7" as "7". So it is never rendered as a fraction: it renders as
@@ -143,12 +151,6 @@ export default function AdvancedPanel({ report }: AdvancedPanelProps) {
             ) : (
               <p className="font-lingo-brand text-4xl leading-none text-lingo-ink">{mark}/7</p>
             )}
-            {level && (
-              <p className="mt-2.5 text-sm text-lingo-ink">
-                <span className="text-lingo-muted">{FR.advAlsoCefr} : </span>
-                <span className="font-semibold">{level}</span>
-              </p>
-            )}
           </>
         ) : (
           <>
@@ -174,7 +176,9 @@ export default function AdvancedPanel({ report }: AdvancedPanelProps) {
           <p className="mt-2.5 text-xs leading-relaxed text-lingo-ink">{FR.advLimiting(limiting)}</p>
         )}
 
-        <p className="mt-3 text-[11px] leading-relaxed text-lingo-muted">{FR.advTwoScales}</p>
+        {face === 'cefr' && (
+          <p className="mt-3 text-[11px] leading-relaxed text-lingo-muted">{FR.advTwoScales}</p>
+        )}
       </section>
 
       {/* ── What went well, second, in their own words ─────────────── */}
@@ -300,7 +304,7 @@ export default function AdvancedPanel({ report }: AdvancedPanelProps) {
       )}
 
       {/* ── Can-do, on the CEFR side of the same three criteria ────── */}
-      {canDo.length > 0 && (
+      {face === 'cefr' && canDo.length > 0 && (
         <section>
           <Heading>{FR.advCanDoTitle}</Heading>
           <ul className="space-y-1.5">
