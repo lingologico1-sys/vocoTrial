@@ -472,6 +472,10 @@ export async function startGeminiSession(
 
       if (content.turnComplete) {
         answering = false;
+        // The queue is about to run dry because the agent has stopped talking,
+        // not because anything failed to arrive. Saying so keeps the player's
+        // underrun logging honest — see PcmPlayer.endTurn.
+        player.endTurn();
         // Stamped like the words were, so a consumer holding the turn back to
         // match the audio closes it when the audio ends rather than when the
         // socket says so — which is seconds earlier.

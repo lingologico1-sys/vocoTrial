@@ -212,7 +212,7 @@ export interface AudioTap {
   now(): number;
   /**
    * When audio queued at this instant will be heard — the far end of what is
-   * already scheduled, or now if the queue has drained.
+   * already scheduled, or a prime ahead of now if the queue has drained.
    */
   scheduledAt(): number;
   /**
@@ -312,12 +312,54 @@ interface EnvelopeFrame extends EnvelopeSample {
 }
 
 /**
+ * How far ahead of the clock a dry queue restarts, in seconds.
+ *
+ * Chunks were scheduled at `currentTime` itself the moment the queue ran dry,
+ * which is a pipeline with no slack anywhere in it: a chunk arriving even
+ * slightly later than the queue could cover became exactly that much silence in
+ * the middle of a word. Worse, the playhead then re-anchored to now, so the
+ * stream carried on with no lead at all and the next hiccup cost the same
+ * again — which is why one audible seam in a call tends to mean several.
+ *
+ * This is the cushion that absorbs them, paid whenever the queue is empty: at
+ * the start of a turn, and again after any hiccup that did get through. That
+ * second case is the one that matters, because it makes a lost lead a rebuilt
+ * lead rather than a lead gone for the rest of the call.
+ *
+ * The size is a straight trade of responsiveness for continuity, settled for a
+ * tutor rather than for a conversation. A fifth of a second before the agent
+ * starts talking is not something a learner can pick out; a seam in the middle
+ * of the sentence they are trying to parse very much is. It is the number to
+ * raise if a line turns out to need more, and the underrun logging below is
+ * what says whether it does.
+ */
+const PRIME_SECONDS = 0.18;
+
+/**
+ * The longest dry spell still read as starvation rather than as a new turn.
+ *
+ * Only the logging needs the distinction — the schedule primes either way — but
+ * an empty queue means opposite things either side of this, and a diagnostic
+ * that cries starvation every time the learner takes their turn is worse than
+ * no diagnostic. `endTurn` separates the two properly where it is called; this
+ * is the backstop for a turn that ended some other way.
+ */
+const UNDERRUN_GAP_SECONDS = 1;
+
+/** How much lower a lead must be than the last low-water mark to be worth a line. */
+const LOW_WATER_STEP_SECONDS = 0.02;
+
+/**
  * Plays the 24 kHz int16 stream the model sends back.
  *
  * Chunks arrive faster than real time, so they are scheduled end to end on the
  * AudioContext clock rather than played on arrival — otherwise they overlap
- * into noise. `clear()` exists for barge-in: when the user interrupts, audio
- * already queued is no longer wanted and every pending source is dropped.
+ * into noise. Mostly faster, anyway: an empty queue starts a cushion ahead of
+ * the clock rather than at it, so that the times they do not arrive in time are
+ * absorbed instead of heard. See PRIME_SECONDS, and `watch` for how to tell
+ * whether that is what you are hearing. `clear()` exists for barge-in: when the
+ * user interrupts, audio already queued is no longer wanted and every pending
+ * source is dropped.
  *
  * Sources do not reach the speakers directly: they pass through a mixing node
  * so that an AnalyserNode can sit across the whole output rather than across
@@ -330,6 +372,13 @@ export class PcmPlayer {
   private analyser: AnalyserNode | null = null;
   private playhead = 0;
   private sources = new Set<AudioBufferSourceNode>();
+
+  /** Whether the next chunk to arrive opens a new turn. Diagnostics only. */
+  private awaitingTurn = true;
+  /** How many times the queue has been starved mid-speech this call. */
+  private underruns = 0;
+  /** The smallest lead seen at an enqueue, in seconds. Diagnostics only. */
+  private lowWater = Infinity;
 
   /**
    * Sized for the mouth, which needs frequency resolution more than time
@@ -388,7 +437,73 @@ export class PcmPlayer {
   scheduledAt(): number {
     const context = this.context;
     if (!context) return 0;
-    return Math.max(context.currentTime, this.playhead);
+    return this.nextStart(context);
+  }
+
+  /**
+   * When audio handed over right now would be heard.
+   *
+   * The single place the schedule is decided, which is what keeps the words on
+   * the sound: the transcript stamps itself with `scheduledAt` and the audio is
+   * started at this, so a prime that only one of them knew about would put the
+   * first line of every turn on screen a fifth of a second early.
+   */
+  private nextStart(context: AudioContext): number {
+    return this.playhead > context.currentTime
+      ? this.playhead
+      : context.currentTime + PRIME_SECONDS;
+  }
+
+  /**
+   * Says the model has stopped speaking, so the next chunk opens a new turn.
+   *
+   * Only the diagnostics want this. The schedule does not care where a turn
+   * begins — a dry queue is primed the same either way — but "empty because the
+   * learner is talking" and "empty because the audio did not arrive in time"
+   * are one measurement and opposite findings, and this is the bit that tells
+   * them apart.
+   */
+  endTurn(): void {
+    this.awaitingTurn = true;
+  }
+
+  /**
+   * Notes what the queue looked like just before a chunk was scheduled.
+   *
+   * Nothing here changes a sample that is played. It is here because a pause
+   * heard mid-sentence has three quite different causes and one measurement
+   * separates them. A starved queue means the hole is ours — the network, the
+   * relay hop, or a main thread too busy to hand the chunk over — and is worth
+   * a louder prime. A queue that still had a healthy lead means the silence was
+   * in the audio Google sent, and no amount of buffering will touch it.
+   */
+  private watch(context: AudioContext): void {
+    // Nothing has played yet, or a barge-in threw the queue away.
+    if (this.playhead === 0) return;
+
+    // A turn boundary is an empty queue on purpose, and says nothing about the
+    // transport. Spent whether or not this chunk turns out to have been late.
+    const boundary = this.awaitingTurn;
+    this.awaitingTurn = false;
+
+    const lead = this.playhead - context.currentTime;
+    if (lead >= 0) {
+      if (lead < this.lowWater - LOW_WATER_STEP_SECONDS) {
+        console.info(`PcmPlayer: lead low-water ${Math.round(lead * 1000)}ms`);
+      }
+      this.lowWater = Math.min(this.lowWater, lead);
+      return;
+    }
+
+    const gap = -lead;
+    if (boundary || gap > UNDERRUN_GAP_SECONDS) return;
+
+    this.underruns++;
+    this.lowWater = 0;
+    console.warn(
+      `PcmPlayer: underrun #${this.underruns} — queue dry for ${Math.round(gap * 1000)}ms ` +
+        'mid-speech; that is the pause you heard.',
+    );
   }
 
   /**
@@ -538,9 +653,12 @@ export class PcmPlayer {
     source.buffer = buffer;
     source.connect(this.mix ?? context.destination);
 
-    // A gap means the previous turn finished playing; restart from now rather
-    // than scheduling in the past, which would play everything at once.
-    const startAt = Math.max(context.currentTime, this.playhead);
+    // Measured before it is decided, so the lead reported is the one this chunk
+    // actually found rather than the one it is about to create.
+    this.watch(context);
+    // A dry queue restarts a cushion ahead of the clock rather than at it — see
+    // PRIME_SECONDS. Anything still playing is simply followed on from.
+    const startAt = this.nextStart(context);
     // Measured before it is scheduled, so the envelope is ready the moment the
     // audio is — a lookahead that arrived after the sound would be no lookahead.
     this.measure(channel, startAt);
@@ -564,6 +682,9 @@ export class PcmPlayer {
     }
     this.sources.clear();
     this.playhead = 0;
+    // A barge-in ends the turn as surely as finishing it does, and whatever the
+    // model says next starts a new one from an empty queue on purpose.
+    this.awaitingTurn = true;
 
     // Everything measured beyond now describes audio that was just thrown away
     // unplayed. Leaving it would let the mouth go on speaking the interrupted
