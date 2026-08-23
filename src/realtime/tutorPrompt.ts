@@ -101,6 +101,31 @@
  *    the report, and nothing can keep it out of the audio, which is why the
  *    prompt argues the point instead of forbidding it.
  *
+ *  - HOW THIS STARTS is the ending's mirror, and it is here because the opening
+ *    note was two instructions that turned out to be one. It said greet them
+ *    "and then ask the first question", which is right in every lesson whose
+ *    first question is not itself a greeting — and half of them are, because a
+ *    list called "se présenter" opens with "comment ça va?" and so does every
+ *    other beginner's list ever written. On 2026-08-23 the tutor opened with
+ *    "Bonjour! Comment ça va ce matin? J'espère que tu es prêt. Alors, ma
+ *    première question: comment ça va?" — both instructions obeyed exactly, and
+ *    the learner asked the same question twice inside seven seconds.
+ *
+ *    IT WAS ALSO BREAKING A RULE THE LESSON BLOCK ALREADY HAD. Every turn ends
+ *    with one question and carries no other; that opening carried two. So this
+ *    section mostly says the existing rule applies to the first turn as well,
+ *    which is the sort of thing a model reads as obvious right up until two
+ *    instructions pull the other way — and then the note's "and then" wins,
+ *    because it is the more recent and the more specific of the two.
+ *
+ *    THE NUMBERING GOES WITH IT, and it is the one part of this that is not
+ *    symmetrical. "Ma première question" tells the learner where they are on a
+ *    list, which the reporting block already refuses for the count — but the
+ *    ending deliberately does say "one last question", because a learner who
+ *    does not know the lesson is closing gets a goodbye out of nowhere. So the
+ *    rule is not "never number them": it is that the close is the one place a
+ *    position on the list is worth saying, and the opening is not.
+ *
  *  - HOW THIS ENDS is a section rather than a sentence, and it is the one place
  *    the prompt was rewritten by giving the model something to do instead of
  *    something to avoid. It began as "the goodbye is never yours to start",
@@ -409,7 +434,7 @@ export function dayPartAt(when: Date = new Date()): DayPart {
  * thing it is told.
  */
 export function openingSignal(part: DayPart = dayPartAt()): string {
-  return `${OPENING_NOTE} The learner has just connected and is waiting for you to speak first. Greet them now, in the language you are speaking, with the greeting a person would use in the ${part}, and then ask the first question on your list. Never say what the time is: the part of the day is here so that your greeting fits it, and for nothing else. This note does not end the conversation — it begins it.`;
+  return `${OPENING_NOTE} The learner has just connected and is waiting for you to speak first. Greet them now, in the language you are speaking, with the greeting a person would use in the ${part}, and ask the first question on your list in the same breath — one turn carrying one question. If that first question is itself a greeting, then it is your greeting: ask it once, and do not ask them how they are twice. Never say what the time is: the part of the day is here so that your greeting fits it, and for nothing else. This note does not end the conversation — it begins it.`;
 }
 
 /**
@@ -594,6 +619,21 @@ come, and the learner is left sitting in silence while you hold a call back.
 Never spend a turn on the call alone either: a turn with nothing but bookkeeping
 in it is silence too. It is between you and the program, so never mention it,
 never say how many questions are left, and carry straight on talking.
+
+HOW THIS STARTS
+A note arrives before the learner has said anything, asking you to greet them.
+The greeting and the first question on the list are one turn, not two: say
+hello and ask question 1 together. Every turn you take carries one question,
+and the opening is not an exception to that.
+
+The first question is very often a greeting itself — "how are you" and its
+like. When it is, it *is* your greeting: ask it once. Saying hello and then
+putting the same question to them again is the commonest way this turn goes
+wrong, and what the learner hears is a tutor not listening to itself.
+
+Do not announce it as your first question. The learner knows they have a list;
+where they are on it is between you and the program, and the end of the lesson
+is the one place a position on it is ever said out loud.
 
 HOW THIS ENDS
 The last question on the list is the end of the lesson, and you close it
