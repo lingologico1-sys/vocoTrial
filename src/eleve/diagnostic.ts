@@ -1,4 +1,17 @@
 import type { CallEvent, Turn } from '../live/useVoiceCall';
+import {
+  AUDIO_RATES_VERIFIED_ON,
+  estimateCost,
+  formatDuration,
+  formatTokens,
+  projectHour,
+  RATES_VERIFIED_ON,
+  speakingTime,
+  totalTokens,
+  type MarkingCost,
+  type UsageTotals,
+} from '../realtime/cost';
+import type { AdvancedReport } from '../realtime/oralRubric';
 import { findL1 } from '../realtime/l1';
 import { findLanguage } from '../realtime/languages';
 import { findModel } from '../realtime/models';
@@ -92,6 +105,8 @@ export interface DiagnosticInput {
    * gone quiet, and they used to be the same single fact. See useVoiceCall.
    */
   answered: number[];
+  /** Provider-reported token counts for the last call. See VoiceCall.usage. */
+  usage: UsageTotals;
 
   // --- What the page made of all of it.
   /** The cap the page is running, in minutes. Null when no setup is open. */
@@ -99,6 +114,10 @@ export interface DiagnosticInput {
   /** Whether the page believes the list is finished. See Eleve.tsx. */
   lessonDone: boolean;
   report: SessionReport | null;
+  /** The advanced marker's result, when the teacher published one. */
+  advanced: AdvancedReport | null;
+  /** What the marking call cost, or null if none has been made. */
+  markingCost: MarkingCost | null;
   reportError: string | null;
   reporting: boolean;
 }
@@ -315,9 +334,216 @@ function timeline(turns: Turn[], events: CallEvent[]): string {
 function reportLine(input: DiagnosticInput): string {
   if (input.reporting) return 'being written now';
   if (input.reportError) return `failed — ${input.reportError}`;
+  /*
+   * Both markers, because this line used to know about one. A lesson published
+   * against the exam rubric fills `advanced` and leaves `report` null, and this
+   * read "none asked for yet" underneath a panel that was showing the student a
+   * mark — exactly the kind of quiet disagreement between a page and its own
+   * diagnostic that this file exists to prevent.
+   */
+  if (input.advanced) {
+    const { final } = input.advanced;
+    if (final.insufficient_evidence) return 'delivered — not placed, too little to mark';
+    return (
+      `delivered — advanced:${input.advanced.face}, ` +
+      `${final.half_mark ?? final.final_ib_mark}/7 (IB grade ${final.final_ib_mark}), ` +
+      `${final.cefr_verdict}, confidence ${final.confidence}`
+    );
+  }
   if (!input.report) return 'none asked for yet';
   const { band, confidence } = input.report.diagnosis;
   return `delivered — band ${band}, confidence ${confidence}`;
+}
+
+/**
+ * One row of the cost table: a label, a middle, and money in the last column.
+ *
+ * THREE FIXED WIDTHS RATHER THAN THREE CALLERS EACH PICKING THEIR OWN. Every
+ * line in the block has to put its dollars in the same column — a per-bucket
+ * row, a subtotal with no rate, an hourly projection with no tokens, and the
+ * lesson total — and those have nothing else in common. Padding them
+ * individually is how a table drifts a character per row until the sum no
+ * longer looks like a sum.
+ */
+const LABEL_WIDTH = 22;
+const MIDDLE_WIDTH = 27;
+
+function row(label: string, middle: string, usd: number | null): string {
+  return (
+    `  ${label.padEnd(LABEL_WIDTH)}${middle.padEnd(MIDDLE_WIDTH)}` +
+    (usd === null ? '' : usdCell(usd))
+  );
+}
+
+/**
+ * Money in the last column — and NOT `formatUsd`, deliberately.
+ *
+ * `formatUsd` gives two decimals at a cent and above, which is right for the
+ * bench, where the reader wants to know roughly what a call cost. It is fatal
+ * here. The two markers this block exists to compare differ by fractions of a
+ * cent — $0.0161 against $0.0119 — and two decimals renders those as "$0.02"
+ * and "$0.01", which is a 2× difference where the truth is 1.35×. A comparison
+ * table whose rounding invents the answer is worse than no table.
+ *
+ * So: four decimals below a dollar, where the difference lives, and two above,
+ * where four would be noise on an hourly projection nobody will bill against.
+ */
+function usdCell(usd: number): string {
+  return `$${usd < 1 ? usd.toFixed(4) : usd.toFixed(2)}`.padStart(10);
+}
+
+/** The middle column of a priced bucket: tokens and the rate they cost. */
+function priced(tokens: number, rate: number): string {
+  return `${formatTokens(tokens).padStart(9)} tok  @ $${String(rate).padStart(5)}/M  `;
+}
+
+/**
+ * What the conversation and the marking of it cost.
+ *
+ * WHY IT IS IN HERE AT ALL, on a page whose standing rule is that a student
+ * never sees a price. The diagnostic is not the student's — it is taken by the
+ * person who published the lesson, by a gesture nobody finds by accident, and
+ * this is the only place the two halves of a lesson's bill ever meet. The live
+ * call is priced in the browser from `usageMetadata` frames; the marking call
+ * is priced in the Worker from Vertex's. Neither number is visible from where
+ * the other one lives.
+ *
+ * THE QUESTION IT IS BUILT TO ANSWER is which marker to publish. Choosing
+ * between the standard report and the exam rubric is choosing between two
+ * models, two prompt sizes and two retry behaviours, and the only answer
+ * available before this was "a cent or so, probably". One diagnostic from a
+ * lesson marked each way settles it — which is why the marking block names the
+ * model, the call count and the token split rather than just the money.
+ *
+ * ONLY THE MARKER THAT RAN IS PRICED. The other is not run, cannot be costed
+ * from this transcript without running it, and a modelled figure sitting beside
+ * a measured one would be read as the same kind of thing. The closing note says
+ * so rather than leaving the absence to be interpreted.
+ *
+ * EVERY FIGURE IS A FLOOR, and the caveats are printed here rather than left in
+ * cost.ts where nobody reading a diagnostic would find them.
+ */
+function costBlock(input: DiagnosticInput): string {
+  const model = findModel(input.modelKey);
+  const usage = input.usage;
+  const spent = totalTokens(usage);
+  const lines: string[] = [];
+
+  lines.push(
+    'Estimates from provider-reported token counts, priced off published rate',
+    'cards rather than a bill. Both halves are floors: the relay Worker leg is',
+    'not billed here, and a socket that dies takes any usage it had not yet',
+    'reported with it.',
+    '',
+  );
+
+  // --- The call ----------------------------------------------------------
+  lines.push(field('The call', model ? `${model.id} — ${model.label}` : input.modelKey));
+
+  const estimate = model ? estimateCost(model.id, usage) : null;
+
+  if (!spent) {
+    lines.push(
+      '  nothing reported yet — Google sends usage during a call, so this stays',
+      '  empty until one has run.',
+    );
+  } else if (!estimate?.priced) {
+    lines.push(`  ${formatTokens(spent)} tokens, on a model this build has no rates for.`);
+  } else {
+    for (const line of estimate.lines) {
+      lines.push(row(line.label, priced(line.tokens, line.rate), line.usd));
+    }
+    lines.push(`  ${' '.repeat(LABEL_WIDTH)}${'-'.repeat(9)}`);
+    lines.push(row('This call', `${formatTokens(spent).padStart(9)} tok`, estimate.usd));
+
+    /*
+     * The wall clock and the token clock side by side. They answer different
+     * questions — how long the connection was open, and how much speech was
+     * actually billed — and a call where they disagree spent money on silence.
+     * See speakingTime for why the learner's own figure is usually withheld.
+     */
+    const seconds = input.lastCallMs !== null ? input.lastCallMs / 1000 : null;
+    if (seconds !== null) {
+      const time = speakingTime(model!.id, usage, seconds);
+      lines.push(
+        row(
+          'Speech',
+          `${formatDuration(time.callSeconds)} of call, tutor ` +
+            `${time.agentSeconds === null ? '—' : formatDuration(time.agentSeconds)}`,
+          null,
+        ),
+      );
+      lines.push(
+        row(
+          '',
+          time.userSeconds === null
+            ? 'learner withheld — every turn re-reads'
+            : `learner ${formatDuration(time.userSeconds)}`,
+          null,
+        ).trimEnd(),
+      );
+      if (time.userSeconds === null) {
+        lines.push(`  ${' '.repeat(LABEL_WIDTH)}the call, so the tokens over-count.`);
+      }
+
+      const hourly = projectHour(model!.id, usage, seconds);
+      if (hourly) {
+        lines.push(row('An hour of this', '', hourly.usd));
+        lines.push(
+          `  ${' '.repeat(LABEL_WIDTH)}up to ${usdCell(hourly.ceilingUsd).trim()}` +
+            ' if the context is never trimmed.',
+        );
+      }
+    }
+    lines.push(
+      `  Rates read ${RATES_VERIFIED_ON}; audio seconds-per-token ${AUDIO_RATES_VERIFIED_ON}.`,
+    );
+  }
+
+  // --- The marking -------------------------------------------------------
+  lines.push('');
+  const cost = input.markingCost;
+  if (!cost) {
+    lines.push(field('The marking', 'not run — no evaluation has been asked for'));
+  } else {
+    lines.push(field('The marking', `${cost.kind} — ${cost.modelId} — ${cost.modelLabel}`));
+    if (cost.unverifiedRates) {
+      lines.push(`  ${' '.repeat(LABEL_WIDTH)}rates read off a pricing page, not a bill.`);
+    }
+    lines.push(
+      row(
+        `${cost.calls} call${cost.calls === 1 ? '' : 's'}`,
+        `${formatTokens(cost.inputTokens)} in / ${formatTokens(cost.outputTokens)} out` +
+          (cost.cachedInputTokens ? ` / ${formatTokens(cost.cachedInputTokens)} cached` : ''),
+        cost.usd,
+      ),
+    );
+    /*
+     * A retry is a doubling, and it is the one thing about this number a
+     * teacher comparing two markers would otherwise read as the prompt being
+     * twice the size. Only the advanced path has one — see _advanced.ts, §14.
+     */
+    if (cost.calls > 1) {
+      lines.push(
+        '  The marker retried: a reply failed grounding against the transcript,',
+        `  so this ran ${cost.calls === 2 ? 'twice' : `${cost.calls} times`}. A run that` +
+          ` validates first time costs about ${usdCell(cost.usd / cost.calls).trim()}.`,
+      );
+    }
+  }
+
+  // --- The two together --------------------------------------------------
+  lines.push('');
+  lines.push(row('THIS LESSON', '', (estimate?.usd ?? 0) + (cost?.usd ?? 0)));
+  lines.push(
+    '',
+    'Only the marker that ran is priced. The other is never run, so comparing',
+    'the two means one diagnostic from a lesson published each way. What differs',
+    'between them is the model, the prompt size and whether a retry is possible',
+    '— never the transcript, and never the call above.',
+  );
+
+  return lines.join('\n');
 }
 
 export function buildDiagnostic(input: DiagnosticInput): string {
@@ -508,6 +734,9 @@ export function buildDiagnostic(input: DiagnosticInput): string {
       composed,
     );
   }
+
+  put(head('WHAT IT COST'));
+  put(costBlock(input));
 
   put('', RULE, 'END', RULE);
   return lines.join('\n');

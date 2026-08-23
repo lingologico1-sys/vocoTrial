@@ -6,6 +6,7 @@ import { publishedKit } from '../facekit/store';
 import { L1_CHOICES, resolveL1 } from '../realtime/l1';
 import type { SessionReport } from '../realtime/report';
 import type { AdvancedReport } from '../realtime/oralRubric';
+import type { MarkingCost } from '../realtime/cost';
 import AdvancedPanel from './AdvancedPanel';
 import { LESSON_CODE_LENGTH, normaliseLessonCode } from '../realtime/lessonCodes';
 import { hasLesson, type PublishedSetup } from '../realtime/session';
@@ -252,6 +253,17 @@ export default function Eleve() {
    * which clears the other whichever comes back.
    */
   const [advanced, setAdvanced] = useState<AdvancedReport | null>(null);
+  /**
+   * What the marking call cost, as the route measured it.
+   *
+   * KEPT ONLY FOR THE DIAGNOSTIC, and deliberately never rendered on the page —
+   * EvaluationPanel's header states the rule and it holds here: a student is
+   * never shown what reading their conversation cost. This is the same figure
+   * tutorBench prints, and it is here because the two markers run different
+   * models against different prompts and nobody could compare them without
+   * taking a diagnostic from each.
+   */
+  const [markingCost, setMarkingCost] = useState<MarkingCost | null>(null);
   const [reporting, setReporting] = useState(false);
   const [reportError, setReportError] = useState<string | null>(null);
 
@@ -507,6 +519,7 @@ export default function Eleve() {
   const start = async () => {
     setReport(null);
     setAdvanced(null);
+    setMarkingCost(null);
     setReportError(null);
     await call.connect();
     call.say(openingSignal(), 'opening — greet the learner');
@@ -535,7 +548,12 @@ export default function Eleve() {
         lesson republished onto the other kind of marking needs no change here.
       */
       const answer = (await response.json().catch(() => null)) as
-        | { report?: SessionReport; advanced?: AdvancedReport; error?: string }
+        | {
+            report?: SessionReport;
+            advanced?: AdvancedReport;
+            cost?: MarkingCost;
+            error?: string;
+          }
         | null;
       if (!response.ok || !(answer?.report || answer?.advanced)) {
         throw new Error(answer?.error || FR.evalFailed);
@@ -547,6 +565,7 @@ export default function Eleve() {
         setReport(answer.report ?? null);
         setAdvanced(null);
       }
+      setMarkingCost(answer.cost ?? null);
     } catch (problem) {
       setReportError(problem instanceof Error ? problem.message : FR.evalFailed);
     } finally {
@@ -1124,9 +1143,12 @@ export default function Eleve() {
             connectedAt: call.connectedAt,
             lastCallMs: call.lastCallMs,
             answered: call.answered,
+            usage: call.usage,
             capMinutes: session ? capMinutesOf(session) : null,
             lessonDone,
             report,
+            advanced,
+            markingCost,
             reportError,
             reporting,
           }}

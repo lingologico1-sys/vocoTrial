@@ -372,3 +372,40 @@ wrong one shown to a student is not.
 
 A transcript under forty student words never reaches the model at all — Stage 1
 refuses it from counts alone, for free.
+
+### Measuring it rather than estimating it
+
+The paragraphs above are arithmetic off a rate card. The actual figures are in
+the student page's diagnostic, under **WHAT IT COST** — take one with the
+gesture nobody finds by accident and read the bottom of it.
+
+It prices both halves of a lesson from provider-reported token counts: the live
+call, from the `usageMetadata` frames the browser already collects and
+`cost.ts` already knows how to price; and the marking call, from the
+`MarkingCost` the route now returns beside the report. Neither number was
+visible from where the other lived, which is why "what does the advanced marker
+cost me" had no answer before.
+
+**Only the marker that ran is priced.** The other is not run and cannot be
+costed from the same transcript without running it, so comparing them means one
+diagnostic from a lesson published each way. What differs between the two is the
+model, the prompt size and whether a retry is possible — never the transcript,
+and never the live call, which is identical either way.
+
+Three things about reading it:
+
+- **`calls` is the field to look at first.** The advanced marker retries once on
+  a grounding failure, so a run that validated first time and one that did not
+  differ by roughly double, and no other field in the readout would show it.
+  The block says so in as many words when it happens.
+- **Money is shown to four decimals below a dollar**, not the two `formatUsd`
+  gives the bench. The two markers differ by fractions of a cent, and two
+  decimals would render $0.0161 and $0.0119 as "$0.02" and "$0.01" — a 2×
+  difference where the truth is 1.35×.
+- **Every figure is a floor.** The relay Worker leg is unbilled, and a socket
+  that dies loses whatever usage it had not yet reported.
+
+The live call dominates both markers by more than an order of magnitude, which
+is the finding a teacher should take from it: the choice between the standard
+report and the exam rubric is a pedagogy decision with a rounding error
+attached, not a budget one.

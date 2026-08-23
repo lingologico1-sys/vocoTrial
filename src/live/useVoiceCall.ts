@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { startGeminiSession } from '../realtime/gemini';
+import { emptyUsage, type UsageTotals } from '../realtime/cost';
 import type { SessionSettings } from '../realtime/settings';
 import {
   KEEP_GOING_SIGNAL,
@@ -319,6 +320,20 @@ export interface VoiceCall {
   tiltCue: TiltCue | null;
   live: boolean;
   busy: boolean;
+  /**
+   * What Google says this call has consumed, in billing buckets.
+   *
+   * PROVIDER-REPORTED, NOT DERIVED. `usageMetadata` frames arrive during the
+   * call and gemini.ts folds them into these buckets — including the decision
+   * about whether the frames are cumulative or per-turn, which Google's docs do
+   * not settle. The page prices them through cost.ts.
+   *
+   * Zeroed when a new call is dialled, like the transcript, because the buckets
+   * describe one conversation. What it holds after a call is what that call
+   * used, and it is a floor: a socket that dies loses whatever it had not
+   * reported yet.
+   */
+  usage: UsageTotals;
   /** When the current call reached `live`, or null between calls. */
   connectedAt: number | null;
   /** How long the call that just ended ran, in ms. Null before the first one. */
@@ -446,6 +461,7 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
    * its animation loop when one appears, and a ref would not tell it.
    */
   const [tap, setTap] = useState<AudioTap | null>(null);
+  const [usage, setUsage] = useState<UsageTotals>(emptyUsage);
   const [connectedAt, setConnectedAt] = useState<number | null>(null);
   const [lastCallMs, setLastCallMs] = useState<number | null>(null);
   const [answered, setAnswered] = useState<number[]>([]);
@@ -1000,8 +1016,10 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
     setOpeningDone(false);
     tutorHasSpoken.current = false;
     said.current = { heard: '', shown: 0, stray: false };
+    setUsage(emptyUsage());
 
     const handlers = {
+      onUsage: setUsage,
       onStatus: (next: SessionStatus, message?: string) => {
         record('status', message ? `${next} — ${oneLine(message)}` : next);
         setStatus(next);
@@ -1221,6 +1239,7 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
     tiltCue,
     live: status === 'live',
     busy: status === 'connecting',
+    usage,
     connectedAt,
     lastCallMs,
     answered,

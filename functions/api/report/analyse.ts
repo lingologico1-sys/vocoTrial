@@ -16,6 +16,7 @@ import {
   reportInstruction,
   type ReportTurn,
 } from '../../../src/realtime/report';
+import type { MarkingCost } from '../../../src/realtime/cost';
 import { type GateEnv, json } from '../_middleware';
 import { VERTEX_KEY_NAMES, vertexGenerateContentUrl, vertexKey } from '../_vertex';
 import { type LibraryEnv, readLibrary } from '../evaluators/_library';
@@ -102,6 +103,26 @@ function costUsd(usage: Usage | undefined) {
     (input * REPORT_MODEL.usdPerMillionInput) / 1_000_000 +
     (output * REPORT_MODEL.usdPerMillionOutput) / 1_000_000
   );
+}
+
+/**
+ * The same reading in the shape the advanced marker reports, so the two can be
+ * put side by side. `calls` is always 1 here: this path has no retry — an
+ * unparseable body is a 502 rather than a second attempt, because there is no
+ * validator to disagree with.
+ */
+function markingCost(usage: Usage | undefined): MarkingCost {
+  return {
+    kind: 'standard',
+    modelId: REPORT_MODEL.id,
+    modelLabel: REPORT_MODEL.label,
+    calls: 1,
+    inputTokens: usage?.promptTokenCount ?? 0,
+    outputTokens: (usage?.candidatesTokenCount ?? 0) + (usage?.thoughtsTokenCount ?? 0),
+    cachedInputTokens: usage?.cachedContentTokenCount ?? 0,
+    usd: costUsd(usage),
+    unverifiedRates: REPORT_MODEL.unverified === true,
+  };
 }
 
 /** Narrows the wire format to what renderTranscript can read. */
@@ -217,7 +238,12 @@ export async function onRequestPost(
         result.status,
       );
     }
-    return json({ advanced: result.report, usd: result.usd, cached: result.cached });
+    return json({
+      advanced: result.report,
+      usd: result.usd,
+      cached: result.cached,
+      cost: result.cost,
+    });
   }
 
   let evaluator: Evaluator | undefined;
@@ -359,5 +385,6 @@ export async function onRequestPost(
     report,
     usd: costUsd(answer.usageMetadata),
     cached: answer.usageMetadata?.cachedContentTokenCount ?? 0,
+    cost: markingCost(answer.usageMetadata),
   });
 }

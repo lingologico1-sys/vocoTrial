@@ -11,6 +11,7 @@ import {
 } from '../../../src/realtime/oralRubric';
 import { ANCHOR_FOR_PROMPT } from '../../../src/realtime/oralAnchors';
 import { MAX_TRANSCRIPT, type ReportTurn } from '../../../src/realtime/report';
+import type { MarkingCost } from '../../../src/realtime/cost';
 import { vertexGenerateContentUrl } from '../_vertex';
 
 /**
@@ -53,6 +54,38 @@ function costUsd(usage: Usage | undefined): number {
     (input * ORAL_MODEL.usdPerMillionInput) / 1_000_000 +
     (output * ORAL_MODEL.usdPerMillionOutput) / 1_000_000
   );
+}
+
+/**
+ * The running tally, in the shape the two markers are compared in.
+ *
+ * ACCUMULATED RATHER THAN READ OFF THE LAST ATTEMPT, because the retry is the
+ * whole reason the advanced path can cost double what a glance at the prompt
+ * suggests: a run that failed validation once has paid for two full calls
+ * against a prompt carrying a 1.5k-token worked example. `calls` is what makes
+ * that visible instead of leaving it as an unexplained doubling.
+ */
+function emptyMarkingCost(): MarkingCost {
+  return {
+    kind: 'advanced',
+    modelId: ORAL_MODEL.id,
+    modelLabel: ORAL_MODEL.label,
+    calls: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    cachedInputTokens: 0,
+    usd: 0,
+    unverifiedRates: ORAL_MODEL.unverified === true,
+  };
+}
+
+function addUsage(cost: MarkingCost, usage: Usage | undefined): void {
+  cost.calls += 1;
+  cost.inputTokens += usage?.promptTokenCount ?? 0;
+  cost.outputTokens +=
+    (usage?.candidatesTokenCount ?? 0) + (usage?.thoughtsTokenCount ?? 0);
+  cost.cachedInputTokens += usage?.cachedContentTokenCount ?? 0;
+  cost.usd += costUsd(usage);
 }
 
 const REASON_LIMIT = 300;
@@ -176,7 +209,7 @@ export interface AdvancedRequest {
 }
 
 export type AdvancedResult =
-  | { ok: true; report: AdvancedReport; usd: number; cached: number }
+  | { ok: true; report: AdvancedReport; usd: number; cached: number; cost: MarkingCost }
   | { ok: false; error: string; code: string; status: number; reason?: string };
 
 /**
@@ -245,13 +278,13 @@ export async function markAdvanced({
       },
       usd: 0,
       cached: 0,
+      cost: emptyMarkingCost(),
     };
   }
 
   const instruction = oralInstruction({ l1, stats, anchor: ANCHOR_FOR_PROMPT });
 
-  let usd = 0;
-  let cached = 0;
+  const cost = emptyMarkingCost();
   let lastErrors: string[] = [];
 
   // Two attempts, per §14. The second is a fresh sample of the same prompt: at
@@ -275,8 +308,7 @@ export async function markAdvanced({
       throw error;
     }
 
-    usd += costUsd(usage);
-    cached += usage?.cachedContentTokenCount ?? 0;
+    addUsage(cost, usage);
 
     if (llm.insufficient_evidence) {
       return {
@@ -289,8 +321,9 @@ export async function markAdvanced({
           feedback: llm.feedback,
           flags: llm.flags,
         },
-        usd,
-        cached,
+        usd: cost.usd,
+        cached: cost.cachedInputTokens,
+        cost,
       };
     }
 
@@ -306,8 +339,9 @@ export async function markAdvanced({
           feedback: llm.feedback,
           flags: llm.flags,
         },
-        usd,
-        cached,
+        usd: cost.usd,
+        cached: cost.cachedInputTokens,
+        cost,
       };
     }
 

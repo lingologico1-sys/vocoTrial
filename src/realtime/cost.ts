@@ -247,6 +247,43 @@ export function totalTokens(usage: UsageTotals): number {
   );
 }
 
+/**
+ * What one end-of-lesson marking call cost, as the route measured it.
+ *
+ * WHY IT IS A TYPE AND NOT TWO NUMBERS ON A RESPONSE. There are two markers —
+ * the standard report and the advanced exam rubric — they run different models
+ * against different prompts, and the only honest way to answer "which one costs
+ * more" is to have both report the same fields. The routes were already
+ * computing a `usd`; what was missing was everything that makes a `usd`
+ * interpretable. A cent is a cent, but a cent from 12k input tokens on one call
+ * and a cent from 5k on two are different facts about which lever to pull.
+ *
+ * `calls` is the field that earns its place: the advanced marker retries once
+ * when a quotation fails to ground (spec §14), so a run that validated first
+ * time and a run that did not differ by roughly double, and nothing else in the
+ * readout would show it.
+ *
+ * Both markers price against a published rate card rather than a bill — see
+ * `unverifiedRates` — so these are estimates on the same footing as the live
+ * call's.
+ */
+export interface MarkingCost {
+  /** Which of the two markers ran. */
+  kind: 'standard' | 'advanced';
+  /** The provider's own model id, so it can be checked against a rate card. */
+  modelId: string;
+  modelLabel: string;
+  /** Model calls made. More than one means the marker retried. */
+  calls: number;
+  inputTokens: number;
+  /** Reply plus reasoning tokens, which bill at the same rate. */
+  outputTokens: number;
+  cachedInputTokens: number;
+  usd: number;
+  /** True when the rates came off a pricing page rather than a bill. */
+  unverifiedRates: boolean;
+}
+
 export interface CostLine {
   label: string;
   /** The provider's own name for this bucket, for the row's tooltip. */
