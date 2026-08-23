@@ -77,18 +77,24 @@ const CLOSING_GRACE_MS = 45_000;
  * momentarily run dry looks exactly like a tutor that has finished. The
  * transcript carries something better — the model marks the end of its own turn
  * — so once the tutor's turn is closed and it came after the learner's last
- * answer, there is nothing more coming and the only question left is whether
- * the learner wants to say goodbye back.
+ * answer, there is nothing more coming.
  *
- * TWO SECONDS IS FOR THEM, THEN. It is not a guess about the tutor; it is the
- * beat a person needs to start saying "au revoir" into. The clock counts the
- * room rather than the tutor, so a learner who takes it is not cut off — their
- * voice resets it, and the page waits again after they stop.
+ * IT WAS TWO SECONDS AND THEY WERE FOR THE LEARNER, a beat to say "au revoir"
+ * back into. That beat cost more than it bought. The clock counts the room, so
+ * anything the learner said reset it — and what they said also reached a tutor
+ * with no questions left, which answered, which started the wait again. A
+ * lesson that was over went on for another minute because somebody was polite,
+ * or cleared their throat. The microphone is now closed when the close begins
+ * (see the effect below), so there is nobody left to wait for.
  *
- * WHAT IT REPLACES was six seconds of silence on every finished lesson, which
- * is a long time to sit looking at a face that has already waved.
+ * WHAT IS LEFT IS THE SPEAKERS. `done` flips when the reveal queue reaches the
+ * end of the audio on the graph's clock, which is a little before that sound
+ * has physically left the device — `outputLatency`, tens of milliseconds on
+ * built-in speakers and a few hundred over Bluetooth. This is that, with room:
+ * long enough that no goodbye is ever clipped, short enough to read as the call
+ * ending when the tutor stops talking.
  */
-const CLOSING_DONE_MS = 2_000;
+const CLOSING_DONE_MS = 600;
 
 /**
  * How long the tutor has to be quiet, once a close has begun, before the page
@@ -662,8 +668,31 @@ export default function Eleve() {
    * nudged. See NUDGE_AFTER_MS.
    */
   const silentSince = useRef<number | null>(null);
+  /** Whether the microphone has already been shut for the close. */
+  const micClosed = useRef(false);
   const nudges = useRef(0);
   const capMs = session ? capMinutesOf(session) * 60_000 : 0;
+
+  /**
+   * Whether the lesson has begun ending. State, not a ref, because three things
+   * on screen now change the moment it goes true.
+   *
+   * IT IS EARLIER THAN THE GOODBYE AND THAT IS THE POINT. The close begins when
+   * the count completes, which is the tutor's own report for the last question
+   * — and the prompt has it make that call at the *top* of the turn it replies
+   * in. Measured on 2026-08-23 the report landed 1.4s before a word of the
+   * goodbye was audible. So this is true while the tutor is drawing breath to
+   * say farewell, not after it has said it.
+   *
+   * WHAT IT DOES. The microphone closes, because a learner talking to a tutor
+   * with no questions left restarts a conversation that was over. The wait
+   * after the goodbye drops to the length of the speaker's own latency, because
+   * with the microphone shut there is nobody left to wait for. And the
+   * evaluation button appears, because from here the lesson is done and making
+   * someone sit through the farewell before they can ask for their mark is a
+   * wait with nothing at the end of it.
+   */
+  const [closing, setClosing] = useState(false);
 
   useEffect(() => {
     if (!call.live) {
@@ -671,7 +700,11 @@ export default function Eleve() {
       doneSince.current = null;
       spokeInClose.current = false;
       silentSince.current = null;
+      micClosed.current = false;
       nudges.current = 0;
+      // Nothing to unmute here: `connect` clears it, so the next call opens
+      // with a live microphone whatever this one ended as.
+      setClosing(false);
       return;
     }
     if (elapsedMs === null) return;
@@ -682,11 +715,41 @@ export default function Eleve() {
     if (call.speaking || call.heard) silentSince.current = null;
     else if (silentSince.current === null) silentSince.current = Date.now();
 
-    if (lessonDone && doneSince.current === null) doneSince.current = Date.now();
+    if (lessonDone && doneSince.current === null) {
+      doneSince.current = Date.now();
+      setClosing(true);
+    }
+
+    /*
+     * The microphone closes on the first tick the learner is not using it.
+     *
+     * NOT THE INSTANT THE CLOSE BEGINS, because that moment is the tutor's own
+     * report for the last question and the page has no way to check it. The
+     * count is the authority everywhere else in this file, but everywhere else
+     * the cost of it being wrong is a wait; here it would be cutting somebody
+     * off in the middle of their own sentence, which is the rudest thing this
+     * page could do and would read as a bug rather than as an ending.
+     *
+     * So it waits for quiet, which this effect is already watching for and
+     * re-checks every second. In the ordinary case there is no wait at all: the
+     * report lands at the top of the tutor's reply, which is after the learner
+     * has stopped. In the case worth guarding against — a report that arrives
+     * early — they get to finish, and the microphone shuts behind them.
+     */
+    if (closing && !micClosed.current && !call.heard) {
+      micClosed.current = true;
+      call.mute(true);
+    }
 
     if (!lessonDone && closedAt.current === null) {
       if (capMs && elapsedMs >= capMs) {
         closedAt.current = Date.now();
+        // The cap closes a lesson with questions still on the list, and the
+        // microphone shuts for the same reason it does on a finished one: what
+        // the learner says now cannot be answered, only replied to. Muting is
+        // left to the quiet check above, on the next tick — the cap can land
+        // in the middle of an answer far more easily than a count can.
+        setClosing(true);
         call.say(TIME_UP_SIGNAL, 'closing — out of time, questions unanswered');
         return;
       }
@@ -788,7 +851,22 @@ export default function Eleve() {
         `closed — ${CLOSING_GRACE_MS / 1000}s into the close and the tutor was still talking`,
       );
     }
-  }, [call, call.live, call.speaking, call.heard, closingTurnDone, elapsedMs, capMs, lessonDone, total]);
+    // `closing` is listed so the microphone shuts on the tick the close begins
+    // rather than on the next one — the poll would get there within a second
+    // either way, and a second of open microphone is a second of the thing this
+    // is here to prevent.
+  }, [
+    call,
+    call.live,
+    call.speaking,
+    call.heard,
+    closing,
+    closingTurnDone,
+    elapsedMs,
+    capMs,
+    lessonDone,
+    total,
+  ]);
 
   /**
    * Whether the conversation that just ended is worth reading.
@@ -1097,16 +1175,37 @@ export default function Eleve() {
                     {consigne && session && (
                       <ConsignePanel session={session} answered={call.answered} />
                     )}
+                    {/*
+                      THE GATE IS TOLD THE CALL IS OVER BEFORE IT IS, once the
+                      close has begun. Both of the props that lie are the same
+                      lie: `live` hides the gate behind "your lesson is running"
+                      and `lastCallMs` is only written on hang-up, so a page
+                      waiting for either makes the learner sit through the
+                      goodbye before it will offer them their mark. From the
+                      moment the count completes there is nothing left to say
+                      that could change the reading, so the gate is shown the
+                      call as it will be rather than as it is, and the running
+                      clock stands in for the finished one.
+                    */}
                     <EvaluationGate
-                      live={call.live}
+                      live={call.live && !closing}
                       elapsedMs={elapsedMs}
-                      lastCallMs={call.lastCallMs}
+                      lastCallMs={closing ? elapsedMs : call.lastCallMs}
                       minimumMs={evalFloorMs}
                       complete={lessonDone}
                       busy={reporting}
                       error={reportError}
                       under={consigne}
-                      onEvaluate={() => void evaluate()}
+                      onEvaluate={() => {
+                        // Pressing it during the goodbye means they have heard
+                        // enough. The call would hang up on its own a beat after
+                        // the tutor stops, but leaving it open while the report
+                        // renders bills for a farewell nobody is listening to.
+                        if (call.live) {
+                          call.hangUp(undefined, 'closed — the learner asked to be marked during the close');
+                        }
+                        void evaluate();
+                      }}
                     />
                   </>
                 )}

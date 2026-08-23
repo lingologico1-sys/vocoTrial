@@ -402,6 +402,17 @@ export interface VoiceCall {
   hangUp: (notice?: string, why?: string) => void;
   toggleMute: () => void;
   /**
+   * Mute or unmute, as a setting rather than a flip.
+   *
+   * `toggleMute` is for a button, where the only honest thing to do is invert
+   * what the person is looking at. This is for the page acting on its own —
+   * closing a finished lesson, above all — where the intent is "the microphone
+   * is off now" and a flip would turn it back on if anything had muted it
+   * first. Cleared on `connect`, so a call muted by its own ending does not
+   * hand a dead microphone to the next one.
+   */
+  mute: (muted: boolean) => void;
+  /**
    * Say something to the tutor as the learner, invisibly.
    *
    * The page owns the clock — see `say` in types.ts — so this is how it tells
@@ -1255,11 +1266,14 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
   // Read-then-set rather than a functional updater: the session call is a side
   // effect, and StrictMode double-invokes updaters in development, so putting
   // it inside one would mute the microphone twice per press.
-  const toggleMute = useCallback(() => {
-    const next = !muted;
+  const mute = useCallback((next: boolean) => {
     setMuted(next);
     session.current?.setMuted(next);
-  }, [muted]);
+  }, []);
+
+  const toggleMute = useCallback(() => {
+    mute(!muted);
+  }, [mute, muted]);
 
   return {
     status,
@@ -1282,6 +1296,7 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
     connect,
     hangUp,
     toggleMute,
+    mute,
     say,
     fail,
   };
