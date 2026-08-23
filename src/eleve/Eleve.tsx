@@ -3,6 +3,7 @@ import BrandBar from '../lingo/BrandBar';
 import type { FaceKit } from '../facekit/kit';
 import { loadBundledKit } from '../facekit/bundled';
 import { publishedKit } from '../facekit/store';
+import { useWarmKit } from '../facekit/warm';
 import { L1_CHOICES, resolveL1 } from '../realtime/l1';
 import type { SessionReport } from '../realtime/report';
 import type { AdvancedReport } from '../realtime/oralRubric';
@@ -234,6 +235,12 @@ export default function Eleve() {
   const [codeError, setCodeError] = useState('');
   const [checking, setChecking] = useState(false);
   const [kit, setKit] = useState<FaceKit | null>(null);
+  /**
+   * Decoded while the learner is still reading the consigne, rather than during
+   * the tutor's first sentence — which is where it landed before, and what it
+   * cost is written up in warm.ts.
+   */
+  useWarmKit(kit);
 
   const [l1, setL1] = useState(loadL1);
   const [tab, setTab] = useState<Tab>('evaluation');

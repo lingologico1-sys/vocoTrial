@@ -420,8 +420,30 @@ export class PcmPlayer {
   private awaitingTurn = true;
   /** How many times the queue has been starved mid-speech this call. */
   private underruns = 0;
-  /** The smallest lead seen at an enqueue, in seconds. Diagnostics only. */
-  private lowWater = Infinity;
+  /**
+   * The smallest lead seen all call, in seconds. Console only, and monotonic.
+   *
+   * Goes to zero and stays there once the queue has actually run dry, which is
+   * correct for a worst-of-the-call mark and is also why it cannot be the thing
+   * that decides whether to warn — see `episodeLow`.
+   */
+  private worstLead = Infinity;
+  /**
+   * The smallest lead since the queue was last at a full cushion, in seconds.
+   *
+   * THE WARNING NEEDS A MARK THAT CAN RISE AGAIN and the one above cannot. The
+   * first version warned off the call's worst lead, which reads sensibly and is
+   * silent for the rest of the call the moment anything goes wrong: an underrun
+   * puts the worst mark on the floor, and nothing afterwards can ever be lower
+   * than the floor. The first diagnostic taken with it had nine `starved` lines
+   * and not one `thin`, because the warning that was supposed to arrive *before*
+   * the trouble had been switched off by the trouble.
+   *
+   * So this resets whenever the queue gets back to a full cushion, and a
+   * thinning that follows is a new episode with its own line. A queue hovering
+   * below the prime does not spam, because it only resets on recovery.
+   */
+  private episodeLow = Infinity;
 
   /**
    * Sized for the mouth, which needs frequency resolution more than time
@@ -536,15 +558,27 @@ export class PcmPlayer {
 
     const lead = this.playhead - context.currentTime;
     if (lead >= 0) {
-      const dropped = lead < this.lowWater - LOW_WATER_STEP_SECONDS;
-      this.lowWater = Math.min(this.lowWater, lead);
-      if (!dropped) return;
-
       const ms = Math.round(lead * 1000);
-      console.info(`PcmPlayer: lead low-water ${ms}ms`);
+
+      // The whole descent, for a developer with devtools open.
+      if (lead < this.worstLead - LOW_WATER_STEP_SECONDS) {
+        console.info(`PcmPlayer: lead low-water ${ms}ms`);
+      }
+      this.worstLead = Math.min(this.worstLead, lead);
+
+      // Back to a full cushion: whatever was happening is over, and the next
+      // dip is a new episode that has earned a line of its own.
+      if (lead >= PRIME_SECONDS) {
+        this.episodeLow = Infinity;
+        return;
+      }
+
       // Only the part that is a fault reaches the call's account — see
-      // THIN_LEAD_SECONDS. The console above gets the whole descent.
-      if (lead < THIN_LEAD_SECONDS) this.report?.({ kind: 'thin', ms });
+      // THIN_LEAD_SECONDS.
+      if (lead < THIN_LEAD_SECONDS && lead < this.episodeLow - LOW_WATER_STEP_SECONDS) {
+        this.report?.({ kind: 'thin', ms });
+      }
+      this.episodeLow = Math.min(this.episodeLow, lead);
       return;
     }
 
@@ -552,7 +586,10 @@ export class PcmPlayer {
     if (boundary || gap > UNDERRUN_GAP_SECONDS) return;
 
     this.underruns++;
-    this.lowWater = 0;
+    this.worstLead = 0;
+    // The episode is over the moment it costs a hole: the queue re-primes from
+    // here, and the descent that follows is worth warning about again.
+    this.episodeLow = Infinity;
     const ms = Math.round(gap * 1000);
     console.warn(
       `PcmPlayer: underrun #${this.underruns} — queue dry for ${ms}ms ` +

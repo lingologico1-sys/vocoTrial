@@ -27,6 +27,7 @@ import { loadBundledKit } from '../facekit/bundled';
 import { listPublished } from '../facekit/library';
 import type { PublishedFace } from '../facekit/published';
 import { activeKit, publishedKit, selectFace, selectedFace } from '../facekit/store';
+import { useWarmKit } from '../facekit/warm';
 import Stage from './Stage';
 import { useVoiceCall } from './useVoiceCall';
 import {
@@ -374,6 +375,12 @@ export default function Studio() {
    * empty head.
    */
   const [kit, setKit] = useState<FaceKit | null>(null);
+  /**
+   * Warmed here as on the student page, and for the same reason — see warm.ts.
+   * The bench swaps faces mid-session, so this is keyed on the kit rather than
+   * done once at load.
+   */
+  useWarmKit(kit);
 
   /**
    * The shared library, and which of it is worn.
