@@ -116,7 +116,8 @@ export const IMAGE_MODELS: ImageModelChoice[] = [
 ];
 
 /**
- * The model the neutralising pass runs on, and the only one it will.
+ * The model the base pass runs on — neutralising and smiling alike — and the
+ * only one it will.
  *
  * Pinned rather than taken from the picker, because the base pass is not one
  * generation among ten — it is the one every other generation then sits on. It
@@ -134,7 +135,7 @@ export const IMAGE_MODELS: ImageModelChoice[] = [
  * — and this is a judgement about which model to spend on, not a gate against a
  * caller.
  */
-export const NEUTRALISE_MODEL_KEY = 'gemini-image-pro';
+export const BASE_MODEL_KEY = 'gemini-image-pro';
 
 /*
  * WHAT USED TO BE HERE

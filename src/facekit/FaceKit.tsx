@@ -17,7 +17,7 @@ import { generateBase, generatePatch } from './generate';
 import {
   IMAGE_MODELS,
   IMAGE_RATES_READ_ON,
-  NEUTRALISE_MODEL_KEY,
+  BASE_MODEL_KEY,
   findImageModel,
 } from './imageModels';
 import {
@@ -37,6 +37,7 @@ import {
 } from './kit';
 import {
   NEUTRALISE_BASE_PROMPT,
+  SMILE_BASE_PROMPT,
   BROW_BOXES,
   DEFAULT_LASH_STYLE,
   LASH_STYLES,
@@ -718,16 +719,22 @@ export default function FaceKit() {
   };
 
   /**
-   * Takes no model, where it used to take one per button.
+   * Runs one base pass — neutralising or smiling — over the whole frame.
    *
-   * The buttons were rendered one per picked model, which was a choice the
-   * function underneath refused to honour: generateBase throws on anything but
-   * NEUTRALISE_MODEL_KEY, on the argument that a base quietly drawn by the
-   * cheaper model is indistinguishable from a right one until a slot laid over
-   * it looks wrong. Offering a choice that would have thrown was the picker's
-   * doing, and it went with the picker.
+   * Takes no model, where it used to take one per button. The buttons were
+   * rendered one per picked model, which was a choice the function underneath
+   * refused to honour: generateBase throws on anything but BASE_MODEL_KEY, on
+   * the argument that a base quietly drawn by the cheaper model is
+   * indistinguishable from a right one until a slot laid over it looks wrong.
+   * Offering a choice that would have thrown was the picker's doing, and it
+   * went with the picker.
    */
-  const neutralise = async () => {
+  const redrawBase = async (
+    instruction: string,
+    key: string,
+    label: string,
+    verb: string,
+  ) => {
     if (!kit) return;
     // Asked rather than done quietly, for the same reason restart() asks: the
     // discard below is not a side effect the button's label mentions. A kit
@@ -735,12 +742,11 @@ export default function FaceKit() {
     if (
       generated > 0 &&
       !window.confirm(
-        `Neutralising redraws the base, so the ${generated} image(s) cut from the old one will be discarded. Go on?`,
+        `${verb} redraws the base, so the ${generated} image(s) cut from the old one will be discarded. Go on?`,
       )
     ) {
       return;
     }
-    const key = 'base';
     mark(key, 1);
     setError(null);
 
@@ -748,11 +754,11 @@ export default function FaceKit() {
       // From the upload, never from the current base. Pressing this again means
       // "try that again", not "edit the last attempt".
       const result = await generateBase({
-        modelKey: NEUTRALISE_MODEL_KEY,
+        modelKey: BASE_MODEL_KEY,
         base: kit.original ?? kit.base,
-        instruction: NEUTRALISE_BASE_PROMPT,
+        instruction,
         box: kit.boxes.mouth,
-        label: 'Neutral base',
+        label,
         imageFirst,
         onAttempt: (attempt) => mark(key, attempt),
       });
@@ -771,6 +777,12 @@ export default function FaceKit() {
       mark(key, 0);
     }
   };
+
+  const neutralise = () =>
+    redrawBase(NEUTRALISE_BASE_PROMPT, 'base:neutralise', 'Neutral base', 'Neutralising');
+
+  const smile = () =>
+    redrawBase(SMILE_BASE_PROMPT, 'base:smile', 'Smiling base', 'Adding a smile');
 
   /**
    * How much artwork each region is already committed to.
@@ -1211,21 +1223,33 @@ export default function FaceKit() {
               <div className="space-y-1">
                 <h2 className="text-sm font-medium text-slate-300">Base</h2>
                 <p className="max-w-xl text-xs text-slate-500">
-                  Closes the mouth on the portrait that every later pose is drawn over. Worth
-                  doing first if the portrait arrived smiling. It always runs against the picture
-                  you uploaded, so pressing it again is another attempt rather than an edit of the
-                  last one — which is also why it clears any poses already cut, those having been
-                  drawn for a face that is about to be replaced.
+                  Sets the resting mouth that every later pose is drawn over — neutral, or a gentle
+                  smile. Worth doing first if the portrait arrived smiling. Either way it runs
+                  against the picture you uploaded, so pressing again is another attempt rather than
+                  an edit of the last one — which is also why it clears any poses already cut, those
+                  having been drawn for a face that is about to be replaced.
                 </p>
               </div>
-              <button
-                type="button"
-                disabled={Boolean(busy.base)}
-                onClick={() => void neutralise()}
-                className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:border-slate-500 disabled:opacity-40"
-              >
-                {busy.base ? `Neutralising${busyMark(busy.base)}` : 'Neutralise base'}
-              </button>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  disabled={Boolean(busy['base:neutralise'] || busy['base:smile'])}
+                  onClick={() => void neutralise()}
+                  className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:border-slate-500 disabled:opacity-40"
+                >
+                  {busy['base:neutralise']
+                    ? `Neutralising${busyMark(busy['base:neutralise'])}`
+                    : 'Neutralise base'}
+                </button>
+                <button
+                  type="button"
+                  disabled={Boolean(busy['base:neutralise'] || busy['base:smile'])}
+                  onClick={() => void smile()}
+                  className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:border-slate-500 disabled:opacity-40"
+                >
+                  {busy['base:smile'] ? `Smiling${busyMark(busy['base:smile'])}` : 'Smile base'}
+                </button>
+              </div>
             </div>
 
             <section className="grid gap-5 md:grid-cols-2">

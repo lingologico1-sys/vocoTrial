@@ -513,6 +513,23 @@ export const SLOTS: Slot[] = [
 export const NEUTRALISE_BASE_PROMPT =
   'Close the mouth into a relaxed, neutral, closed-lip expression with no teeth visible. Keep everything else about the portrait identical.';
 
+/**
+ * The alternative base pass: a gentle smile instead of the neutral mouth.
+ *
+ * Where neutralising is the answer to a portrait that arrived mid-smile, this
+ * is the author choosing that smile on purpose as the rest pose. It is a base
+ * pass exactly like neutralising — same model, same discard of cut poses — so
+ * the two sit beside each other on the page rather than one being a follow-up
+ * to the other.
+ *
+ * Deliberately under-specified next to the neutralise prompt: whether the lips
+ * stay together or part to show teeth is left to the model, on the argument
+ * that a "gentle, natural" smile drawn to match the portrait reads better than
+ * one pinned to a lip state the portrait may not suit.
+ */
+export const SMILE_BASE_PROMPT =
+  'Give the mouth a gentle, natural smile. Keep everything else about the portrait identical.';
+
 export function slot(id: SlotId): Slot {
   const found = SLOTS.find((entry) => entry.id === id);
   if (!found) throw new Error(`No slot "${id}"`);

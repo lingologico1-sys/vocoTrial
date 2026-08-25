@@ -8,7 +8,7 @@ import {
   normalise,
 } from './canvas';
 import { beginRun, type RunHandle } from './runLog';
-import { NEUTRALISE_MODEL_KEY, findImageModel } from './imageModels';
+import { BASE_MODEL_KEY, findImageModel } from './imageModels';
 import { chinClearance, type MouthBox } from './kit';
 import { PREAMBLE } from './slots';
 
@@ -427,14 +427,15 @@ export async function generatePatch({
  * Replaces the base itself rather than producing a patch.
  *
  * The one generation that is allowed to change the whole frame, because its job
- * is to give every later patch something sane to sit on: a closed, neutral
- * mouth. Everything downstream treats whatever this returns as the original.
+ * is to give every later patch something sane to sit on: a rest mouth, neutral
+ * or smiling. Everything downstream treats whatever this returns as the
+ * original.
  *
  * Which is why it will only run on one model, and throws rather than
  * substituting when asked for another. Refusing is the point: a base quietly
  * generated on the cheaper of two models would be indistinguishable from one
  * generated on the right model until a slot drawn over it looked wrong, and by
- * then the kit has been paid for. See NEUTRALISE_MODEL_KEY in imageModels.ts.
+ * then the kit has been paid for. See BASE_MODEL_KEY in imageModels.ts.
  */
 export async function generateBase({
   modelKey,
@@ -447,10 +448,10 @@ export async function generateBase({
 }: GenerateArgs): Promise<{ base: string; usd: number }> {
   const model = findImageModel(modelKey);
   if (!model) throw new Error(`Unknown image model "${modelKey}"`);
-  if (modelKey !== NEUTRALISE_MODEL_KEY) {
-    const only = findImageModel(NEUTRALISE_MODEL_KEY);
+  if (modelKey !== BASE_MODEL_KEY) {
+    const only = findImageModel(BASE_MODEL_KEY);
     throw new Error(
-      `The base can only be neutralised on ${only?.label ?? NEUTRALISE_MODEL_KEY}, not ${model.label}`,
+      `The base pass can only run on ${only?.label ?? BASE_MODEL_KEY}, not ${model.label}`,
     );
   }
 
