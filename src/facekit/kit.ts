@@ -185,6 +185,9 @@ export function chinLine(box: MouthBox): number {
   return Math.min(box.height, Math.max(0, box.chin ?? box.height * CHIN_SHARE));
 }
 
+/** Which rest pose a base pass drew. The two the page offers. */
+export type BaseKind = 'neutral' | 'smile';
+
 export interface FaceKit {
   /** Bumped when this shape changes in a way an older kit cannot satisfy. */
   format: number;
@@ -213,6 +216,18 @@ export interface FaceKit {
    * those fall back to `base` and behave as they always did.
    */
   original?: string;
+  /**
+   * Every rest pose the author has drawn, keyed by kind, so drawing one does
+   * not throw the other away.
+   *
+   * `base` is whichever of these the kit currently wears; the rest are
+   * alternatives the author can switch back to without paying to draw them
+   * again. Optional because a kit written before this held one base and no
+   * record of the other, and a kit that has only ever drawn one pose has
+   * nothing else to list — no format bump, for the same reason `original`
+   * needed none: nothing already drawn has to be brought forward.
+   */
+  bases?: Partial<Record<BaseKind, string>>;
   /** Where each region sits on the base. Also the generation mask. */
   boxes: Boxes;
   /** One PNG data URL per authored slot, already cropped to its region's box. */

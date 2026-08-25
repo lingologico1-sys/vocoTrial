@@ -29,6 +29,7 @@ import {
   newKit,
   patchFilename,
   resizeAbout,
+  type BaseKind,
   type Box,
   type BrowBox,
   type FaceKit as Kit,
@@ -92,6 +93,18 @@ type Candidate = {
 
 /** The poses that get compared against each other. Eyes have nothing to collide with. */
 const MOUTH_SLOTS = SLOTS.filter((entry) => entry.region === 'mouth');
+
+/**
+ * The rest poses the Base card can draw, in the order the buttons show them.
+ *
+ * Kept beside the region tabs rather than in the Base card because the two
+ * controls answer the same question in different keys: the tabs pick which box
+ * to judge, these pick which face the boxes are judged against.
+ */
+const BASE_KINDS: ReadonlyArray<{ kind: BaseKind; label: string }> = [
+  { kind: 'neutral', label: 'Neutral' },
+  { kind: 'smile', label: 'Smile' },
+];
 
 /**
  * Below this share of visibly differing pixels, two mouths are the same drawing.
@@ -336,6 +349,15 @@ export default function FaceKit() {
   );
   const [assembled, setAssembled] = useState<string | null>(null);
   /**
+   * Which drawn rest pose the picker is showing, when any.
+   *
+   * Session state, not part of the kit: it is a view, not a fact about the
+   * artwork. Null is the working view — the neutral base with the rest mouth
+   * composited — and either kind shows that base on its own for a look. The
+   * smile is reachable only through here, never by becoming `kit.base`.
+   */
+  const [shownBase, setShownBase] = useState<BaseKind | null>(null);
+  /**
    * How far every mouth on the page sits from every mouth in the kit.
    *
    * Keyed by `twinKey`, valued with one distance per other accepted slot,
@@ -540,6 +562,7 @@ export default function FaceKit() {
         // A kit arriving from the library has boxes but no history of how they
         // got there, so every box goes back to being judged on size.
         setFollowing({});
+        setShownBase(null);
         // The editor is at the top of a page whose library sits at the bottom,
         // and a click that changes only off-screen state is the complaint this
         // whole button exists to answer.
@@ -663,6 +686,7 @@ export default function FaceKit() {
       setKit(newKit(file.name.replace(/\.[^.]+$/, '') || 'face', normalised));
       setCandidates({});
       setFollowing({});
+      setShownBase(null);
       setDirty(false);
       // A portrait that has just arrived has no mouths at all, so there is one
       // honest answer to whether it is fit to wear.
@@ -689,9 +713,15 @@ export default function FaceKit() {
     setError(null);
 
     try {
+      // Always generated from the neutral base, even while the page is showing
+      // the smile one. The mouth and eye poses are written against a closed,
+      // relaxed rest pose, and a smile is a rest pose the face can wear — not
+      // one the poses are measured from. A kit with no neutral base yet falls
+      // back to the active base, which is the behaviour every kit had before
+      // either pose could be chosen.
       const result = await generatePatch({
         modelKey,
-        base: kit.base,
+        base: kit.bases?.neutral ?? kit.base,
         box: kit.boxes[definition.region],
         instruction: definition.prompt(kit.lashes ?? DEFAULT_LASH_STYLE),
         label: definition.label,
@@ -731,15 +761,18 @@ export default function FaceKit() {
    */
   const redrawBase = async (
     instruction: string,
-    key: string,
+    kind: BaseKind,
     label: string,
     verb: string,
   ) => {
+    const key = `base:${kind}`;
     if (!kit) return;
-    // Asked rather than done quietly, for the same reason restart() asks: the
-    // discard below is not a side effect the button's label mentions. A kit
-    // with nothing cut yet is the ordinary case and gets no question.
+    // Only the neutral pass replaces the base every patch is cut from and
+    // composited onto, so only it discards work. A smile is stored beside the
+    // base and changes nothing already cut — nothing to ask about.
+    const replaces = kind === 'neutral';
     if (
+      replaces &&
       generated > 0 &&
       !window.confirm(
         `${verb} redraws the base, so the ${generated} image(s) cut from the old one will be discarded. Go on?`,
@@ -762,15 +795,24 @@ export default function FaceKit() {
         imageFirst,
         onAttempt: (attempt) => mark(key, attempt),
       });
-      // Patches cut from the old base no longer describe this face, so they go
-      // with it. Keeping them would leave a mouth drawn for a jaw that moved.
-      edit((current) => ({
-        ...current,
-        base: result.base,
-        patches: {},
-        spentUsd: current.spentUsd + result.usd,
-      }));
-      setCandidates({});
+      edit((current) => {
+        const bases = { ...current.bases, [kind]: result.base };
+        // A smile is a view, not a target: it is stored beside the base and
+        // never becomes it, so the base and its patches stay put. Only the
+        // neutral pass replaces the base, and with it the patches that were
+        // cut from the old one.
+        return replaces
+          ? { ...current, base: result.base, bases, patches: {}, spentUsd: current.spentUsd + result.usd }
+          : { ...current, bases, spentUsd: current.spentUsd + result.usd };
+      });
+      if (replaces) {
+        setCandidates({});
+        setShownBase(null);
+      } else {
+        // Show the smile that was just drawn, since it changed nothing else
+        // and would otherwise be invisible.
+        setShownBase('smile');
+      }
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'That generation failed');
     } finally {
@@ -779,10 +821,20 @@ export default function FaceKit() {
   };
 
   const neutralise = () =>
-    redrawBase(NEUTRALISE_BASE_PROMPT, 'base:neutralise', 'Neutral base', 'Neutralising');
+    redrawBase(NEUTRALISE_BASE_PROMPT, 'neutral', 'Neutral base', 'Neutralising');
 
   const smile = () =>
-    redrawBase(SMILE_BASE_PROMPT, 'base:smile', 'Smiling base', 'Adding a smile');
+    redrawBase(SMILE_BASE_PROMPT, 'smile', 'Smiling base', 'Adding a smile');
+
+  /**
+   * Shows one drawn rest pose in the picker, as a look rather than a change.
+   *
+   * The alternative to switching the base outright, now that a smile is a view
+   * and not a target: nothing here touches `kit.base` or the patches. Clicking
+   * the pose already shown puts the picker back on the working view.
+   */
+  const showBase = (kind: BaseKind) =>
+    setShownBase((current) => (current === kind ? null : kind));
 
   /**
    * How much artwork each region is already committed to.
@@ -1223,11 +1275,11 @@ export default function FaceKit() {
               <div className="space-y-1">
                 <h2 className="text-sm font-medium text-slate-300">Base</h2>
                 <p className="max-w-xl text-xs text-slate-500">
-                  Sets the resting mouth that every later pose is drawn over — neutral, or a gentle
-                  smile. Worth doing first if the portrait arrived smiling. Either way it runs
-                  against the picture you uploaded, so pressing again is another attempt rather than
-                  an edit of the last one — which is also why it clears any poses already cut, those
-                  having been drawn for a face that is about to be replaced.
+                  Neutralise sets the resting mouth every later pose is drawn over, and clears any
+                  poses cut for the old one — worth doing first if the portrait arrived smiling.
+                  Smile draws the same face grinning and keeps it beside the neutral one as a look;
+                  it never becomes the base. Both run against the picture you uploaded, so pressing
+                  again is another attempt rather than an edit of the last one.
                 </p>
               </div>
               <div className="flex flex-wrap gap-2">
@@ -1272,8 +1324,42 @@ export default function FaceKit() {
                   </div>
                 </div>
 
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-[11px] font-medium uppercase tracking-wide text-slate-500">
+                    Base shown
+                  </span>
+                  <div className="flex gap-1 rounded-lg border border-slate-800 p-0.5 text-xs">
+                    {BASE_KINDS.map((option) => {
+                      const has = Boolean(kit.bases?.[option.kind]);
+                      const active = shownBase === option.kind;
+                      return (
+                        <button
+                          key={option.kind}
+                          type="button"
+                          disabled={!has}
+                          title={
+                            has
+                              ? `Show the ${option.label.toLowerCase()} base`
+                              : 'Not generated yet'
+                          }
+                          onClick={() => showBase(option.kind)}
+                          className={`rounded-md px-2.5 py-1 disabled:cursor-not-allowed disabled:opacity-40 ${
+                            active ? 'bg-slate-800 text-slate-100' : 'text-slate-500'
+                          }`}
+                        >
+                          {option.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
                 <BoxPicker
-                  base={assembled ?? kit.base}
+                  base={
+                    shownBase
+                      ? kit.bases?.[shownBase] ?? assembled ?? kit.base
+                      : assembled ?? kit.base
+                  }
                   boxes={kit.boxes}
                   active={region}
                   locked={committed[region] > 0}
