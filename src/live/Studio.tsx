@@ -4,16 +4,17 @@ import BuildBadge from '../BuildBadge';
 import ReturnButton from '../ReturnButton';
 import { findModel } from '../realtime/models';
 import { LANGUAGES, defaultLanguageCode, findLanguage } from '../realtime/languages';
-import {
-  builtInPresets,
-  findIn,
-  lastUsedKey,
-  listPresets,
-  rememberPreset,
-  renderFrom,
-} from '../realtime/presets';
+import { findIn } from '../realtime/presets';
+import { usePromptLibrary } from '../realtime/usePromptLibrary';
+import PromptEditor from '../PromptEditor';
+import SettingsFields from '../SettingsFields';
 import { MAX_INSTRUCTIONS, withPersona } from '../realtime/instructions';
-import { VOICES } from '../realtime/settings';
+import {
+  VOICES,
+  houseFieldsFor,
+  houseSettings,
+  type SessionSettings,
+} from '../realtime/settings';
 import {
   MAX_LESSON_RULES,
   MAX_STYLE_NAME,
@@ -175,11 +176,29 @@ const BUBBLE_SENTENCES = 2;
  * without the bump, the only people still seeing the old value are the ones who
  * used the page enough to have an opinion. Bump it when a default moves.
  */
-const PREFS_KEY = 'vocotrial.live.v7';
+const PREFS_KEY = 'vocotrial.live.v8';
 
 interface Prefs {
   language: string;
   voice: string;
+  /**
+   * The prompt being worked on, and which preset it was written against.
+   *
+   * The scratch copy, kept for tutorBench's reason and under this page's own
+   * key: a half-typed prompt belongs to the tab it was typed in. The *pick* is
+   * not in here — that is one shared key, so choosing a prompt on either page
+   * is what the other opens on. See usePromptLibrary.
+   */
+  presetKey: string;
+  instructions: string;
+  edited: boolean;
+  /**
+   * The knobs this page publishes as the house profile's turn-taking half.
+   *
+   * Here rather than only in R2 so that a tuning session survives a reload the
+   * way the sliders do — nothing is published until the button is pressed.
+   */
+  settings: SessionSettings;
   persona: boolean;
   driver: MouthDriver;
   lookaheadMs: number;
@@ -243,21 +262,23 @@ export default function Studio() {
   const [prefs] = useState(loadPrefs);
   const [language, setLanguage] = useState(prefs.language ?? defaultLanguageCode());
   /**
-   * Not in this page's prefs, unlike everything else here: the prompt library
-   * lives in R2 behind realtime/presets.ts, which tutorBench writes to as well.
-   * A prompt saved over there is offered here — on any machine now, which is
-   * the whole point of the move — and picking one here is what that page opens
-   * on next.
+   * The prompt, the shared library it comes out of, and the editing of both.
    *
-   * FETCHED RATHER THAN READ, AND RE-FETCHED. It used to be `useState(listPresets)`
-   * over a localStorage store, which had a quieter version of the same bug the
-   * network introduces: a prompt saved on the bench in another tab did not
-   * appear until this page was reloaded. It reloads on focus now, so publishing
-   * a manner from a prompt written a minute ago does not require a refresh.
+   * THIS PAGE USED TO ONLY BE ABLE TO PICK. The library has lived in R2 since
+   * a prompt written on the bench had to be publishable as a manner from
+   * another machine — but studio got a dropdown and no textarea, so the way to
+   * shorten an over-long prompt it was about to publish was to go to the bench
+   * and come back. Its own warning said so. Both pages mount the same editor
+   * over the same hook now, and a prompt edited here is edited everywhere.
+   *
+   * The list re-reads on focus, so publishing a manner from a prompt written a
+   * minute ago on the other page does not require a refresh — see the hook.
    */
-  const [presets, setPresets] = useState(builtInPresets);
-  const [presetKey, setPresetKey] = useState(() => lastUsedKey(builtInPresets()));
-  const [presetError, setPresetError] = useState('');
+  const library = usePromptLibrary({
+    language: findLanguage(language) ?? LANGUAGES[0],
+    initial: prefs,
+  });
+  const { presets, presetKey, instructions, edited, error: presetError } = library;
   /**
    * Which prebuilt voice the tutor speaks in. Empty means Google's default,
    * which is a third state rather than a synonym for whichever name that
@@ -270,6 +291,23 @@ export default function Studio() {
    * it is the whole point of the page.
    */
   const [voice, setVoice] = useState<string>(prefs.voice ?? '');
+  /**
+   * The rest of the call's knobs: how long it waits, how freely it improvises.
+   *
+   * NEW HERE, AND THE REASON IS A HOLE RATHER THAN A WISH. A published setup
+   * has carried these fields since PerformanceProfile existed, /eleve reads
+   * them and sends them, and studio — the only page that writes the profile —
+   * never set one. So every lesson ever handed to a class went out with the
+   * block empty and ran on Google's defaults, which settings.ts describes as
+   * tuned for fluent speakers who do not pause to assemble a clause. They are
+   * live on this page's own calls as well as published, which is the point of
+   * tuning them here: the setting is judged by listening to it.
+   *
+   * The voice is deliberately not among them. It belongs to the face rather
+   * than to the house, it has its own picker above, and the publish route reads
+   * it off the face a teacher chose. See houseSettings.
+   */
+  const [settings, setSettings] = useState<SessionSettings>(prefs.settings ?? {});
   /**
    * Whether the worn face's own background goes into the prompt.
    *
@@ -533,6 +571,10 @@ export default function Studio() {
         JSON.stringify({
           language,
           voice,
+          presetKey,
+          instructions,
+          edited,
+          settings,
           persona,
           driver,
           lookaheadMs,
@@ -560,6 +602,10 @@ export default function Studio() {
   }, [
     language,
     voice,
+    presetKey,
+    instructions,
+    edited,
+    settings,
     persona,
     driver,
     lookaheadMs,
@@ -600,27 +646,19 @@ export default function Studio() {
    * see `composeTutorPrompt` in tutorPrompt.ts.
    */
   const composed = useMemo(
-    () =>
-      withPersona(
-        renderFrom(presets, presetKey, findLanguage(language) ?? LANGUAGES[0]),
-        persona ? kit?.persona : undefined,
-      ),
-    [presets, presetKey, language, persona, kit],
+    () => withPersona(instructions, persona ? kit?.persona : undefined),
+    [instructions, persona, kit],
   );
 
   /**
-   * The preset's own length, measured rather than derived.
+   * The prompt's own length, which is now simply the length of the box.
    *
-   * It is what the composition would have been with no persona, and the honest
-   * way to get it is to render the preset again — subtracting the persona and a
-   * constant for the wrapper would put a number here that goes quietly wrong the
-   * first time that prose is edited in the other file. Rendering a string twice
-   * costs nothing worth protecting.
+   * It used to be a second render of the preset, because the box did not exist
+   * and the only way to ask what the composition would have been without the
+   * persona was to compose it again. What is typed is what is spent now, so the
+   * honest number is the one under the textarea.
    */
-  const presetChars = useMemo(
-    () => renderFrom(presets, presetKey, findLanguage(language) ?? LANGUAGES[0]).length,
-    [presets, presetKey, language],
-  );
+  const presetChars = instructions.length;
   const tooLong = composed.length > MAX_INSTRUCTIONS;
 
   /**
@@ -640,9 +678,12 @@ export default function Studio() {
     // function that leaves the preset's own text untouched, which is what makes
     // a persona-on run comparable with a persona-off one.
     instructions: composed,
-    // Absent rather than empty when nothing is picked: the Worker drops a
-    // blank, but sending one at all reads as a choice nobody made.
-    settings: voice ? { voice } : {},
+    // The voice is absent rather than empty when nothing is picked: the Worker
+    // drops a blank, but sending one at all reads as a choice nobody made. The
+    // rest are the knobs this page publishes, sent on this page's own calls for
+    // the reason they are tuned here at all — a turn-taking setting is judged
+    // by hearing it, not by reading the number back.
+    settings: { ...settings, ...(voice ? { voice } : {}) },
   });
   const { status, detail, turns, tap, speaking, heard, muted, tiltCue, live, busy } = call;
 
@@ -665,10 +706,10 @@ export default function Studio() {
    *
    * PUBLISHING TO STUDENTS MOVED TO /teach. What stays here are the two things
    * a teacher cannot supply and this page is the only one that can: the manner
-   * a tutor talks in, rendered out of a preset that lives in this browser's
-   * localStorage, and the performance profile that is simply what the sliders
-   * on this page are currently set to. Both go to R2 as the house library, and
-   * the publish route spends them. See house.ts.
+   * a tutor talks in, which is whatever is in the prompt box, and the
+   * performance profile — the sliders, plus the turn-taking knobs beside the
+   * prompt. Both go to R2 as the house library, and the publish route spends
+   * them. See house.ts.
    *
    * THE EVALUATOR PICKER WENT WITH IT. A scale is part of what a student is
    * handed, and what a student is handed is now assembled on /teach — so this
@@ -716,37 +757,6 @@ export default function Studio() {
   useEffect(loadHouse, []);
 
   /**
-   * The prompt library, at mount and whenever this tab is looked at again.
-   *
-   * The focus listener is what makes the two pages feel like one library: the
-   * habit this page is built around is writing a prompt on the bench, coming
-   * back here and publishing it as a manner, and a picker that answers only to
-   * a reload turns that into a refresh nobody remembers to do.
-   *
-   * The pick is re-resolved against what came back, because the remembered key
-   * may name a prompt deleted from another machine. A failure leaves the
-   * built-ins in the picker and says so under it.
-   */
-  useEffect(() => {
-    let alive = true;
-    const load = () => {
-      void listPresets().then(({ presets: found, error }) => {
-        if (!alive) return;
-        setPresets(found);
-        setPresetKey((current) => (findIn(found, current) ? current : lastUsedKey(found)));
-        setPresetError(error ?? '');
-      });
-    };
-
-    load();
-    window.addEventListener('focus', load);
-    return () => {
-      alive = false;
-      window.removeEventListener('focus', load);
-    };
-  }, []);
-
-  /**
    * The sliders on this page, as a profile.
    *
    * Gathered at the press rather than held in state, for the reason `composed`
@@ -755,6 +765,10 @@ export default function Studio() {
    * driving a control.
    */
   const currentPerformance = (): PerformanceProfile => ({
+    // The turn-taking half, spread first and picked rather than spread whole:
+    // the voice is the face's, not the house's. Unset fields are left out
+    // rather than stored as undefined — see houseSettings.
+    ...houseSettings(settings),
     driver,
     lookaheadMs,
     roundness,
@@ -827,15 +841,17 @@ export default function Studio() {
         id: newStyleId(),
         name: styleName.trim(),
         note: '',
-        // Rendered, not the key. See the note beside the button.
-        text: renderFrom(presets, presetKey, styleLanguage),
+        // What is in the box, which is what was tried on this page's own calls.
+        text: instructions,
         language: styleLanguage.code,
-        // And the key as well, when it names a built-in. That one is not in
-        // this browser's localStorage — it is in the bundle and in the Worker —
-        // so publishing can render the manner again for the language of the
-        // lesson going out. A saved prompt sends nothing and stays frozen in
-        // whatever language it was written in.
-        preset: findIn(presets, presetKey)?.builtIn ? presetKey : undefined,
+        // And the key as well, when it names a built-in *and nobody has typed
+        // over it*. A built-in is not in a browser store — it is in the bundle
+        // and in the Worker — so publishing can render the manner again for the
+        // language of the lesson going out. An edited one has to send nothing:
+        // the key would re-render the built-in's own words at publish and throw
+        // the edit away, silently, on somebody else's lesson. A saved prompt
+        // sends nothing either, and stays in the language it was written in.
+        preset: findIn(presets, presetKey)?.builtIn && !edited ? presetKey : undefined,
       });
       setStyleName('');
       setHouseNote(`Published “${written.name}”. Teachers can pick it on /teach.`);
@@ -1760,30 +1776,11 @@ export default function Studio() {
             </select>
           </label>
 
-          <label className="flex flex-1 items-center gap-2 rounded-lg border border-slate-800 px-3 py-2">
-            <SlidersHorizontal size={13} className="text-slate-500" />
-            <select
-              value={presetKey}
-              onChange={(event) => {
-                setPresetKey(event.target.value);
-                rememberPreset(event.target.value);
-              }}
-              disabled={live || busy}
-              className="flex-1 bg-transparent text-sm text-slate-200 outline-none disabled:opacity-40"
-            >
-              {presets.map((preset) => (
-                <option key={preset.key} value={preset.key} className="bg-slate-900">
-                  {preset.builtIn ? preset.label : `${preset.label} · saved`}
-                </option>
-              ))}
-            </select>
-          </label>
-
           {/*
-            Beside the prompt picker rather than among the motion knobs, because
-            it belongs to the same sentence: the preset is the job and this is
-            who is doing it. Locked while a call is up, like the two pickers
-            before it — all three are fixed in the setup frame.
+            Beside the voice rather than among the motion knobs, because it
+            belongs to the same sentence: the prompt below is the job and this
+            is who is doing it. Locked while a call is up, like the picker
+            before it — both are fixed in the setup frame.
           */}
           <button
             type="button"
@@ -1808,16 +1805,61 @@ export default function Studio() {
         </div>
 
         {/*
-          Said only when the library could not be read, and it says what is
-          still on offer: the five built-ins are in the bundle, so the picker
-          above is short rather than broken, and a manner published from one of
-          them is a perfectly ordinary manner.
+          The prompt and the call's own knobs, folded away.
+
+          A <details> rather than an always-open box for the reason this page
+          is laid out the way it is: the face is what studio is looked at for,
+          and a ten-row textarea permanently between the pickers and the dial
+          button would push it off the screen. Open is where a prompt is
+          written; shut is the normal state of a page you are watching a face
+          on.
+
+          THE KNOBS BESIDE IT ARE THE ONES THIS PAGE PUBLISHES. Every field
+          here goes into the house profile when the button below is pressed,
+          which is why they sit with the prompt rather than with the sliders:
+          the sliders are how a face moves and these are how a call is
+          conducted. See houseSettings, and house.ts on the asymmetry.
         */}
-        {presetError && (
-          <p className="-mt-1 text-[11px] text-amber-500">
-            {presetError}. Only the built-in prompts are listed.
-          </p>
-        )}
+        <details className="rounded-lg border border-slate-800">
+          <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 text-xs uppercase tracking-wide text-slate-500 hover:text-slate-400">
+            <SlidersHorizontal size={13} />
+            Prompt &amp; call
+            <span className="ml-auto normal-case tracking-normal text-slate-600">
+              {presets.find((option) => option.key === presetKey)?.label ?? 'Custom'}
+              {edited && ' (edited)'}
+            </span>
+          </summary>
+
+          <div className="border-t border-slate-800 px-3 py-3">
+            <PromptEditor library={library} disabled={live || busy} />
+
+            {/*
+              Said only when the library could not be read, and it says what is
+              still on offer: the five built-ins are in the bundle, so the
+              picker is short rather than broken, and a manner published from
+              one of them is a perfectly ordinary manner.
+            */}
+            {presetError && (
+              <p className="mt-1.5 text-[11px] text-amber-500">
+                {presetError}. Only the built-in prompts are listed.
+              </p>
+            )}
+
+            <p className="mt-4 border-t border-slate-800 pt-3 text-[11px] uppercase tracking-wide text-slate-500">
+              How the call is conducted
+            </p>
+            <SettingsFields
+              fields={model ? houseFieldsFor(model) : []}
+              settings={settings}
+              onSettings={setSettings}
+              disabled={live || busy}
+            />
+            <p className="mt-2 text-[11px] leading-relaxed text-slate-500">
+              Live on this page&rsquo;s own calls, and published with the tuning below. The voice
+              is not among them — it belongs to the face a teacher picks, not to the house.
+            </p>
+          </div>
+        </details>
 
         <div className="flex gap-3">
           {live ? (
@@ -1864,8 +1906,8 @@ export default function Studio() {
             This prompt and this persona come to{' '}
             <span className="tabular-nums">{composed.length}</span> characters together, and a
             session takes {MAX_INSTRUCTIONS}. The prompt is{' '}
-            <span className="tabular-nums">{presetChars}</span> of it. Shorten it on tutorBench,
-            shorten the background on faceKit, or switch the persona off above. A published
+            <span className="tabular-nums">{presetChars}</span> of it. Shorten it in the box
+            above, shorten the background on faceKit, or switch the persona off. A published
             lesson adds its questions on top of this, so a prompt near the ceiling here leaves a
             teacher no room.
           </p>
@@ -1931,8 +1973,8 @@ export default function Studio() {
             </button>
             <span className="text-[11px] text-slate-500">
               {housePerformance
-                ? 'Replaces the profile every published lesson carries.'
-                : 'Nothing saved yet, so lessons publish with the built-in defaults.'}
+                ? 'Replaces the profile every published lesson carries — the face, and how the call takes turns.'
+                : 'Nothing saved yet, so lessons publish with the built-in defaults and leave the turn-taking to Google.'}
             </span>
           </div>
 
@@ -1964,11 +2006,13 @@ export default function Studio() {
             baked in here.
           */}
           <p className="mt-1.5 text-[11px] leading-relaxed text-slate-500">
-            Saves {renderFrom(presets, presetKey, styleLanguage).length.toLocaleString()} characters of
-            prompt as it stands, rendered for {styleLanguage.label}.{' '}
-            {findIn(presets, presetKey)?.builtIn
-              ? 'It is one of the built-in prompts, so a lesson published in another language gets it in that language instead.'
-              : 'It is a saved prompt, so it stays in the language it was written in whatever language a lesson is published in.'}{' '}
+            Saves the {instructions.length.toLocaleString()} characters in the prompt box above as
+            they stand, rendered for {styleLanguage.label}.{' '}
+            {findIn(presets, presetKey)?.builtIn && !edited
+              ? 'It is one of the built-in prompts, untouched, so a lesson published in another language gets it in that language instead.'
+              : edited
+                ? 'It has been edited, so it goes out as these exact words in whatever language a lesson is published in.'
+                : 'It is a saved prompt, so it stays in the language it was written in whatever language a lesson is published in.'}{' '}
             The face&rsquo;s persona is not included — that is applied when a teacher picks a
             face.
           </p>

@@ -70,6 +70,7 @@
  */
 
 import type { Patience } from './settings';
+import type { Pace } from './tutorPrompt';
 
 /** One prepared tutoring session. */
 export interface VocoSession {
@@ -168,6 +169,25 @@ export interface VocoSession {
    * behaviour to preserve.
    */
   patience?: Patience;
+
+  /**
+   * How fast the tutor talks.
+   *
+   * THE OTHER HALF OF `patience`, and the reason the two sit together on
+   * /teach: that one is how long the tutor waits for the learner, this is how
+   * fast it talks at them, and a room of beginners usually needs both.
+   *
+   * NOT A PROVIDER SETTING, unlike everything else a teacher touches here. The
+   * Live API has no speaking rate to set, so this is composed into the prompt
+   * as prose — see `PACE` in tutorPrompt.ts, which also says why that prose is
+   * written as sentence length rather than as "speak slowly".
+   *
+   * A word rather than a paragraph for `patience`'s reason: what a teacher is
+   * choosing is pedagogy, and the wording that gets a model to deliver it is
+   * not a teacher's problem. Absent means 'natural', which composes no block at
+   * all and is what every lesson published before this existed composed.
+   */
+  pace?: Pace;
 
   /**
    * Which live model runs the lesson. A key from models.ts, never an id.

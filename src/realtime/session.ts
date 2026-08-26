@@ -56,6 +56,8 @@
 import type { Persona } from '../facekit/persona';
 import type { HeadMotion, MotionCadence, PressTrigger, TiltTrigger } from '../live/headMotion';
 import { LESSON_CODE } from './lessonCodes';
+import type { Pace } from './tutorPrompt';
+import type { HouseSettings } from './settings';
 
 /**
  * The two mouth modes, restated rather than imported.
@@ -89,7 +91,7 @@ export const MAX_SESSION_LABEL = 60;
  * profile *is* the performance half of a published setup, and two lists that
  * have to agree is two lists that eventually will not.
  */
-export interface PerformanceProfile {
+export interface PerformanceProfile extends HouseSettings {
   // --- How the face performs. Verbatim from studio's own tuning, because the
   // --- whole point is that the student meets what was tuned rather than a
   // --- reasonable-looking approximation of it.
@@ -141,23 +143,12 @@ export interface PerformanceProfile {
   smileHold?: number;
   smileGap?: number;
 
-  /**
-   * Turn-taking, and the reason this block is optional throughout.
-   *
-   * Absent means *do not send the field*, exactly as in settings.ts: the
-   * difference between "leave the decision upstream" and "pin whatever the
-   * default happens to be today" is one this type has to be able to express,
-   * and an object with zeroes in it cannot. These are the knobs that matter
-   * most to a learner, who pauses mid-clause to assemble the next one.
-   */
-  silenceDurationMs?: number;
-  prefixPaddingMs?: number;
-  startSensitivity?: 'START_SENSITIVITY_HIGH' | 'START_SENSITIVITY_LOW';
-  endSensitivity?: 'END_SENSITIVITY_HIGH' | 'END_SENSITIVITY_LOW';
-  affectiveDialog?: boolean;
-  proactiveAudio?: boolean;
-  temperature?: number;
-  maxOutputTokens?: number;
+  // --- Turn-taking, and everything else a call is tuned with, comes in off
+  // --- HouseSettings rather than being listed again here. Absent still means
+  // --- *do not send the field*: the difference between "leave the decision
+  // --- upstream" and "pin whatever the default happens to be today" is one
+  // --- this type has to express, and an object with zeroes in it cannot. See
+  // --- settings.ts, which now owns that list.
 }
 
 export interface PublishedSetup extends PerformanceProfile {
@@ -222,6 +213,16 @@ export interface PublishedSetup extends PerformanceProfile {
    * text, so nothing already handed out changed when the block became editable.
    */
   lessonRules?: string;
+  /**
+   * How fast the tutor talks, as the teacher asked at publish.
+   *
+   * Stored beside `lessonRules` because it is composed the same way — a block
+   * of the prompt the student page assembles at dial time — and frozen for the
+   * same reason: what was handed out stays handed out. Absent means 'natural'
+   * and composes nothing, which is every setup published before this existed.
+   * See `PACE` in tutorPrompt.ts.
+   */
+  pace?: Pace;
   /**
    * The worn face's persona, copied out of its kit at publish time.
    *
@@ -387,6 +388,7 @@ export function looksLikeSetup(value: unknown): value is PublishedSetup {
     (setup.instructions === undefined || isString(setup.instructions)) &&
     (setup.style === undefined || isString(setup.style)) &&
     (setup.lessonRules === undefined || isString(setup.lessonRules)) &&
+    (setup.pace === undefined || isString(setup.pace)) &&
     (setup.persona === undefined || (!!setup.persona && typeof setup.persona === 'object')) &&
     // Absent is the common case and a legal one — every setup published before
     // the stamp existed. It must never be the reason a lesson stops opening:

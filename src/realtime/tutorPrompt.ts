@@ -546,6 +546,79 @@ other. Two questions in a turn loses the first, because a learner answers the
 thing they heard last. The goodbye is the only turn that ends without one. You
 cannot see a clock: never mention the time, and never say how much is left.`;
 
+/**
+ * How fast the tutor talks, as a teacher asks for it.
+ *
+ * THERE IS NO KNOB FOR THIS AND THERE IS NOT GOING TO BE ONE. The Live API's
+ * `speechConfig` takes a voice and a language code; a speaking rate is an open
+ * request against it and nothing more. This rig used to have one — the settings
+ * table carried OpenAI Realtime's speaking rate until that provider came out —
+ * and what replaced it on Gemini is this: prose, composed into the prompt.
+ *
+ * SO IT IS WRITTEN AS STRUCTURE AND NEVER AS A RATE, which is the whole design
+ * and it is not a preference. "Speak slowly" is a rate instruction, and rate is
+ * the first thing these models revert on: it holds for two or three turns and
+ * then climbs back to the register the model prefers. A ceiling on the words in
+ * a sentence and an explicit pause between sentences produce slow speech as a
+ * consequence of structure, and structure survives a long call. The A1 preset
+ * in instructions.ts found that out first and says so at length; this is the
+ * same finding, made available to every manner rather than to one preset.
+ *
+ * IT IS A TEACHER'S AND NOT AN ADMINISTRATOR'S, which is `patience`'s argument
+ * in vocoSessions.ts and the reason the two sit beside each other on /teach.
+ * They are the two halves of one question: patience is how long the tutor waits
+ * for the learner, this is how fast it talks at them, and how much of either a
+ * room needs is known by the person standing in it.
+ *
+ * NATURAL SENDS NOTHING, in the sense the whole rig means it — not a paragraph
+ * asking for an ordinary pace, but no paragraph at all, which is the prompt
+ * every lesson published before this control existed composed. See `PATIENCE`
+ * in settings.ts, which makes the same distinction about a knob.
+ *
+ * WHAT IT CANNOT DO, said here because it is invisible from the outside: this
+ * is an instruction and not a setting, so it is followed rather than obeyed.
+ * You cannot read a payload back to check it took, the way `silenceDurationMs`
+ * can be read back. The only test is listening to a call.
+ */
+export type Pace = 'natural' | 'measured' | 'slow';
+
+export const PACE: Array<{
+  key: Pace;
+  label: string;
+  hint: string;
+  /** The block composed under HOW YOU SPEAK. Empty composes no section at all. */
+  text: string;
+}> = [
+  {
+    key: 'natural',
+    label: 'Natural',
+    hint: "The tutor's own pace. What every lesson used before this control existed.",
+    text: '',
+  },
+  {
+    key: 'measured',
+    label: 'Measured',
+    hint: 'Shorter sentences, one idea at a time. For a class that follows but has to work at it.',
+    text: `Keep each sentence to about ten words and put one idea in each. Finish a
+sentence before you start the next, and leave a beat between them. Prefer the
+everyday word to the exact one.`,
+  },
+  {
+    key: 'slow',
+    label: 'Slow',
+    hint: 'Six-word sentences with a pause between them. For beginners assembling a sentence a word at a time.',
+    text: `Keep each sentence to about six words. Say one thing at a time, and leave a
+clear pause before the next sentence. Use the same small set of everyday words
+over and over rather than reaching for a new one. When a word matters, say it
+once on its own before you use it in a sentence.`,
+  },
+];
+
+/** The block a lesson's pace asks for. Unknown reads as natural, like patience. */
+export function paceText(pace: string | undefined): string {
+  return (PACE.find((entry) => entry.key === pace) ?? PACE[0]).text;
+}
+
 /** Everything a composed prompt is built from. All of it is snapshot data. */
 export interface TutorPromptParts {
   /**
@@ -566,6 +639,15 @@ export interface TutorPromptParts {
    */
   rules?: string;
   persona?: Persona;
+  /**
+   * How fast the tutor talks, or absent for its own pace.
+   *
+   * The teacher's, off the lesson rather than out of the house library — see
+   * `PACE` above on why this one is not an administrator's. Absent and
+   * 'natural' compose the same prompt, which is the prompt every lesson
+   * published before this existed composed.
+   */
+  pace?: string;
   questions: string[];
 }
 
@@ -598,6 +680,23 @@ export function composeTutorPrompt(parts: TutorPromptParts): string {
    */
   const rules = parts.rules?.trim() || DEFAULT_LESSON_RULES;
 
+  /*
+   * The pace block, or nothing at all.
+   *
+   * PLACED AFTER THE RULES AND BEFORE THE PROTOCOL, which is a choice between
+   * two of this file's own arguments. It could sit under YOUR JOB, where it
+   * would read as a qualification of the manner — but pace is the constraint
+   * that drifts soonest, and the header's rule is that what has to hold for a
+   * whole call survives longest late in the prompt. So it goes with the other
+   * pedagogy, at the end of it, under a heading of its own that the model can
+   * hold on to. The protocol below it is machinery and reads as machinery.
+   *
+   * A heading with no body would be worse than no heading: an empty section is
+   * a section the model fills in for itself. Natural composes neither.
+   */
+  const pace = paceText(parts.pace);
+  const paceBlock = pace ? `HOW YOU SPEAK\n${pace}\n\n` : '';
+
   return `${personaBlock(parts.persona)}YOUR JOB
 ${parts.style.trim()}
 
@@ -608,7 +707,7 @@ ${questions.join('\n')}
 
 ${rules}
 
-REPORTING YOUR PROGRESS
+${paceBlock}REPORTING YOUR PROGRESS
 Call ${PROGRESS_TOOL} as soon as the learner has finished answering a question,
 with that question's number — once each, in order, up to ${count}. Finished is
 about their answer and not about your reply: make the call at the top of the

@@ -45,6 +45,7 @@ import {
 } from '../realtime/vocoSessionStore';
 import { listPublishedSetups, publishVocoSession, type PublishedRow } from '../realtime/sessionStore';
 import { PATIENCE, type Patience } from '../realtime/settings';
+import { PACE, type Pace } from '../realtime/tutorPrompt';
 import { defaultModelKey, teachableModels } from '../realtime/models';
 import type { PublishedSetup } from '../realtime/session';
 
@@ -135,6 +136,11 @@ function empty(): VocoSession {
     // of learners actually wants. An existing one shows whatever it was saved
     // with, and absent means 'standard' — see `patience` on VocoSession.
     patience: 'patient',
+    // Natural rather than the pair patience gets, and the asymmetry is
+    // deliberate: waiting longer costs a beginner nothing, and talking in
+    // six-word sentences costs an intermediate class the register they came
+    // for. A teacher who wants it asks for it.
+    pace: 'natural',
     // The counting, transcribing one. A new lesson gets the model the whole
     // app defaults to rather than the last one anybody happened to try.
     modelKey: defaultModelKey(),
@@ -188,6 +194,7 @@ export default function Teach() {
   const [rows, setRows] = useState<string[]>(() => Array(DEFAULT_QUESTION_ROWS).fill(''));
   const [capMinutes, setCapMinutes] = useState(DEFAULT_CAP_MINUTES);
   const [patience, setPatience] = useState<Patience>('patient');
+  const [pace, setPace] = useState<Pace>('natural');
   const [modelKey, setModelKey] = useState<string>(defaultModelKey);
 
   // The tutor.
@@ -289,6 +296,10 @@ export default function Teach() {
     // a lesson saved before this control existed sent nothing, and opening it
     // must not quietly change how it behaves.
     setPatience(source.patience ?? 'standard');
+    // Absent reads as 'natural' for patience's reason: a lesson saved before
+    // this control existed composed no pace block, and opening it must not
+    // quietly start composing one.
+    setPace(source.pace ?? 'natural');
     // Absent reads as the default here rather than as some third thing, and
     // unlike patience that is not a compromise: a lesson saved before this
     // control existed ran on the default model, so opening it shows what it
@@ -422,6 +433,7 @@ export default function Teach() {
     questions,
     capMinutes,
     patience,
+    pace,
     modelKey,
     language,
     styleId: style?.id ?? '',
@@ -843,6 +855,45 @@ export default function Teach() {
                 </select>
                 <p className="text-[11px] leading-relaxed text-lingo-muted">
                   {PATIENCE.find((entry) => entry.key === patience)?.hint}
+                </p>
+              </div>
+
+              {/*
+                THE OTHER HALF OF THE SAME QUESTION, and next to it for that
+                reason: the control above is how long the tutor waits for the
+                learner, this is how fast it talks at them, and a class that
+                needs one usually needs the other.
+
+                NOT A SETTING, WHICH THE NOTE UNDER IT SAYS OUT LOUD. Every
+                other control on this page is a value that gets sent; this one
+                is a paragraph composed into the tutor's instructions, because
+                the Live API has no speaking rate to set. A teacher should know
+                that the tutor is being asked rather than told — it is the
+                difference between a control that always works and one that
+                mostly does, and finding that out from a lesson is worse than
+                reading it here. See PACE in tutorPrompt.ts.
+              */}
+              <div className="flex flex-col gap-1.5">
+                <label className={label} htmlFor="voco-pace">
+                  How fast the tutor talks
+                </label>
+                <select
+                  id="voco-pace"
+                  value={pace}
+                  onChange={(event) => setPace(event.target.value as Pace)}
+                  disabled={busy}
+                  className={`${field} cursor-pointer`}
+                >
+                  {PACE.map((entry) => (
+                    <option key={entry.key} value={entry.key}>
+                      {entry.label}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-[11px] leading-relaxed text-lingo-muted">
+                  {PACE.find((entry) => entry.key === pace)?.hint}
+                  {pace !== 'natural' &&
+                    ' Asked for in the tutor’s instructions rather than set on the call, so it layers over the manner instead of replacing it.'}
                 </p>
               </div>
 

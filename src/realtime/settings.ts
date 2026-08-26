@@ -60,6 +60,36 @@ export interface SessionSettings {
   proactiveAudio?: boolean;
 }
 
+/**
+ * The knobs a published lesson carries: every session setting but the voice.
+ *
+ * A TYPE RATHER THAN A LIST OF FIELDS WRITTEN OUT AGAIN, and that is the point
+ * of it. `PerformanceProfile` used to declare these eight itself, beside the
+ * face's own settings, which meant two files describing the same knobs and
+ * nothing making them agree. They agreed for a while and then did not: studio
+ * never populated a single one, so every lesson ever handed to a class went out
+ * with the block empty and ran on Google's defaults — which settings.ts says at
+ * the top of this file are the ones tuned for fluent speakers who do not pause
+ * to assemble a clause. The profile extends this now, so a knob added here is a
+ * knob a lesson carries.
+ *
+ * The voice is left out because it is not a house decision: it comes off the
+ * face a teacher picks, and the publish route reads it from there.
+ */
+export type HouseSettings = Omit<SessionSettings, 'voice'>;
+
+/** Those same keys at runtime, for picking the house half out of a settings object. */
+const HOUSE_KEYS: Array<keyof HouseSettings> = [
+  'temperature',
+  'maxOutputTokens',
+  'prefixPaddingMs',
+  'silenceDurationMs',
+  'startSensitivity',
+  'endSensitivity',
+  'affectiveDialog',
+  'proactiveAudio',
+];
+
 export interface SettingOption {
   value: string;
   label: string;
@@ -303,6 +333,34 @@ export const SETTING_FIELDS: SettingField[] = [
 /** What the panel shows for a given model, in order. */
 export function fieldsFor(model: ModelChoice): SettingField[] {
   return SETTING_FIELDS.filter((field) => field.applies(model));
+}
+
+/**
+ * What studio shows: the same fields, minus the voice.
+ *
+ * Studio has its own voice picker up beside the face, where it belongs — the
+ * voice is half of who is on screen rather than a knob tuned once — so offering
+ * it twice on one page would be two controls for one value.
+ */
+export function houseFieldsFor(model: ModelChoice): SettingField[] {
+  return fieldsFor(model).filter((field) => field.key !== 'voice');
+}
+
+/**
+ * The house half of a settings object, with the unset fields left out.
+ *
+ * Left out rather than set to undefined, because a profile is spread into a
+ * published setup and a key present with an undefined value is a key that gets
+ * stored — which would turn "let Google decide" into a pinned nothing. Same
+ * distinction the panel's controls are built around; see SessionSettings.
+ */
+export function houseSettings(settings: SessionSettings): HouseSettings {
+  const out: HouseSettings = {};
+  for (const key of HOUSE_KEYS) {
+    const value = settings[key];
+    if (value !== undefined) Object.assign(out, { [key]: value });
+  }
+  return out;
 }
 
 export function optionsFor(field: SettingField): SettingOption[] {

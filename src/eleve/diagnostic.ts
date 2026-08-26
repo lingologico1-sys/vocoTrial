@@ -624,6 +624,21 @@ export function buildDiagnostic(input: DiagnosticInput): string {
           : "this build's own — no house block was published with this code",
       ),
     );
+    /*
+     * The pace, which is the one thing a teacher chose that no payload can be
+     * read back to confirm — it is a block of prose in the prompt rather than a
+     * field on the setup frame. So it is named here and the block itself is
+     * visible in the composed prompt below, which is the only verification
+     * there is. See `PACE` in tutorPrompt.ts on why it cannot be a setting.
+     */
+    put(
+      field(
+        'Pace',
+        setup.pace && setup.pace !== 'natural'
+          ? `${setup.pace} — asked for in the prompt below, under HOW YOU SPEAK`
+          : "the tutor's own — no pace block was composed",
+      ),
+    );
     put(
       field(
         'Persona',
@@ -728,6 +743,7 @@ export function buildDiagnostic(input: DiagnosticInput): string {
       style: setup.style?.trim() || defaultInstructions(language),
       rules: setup.lessonRules,
       persona: setup.persona,
+      pace: setup.pace,
       questions: setup.questions,
     });
     put(

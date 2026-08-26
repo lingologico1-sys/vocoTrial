@@ -5,7 +5,7 @@ import {
   defaultInstructions,
   findInstructionPreset,
 } from '../../../src/realtime/instructions';
-import { composeTutorPrompt } from '../../../src/realtime/tutorPrompt';
+import { PACE, composeTutorPrompt } from '../../../src/realtime/tutorPrompt';
 import { patienceSettings } from '../../../src/realtime/settings';
 import { FALLBACK_PERFORMANCE } from '../../../src/realtime/house';
 import { newLessonCode } from '../../../src/realtime/lessonCodes';
@@ -238,10 +238,20 @@ export async function onRequestPost(
    * It reads the same defaults the student page will: a setup with no style
    * falls back to the built-in preset there too.
    */
+  /*
+   * The pace, resolved here rather than carried, which is the rule every word
+   * on this route follows: a word that names nothing becomes the default rather
+   * than a 400, the same call `patienceSettings` makes. An unknown pace is a
+   * lesson that talks at its own speed, which is a lesson; a 400 is a teacher
+   * two minutes before a class.
+   */
+  const pace = PACE.find((entry) => entry.key === incoming.pace)?.key ?? 'natural';
+
   const composed = composeTutorPrompt({
     style: styleText || defaultInstructions(language),
     rules: lessonRules ?? undefined,
     persona,
+    pace,
     questions,
   });
 
@@ -336,6 +346,11 @@ export async function onRequestPost(
     // unconfigured house stores nothing instead of storing a blank.
     style: styleText,
     lessonRules: lessonRules ?? undefined,
+    // 'natural' composes nothing, so it is stored as nothing: a setup with no
+    // pace and a setup asking for the tutor's own pace are the same lesson, and
+    // only one of them needs a field. The same bargain `lessonRules` takes on
+    // the line above.
+    pace: pace === 'natural' ? undefined : pace,
     persona,
     // Off the face, never off the request — see the header. An incoming `voice`
     // is a field /teach no longer sends, and honouring one would leave the door

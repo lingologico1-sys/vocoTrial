@@ -17,10 +17,11 @@
  *   performance    one profile every publish carries
  *
  * A TUTOR STYLE IS A RENDERED PROMPT, NOT A PRESET KEY, for sessionStore's
- * reason one level up: presets.ts is localStorage, so a key names a prompt the
- * teacher's browser has never heard of. Studio renders its current preset
- * against the language picker and publishes the text, which is the same move
- * publishing already makes for a student and for the same reason.
+ * reason one level up: a key names a row in the prompt library, and a library
+ * is a thing somebody can edit or delete after a teacher has picked from it.
+ * Studio publishes the text it has on screen, rendered against the language
+ * picker, which is the same move publishing already makes for a student and
+ * for the same reason.
  *
  * IT CARRIES THE KEY AS WELL WHEN THE PROMPT WAS A BUILT-IN, which is not a
  * retreat from that. A built-in is not in localStorage — it is in the bundle and
@@ -69,11 +70,12 @@ export interface TutorStyle {
   /**
    * The built-in prompt `text` came out of, when it came out of one.
    *
-   * WHY A STYLE CARRIES ONE AT ALL, having just been told that a preset key
-   * names a prompt in one browser's localStorage. That is true of a *saved*
-   * prompt and false of a built-in: the five in instructions.ts are functions of
-   * the language, they compile into the Worker, and a key that names one means
-   * the same thing in every browser and on the server. So the key is kept when
+   * WHY A STYLE CARRIES ONE AT ALL, having just been told that a style is a
+   * rendered prompt rather than a key. That holds for a *saved* prompt — which
+   * lives in the shared library and can be deleted from another machine — and
+   * not for a built-in: the five in instructions.ts are functions of the
+   * language, they compile into the Worker, and a key that names one means the
+   * same thing in every browser and on the server. So the key is kept when
    * there is one, and the publish route renders it against the language of the
    * lesson going out rather than spending the text frozen here.
    *
@@ -91,6 +93,12 @@ export interface TutorStyle {
    * `language`, and are still what /teach warns about. Absent on everything
    * saved before this field existed, too, which is why publishing falls back to
    * `text` rather than treating the absence as an error.
+   *
+   * AND ABSENT WHEN A BUILT-IN WAS EDITED BEFORE PUBLISHING, which studio can
+   * do now that it has the prompt box rather than a bare picker. A key sent
+   * alongside typed-over text would be a publish route re-rendering the
+   * built-in's own words and throwing the edit away — silently, in front of a
+   * class. Editing a built-in makes it prose, so it is stored as prose.
    */
   preset?: string;
   /** Last written. Sorts the picker, newest first. */

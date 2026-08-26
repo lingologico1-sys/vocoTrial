@@ -360,6 +360,7 @@ export default function Eleve() {
       style: session.style?.trim() || defaultInstructions(language),
       rules: session.lessonRules,
       persona: session.persona,
+      pace: session.pace,
       questions: session.questions,
     });
   }, [session]);
