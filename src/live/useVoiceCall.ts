@@ -1218,18 +1218,21 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
       /**
        * Written down, never shown.
        *
-       * There is nothing to do about this while the call is running: the
-       * cushion cannot be raised mid-sentence, and a learner told their
-       * connection is poor is a learner no longer thinking about French. It
-       * goes on the timeline so that the lesson which "kept cutting out" has
-       * something in its account saying so — and so that the one which did not
-       * has the absence, which is the more useful half.
+       * The player does what can be done about it — every starvation widens the
+       * cushion the queue restarts on, so a bad path corrects itself over the
+       * first few holes rather than paying for the same one all lesson. What is
+       * left is nothing to tell the learner: somebody told their connection is
+       * poor is somebody no longer thinking about French. So it goes on the
+       * timeline instead, where the lesson that "kept cutting out" has something
+       * in its account saying so — and the one that did not has the absence,
+       * which is the more useful half. The cushion each hole bought is on the
+       * line too: it is what says whether the widening kept up with the path.
        */
       onAudioGap: (gap: AudioGap) => {
         record(
           'audio',
           gap.kind === 'starved'
-            ? `the tutor's voice broke off for ${gap.ms}ms — the audio queue ran dry mid-sentence (${gap.count} so far this call)`
+            ? `the tutor's voice broke off for ${gap.ms}ms — the audio queue ran dry mid-sentence (${gap.count} so far this call); the queue now restarts ${gap.primeMs}ms ahead`
             : `the audio queue is thin: ${gap.ms}ms of lead left, so the next hiccup is likely to be heard`,
         );
       },

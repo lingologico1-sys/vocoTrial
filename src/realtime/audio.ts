@@ -327,13 +327,50 @@ interface EnvelopeFrame extends EnvelopeSample {
  * lead rather than a lead gone for the rest of the call.
  *
  * The size is a straight trade of responsiveness for continuity, settled for a
- * tutor rather than for a conversation. A fifth of a second before the agent
+ * tutor rather than for a conversation. A third of a second before the agent
  * starts talking is not something a learner can pick out; a seam in the middle
- * of the sentence they are trying to parse very much is. It is the number to
- * raise if a line turns out to need more, and the underrun logging below is
- * what says whether it does.
+ * of the sentence they are trying to parse very much is.
+ *
+ * This is only where a call *starts*, though. It was a fifth of a second and a
+ * constant, and the logging it was written to invite came back and said so: one
+ * lesson over the relay produced eight `starved` lines, several of them most of
+ * a second long, on a path that never once got the queue back to a full
+ * cushion. A fixed cushion is a bet on how bad the worst hop of the call will
+ * be, and there is no figure that both wins that bet on a Chromebook in
+ * Vancouver relayed through us-central1 and stays out of the way on a good
+ * line. So the bet is not made: this is the opening guess, and PRIME_STEP_SECONDS
+ * is how it is corrected by what actually happens.
  */
-const PRIME_SECONDS = 0.18;
+const BASE_PRIME_SECONDS = 0.32;
+
+/**
+ * How much the cushion grows each time the queue is starved mid-speech.
+ *
+ * A hole in the audio is the transport saying the cushion was too small, and it
+ * is the only honest measurement of that available — which makes it the one
+ * thing worth changing the cushion on. Each starvation adds this to the prime
+ * for the rest of the call, so a path that stalls once has more slack the next
+ * time and a path that stalls repeatedly climbs until it stops stalling.
+ *
+ * It never comes back down. A quiet stretch is not evidence the path improved,
+ * only that nothing has been asked of it lately, and lowering the cushion on
+ * that reasoning is how you arrive back at the hole you just paid for. The
+ * price of holding a cushion that turned out to be generous is a slightly later
+ * start to each turn, which nobody hears; the price of dropping it too early is
+ * another seam mid-sentence, which everybody does.
+ */
+const PRIME_STEP_SECONDS = 0.16;
+
+/**
+ * Where the growth stops.
+ *
+ * Past about a second the cushion has stopped being latency the learner
+ * tolerates and started being a tutor that seems not to have heard them. A path
+ * this bad is a fault to report rather than one to buffer around, and the
+ * timeline is already reporting it — every step of the climb is on the call's
+ * account, in `starved` lines that say what the cushion was raised to.
+ */
+const MAX_PRIME_SECONDS = 1;
 
 /**
  * The longest dry spell still read as starvation rather than as a new turn.
@@ -357,8 +394,13 @@ const LOW_WATER_STEP_SECONDS = 0.02;
  * developer and is looking for a fault, so it gets only the part that is one:
  * half the cushion eaten means the next hiccup is likely to be audible, and
  * that is worth a line whether or not anything has broken yet.
+ *
+ * A fraction rather than a figure, because the cushion moves. What counts as a
+ * thin queue on a path that has already been given a second of slack is not
+ * what counts as one at the opening prime, and a fixed threshold would go
+ * quiet exactly as the cushion grew past it.
  */
-const THIN_LEAD_SECONDS = PRIME_SECONDS / 2;
+const THIN_LEAD_FRACTION = 0.5;
 
 /**
  * A report that the output queue is running out, or has.
@@ -384,6 +426,15 @@ export type AudioGap =
       ms: number;
       /** How many times this has happened so far in the call. */
       count: number;
+      /**
+       * The cushion the queue will restart on from here, in ms.
+       *
+       * Reported because the climb is the interesting part of a bad call: three
+       * starvations at a cushion that never moved and three at a cushion that
+       * doubled between them are different faults, and only this tells them
+       * apart on a timeline read after the fact.
+       */
+      primeMs: number;
     }
   | {
       /** The queue is still ahead, but by less than half the cushion. */
@@ -399,7 +450,7 @@ export type AudioGap =
  * AudioContext clock rather than played on arrival — otherwise they overlap
  * into noise. Mostly faster, anyway: an empty queue starts a cushion ahead of
  * the clock rather than at it, so that the times they do not arrive in time are
- * absorbed instead of heard. See PRIME_SECONDS, and `watch` for how to tell
+ * absorbed instead of heard. See BASE_PRIME_SECONDS, and `watch` for how to tell
  * whether that is what you are hearing. `clear()` exists for barge-in: when the
  * user interrupts, audio already queued is no longer wanted and every pending
  * source is dropped.
@@ -420,6 +471,15 @@ export class PcmPlayer {
   private awaitingTurn = true;
   /** How many times the queue has been starved mid-speech this call. */
   private underruns = 0;
+  /**
+   * The cushion a dry queue currently restarts on, in seconds.
+   *
+   * Starts at BASE_PRIME_SECONDS and climbs by PRIME_STEP_SECONDS with every
+   * starvation, to MAX_PRIME_SECONDS. Held for the life of the player, which is
+   * the life of one call: a fresh call gets a fresh guess, because the thing
+   * being measured is this connection on this evening and not the browser.
+   */
+  private prime = BASE_PRIME_SECONDS;
   /**
    * The smallest lead seen all call, in seconds. Console only, and monotonic.
    *
@@ -521,7 +581,7 @@ export class PcmPlayer {
   private nextStart(context: AudioContext): number {
     return this.playhead > context.currentTime
       ? this.playhead
-      : context.currentTime + PRIME_SECONDS;
+      : context.currentTime + this.prime;
   }
 
   /**
@@ -568,14 +628,15 @@ export class PcmPlayer {
 
       // Back to a full cushion: whatever was happening is over, and the next
       // dip is a new episode that has earned a line of its own.
-      if (lead >= PRIME_SECONDS) {
+      if (lead >= this.prime) {
         this.episodeLow = Infinity;
         return;
       }
 
       // Only the part that is a fault reaches the call's account — see
-      // THIN_LEAD_SECONDS.
-      if (lead < THIN_LEAD_SECONDS && lead < this.episodeLow - LOW_WATER_STEP_SECONDS) {
+      // THIN_LEAD_FRACTION.
+      const thin = this.prime * THIN_LEAD_FRACTION;
+      if (lead < thin && lead < this.episodeLow - LOW_WATER_STEP_SECONDS) {
         this.report?.({ kind: 'thin', ms });
       }
       this.episodeLow = Math.min(this.episodeLow, lead);
@@ -590,12 +651,25 @@ export class PcmPlayer {
     // The episode is over the moment it costs a hole: the queue re-primes from
     // here, and the descent that follows is worth warning about again.
     this.episodeLow = Infinity;
+
+    /**
+     * The correction, and the only place the cushion ever changes.
+     *
+     * It is applied *before* the chunk that found the queue dry is scheduled —
+     * `watch` runs first in `enqueue` for exactly this reason — so the audio
+     * that resumes after the hole already resumes on the wider cushion. Waiting
+     * until the next dry queue would spend the whole of this turn proving the
+     * old cushion wrong a second time.
+     */
+    this.prime = Math.min(MAX_PRIME_SECONDS, this.prime + PRIME_STEP_SECONDS);
+
     const ms = Math.round(gap * 1000);
+    const primeMs = Math.round(this.prime * 1000);
     console.warn(
       `PcmPlayer: underrun #${this.underruns} — queue dry for ${ms}ms ` +
-        'mid-speech; that is the pause you heard.',
+        `mid-speech; that is the pause you heard. Cushion now ${primeMs}ms.`,
     );
-    this.report?.({ kind: 'starved', ms, count: this.underruns });
+    this.report?.({ kind: 'starved', ms, count: this.underruns, primeMs });
   }
 
   /**
@@ -749,7 +823,10 @@ export class PcmPlayer {
     // actually found rather than the one it is about to create.
     this.watch(context);
     // A dry queue restarts a cushion ahead of the clock rather than at it — see
-    // PRIME_SECONDS. Anything still playing is simply followed on from.
+    // BASE_PRIME_SECONDS. Anything still playing is simply followed on from.
+    // The `watch` above is what may just have widened that cushion, so the
+    // order of these two lines is the adaptation: this chunk resumes on the
+    // corrected prime rather than on the one that failed.
     const startAt = this.nextStart(context);
     // Measured before it is scheduled, so the envelope is ready the moment the
     // audio is — a lookahead that arrived after the sound would be no lookahead.
