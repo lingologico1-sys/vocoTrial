@@ -12,6 +12,8 @@ import {
   DEFAULT_NOD_CHANCE,
   DEFAULT_NOD_DEPTH,
   DEFAULT_PRESS_TRIGGERS,
+  DEFAULT_SMILE_GAP,
+  DEFAULT_SMILE_HOLD,
   DEFAULT_TILT_CHANCE,
   DEFAULT_TILT_ROLL,
   DEFAULT_TILT_SETTLE,
@@ -248,7 +250,13 @@ interface FaceProps {
   /**
    * Whether the face is at the edges of a conversation rather than inside one.
    *
-   * The `smile` pose goes on while this is true, over `rest` and under nothing.
+   * IT SAYS A SMILE IS WARRANTED, NOT THAT ONE IS WORN. The difference is
+   * `smileHold` below and it is the whole of why this prop is no longer enough
+   * on its own: the two moments that set it are moments, but the states they
+   * describe are open-ended — an idle page waits as long as the learner does —
+   * and a pose worn for the whole of a state is a mask rather than a gesture.
+   * So this arms the smile and the hold takes it off again.
+   *
    * Two moments set it and no others — before the tutor has said its first word,
    * and once its goodbye has finished playing — which is what keeps it from
    * becoming a face that smiles through every silence a learner leaves while
@@ -271,6 +279,34 @@ interface FaceProps {
    * works.
    */
   smiling?: boolean;
+  /**
+   * Whether the armed smile is held rather than let go — the one exemption from
+   * the schedule below.
+   *
+   * There is exactly one state where a decaying smile is the wrong answer, and
+   * it is the state the smile's first term was written for: the socket is up and
+   * the tutor has not spoken yet. That gap is a second or two, it is *about* to
+   * end, and it is covered on purpose — a face that let its greeting go halfway
+   * through it would go neutral immediately before saying hello, which is worse
+   * than either behaviour on its own.
+   *
+   * A caller that never sets it gets the schedule for every smile, which is the
+   * right default: this is an exemption granted by a caller that knows something
+   * is coming, and nothing here can know that.
+   */
+  smileSustain?: boolean;
+  /**
+   * How long a smile is worn before it is let go, in seconds, and how long the
+   * face waits before smiling again. See DEFAULT_SMILE_HOLD.
+   *
+   * A hold of zero is no smile at all, and is the way to switch this off from
+   * the panel rather than a degenerate case to guard against — a face whose kit
+   * has a smile patch it never wears is a legitimate thing to want to look at. A
+   * gap of zero is one smile per edge and no repeat, which is the conservative
+   * reading of DEFAULT_SMILE_GAP's own argument against itself.
+   */
+  smileHold?: number;
+  smileGap?: number;
   /**
    * Lets a kit's artwork paint past the frame, for a caller that clips already.
    *
@@ -356,10 +392,21 @@ export default function Face({
   speaking = false,
   hold = false,
   smiling = false,
+  smileSustain = false,
+  smileHold = DEFAULT_SMILE_HOLD,
+  smileGap = DEFAULT_SMILE_GAP,
   bleed = false,
   mouthRef,
 }: FaceProps) {
   const [blinking, setBlinking] = useState(false);
+  /**
+   * Whether the smile is being worn this instant, as against warranted.
+   *
+   * State rather than a derived value because the thing that takes it off is a
+   * clock and not a prop: `smiling` stays true for the whole of an idle page,
+   * and what turns over underneath it is this. See the schedule below.
+   */
+  const [smileWorn, setSmileWorn] = useState(false);
   const [perf, setPerf] = useState<Performance>({
     head: 0,
     brow: 0,
@@ -477,6 +524,63 @@ export default function Face({
       timers.current = [];
     };
   }, []);
+
+  /**
+   * The smile's own clock: worn on arming, let go after the hold, and brought
+   * back at the gap for as long as the moment that armed it lasts.
+   *
+   * TIMEOUTS RATHER THAN THE rAF LOOP, which is the blink's arrangement and for
+   * the blink's reason doubled. What is wanted here is a boolean flipping at two
+   * or three points a minute, and a frame clock is the wrong instrument for
+   * that; more to the point this is the *only* thing on the face that has to
+   * keep working when there is no audio anywhere near the page, and SMILE_IN_MS
+   * already explains what runs the fade once the boolean has flipped. Neither
+   * clock is doing the other's job.
+   *
+   * REBUILT WHEN ITS INPUTS CHANGE, unlike the head's loop, which goes to some
+   * lengths not to be. That loop refuses because rebuilding it would reset a
+   * phrase envelope and two lockouts mid-sentence; there is nothing here to
+   * lose. A hold dragged on the panel restarting the smile it is being dragged
+   * against is the behaviour you want from a dial, not a bug in one.
+   *
+   * The jitter is the blink's, in the blink's spelling, because a face that
+   * smiles on the beat is the same failure as one that blinks on it — and this
+   * one is worse, being longer and further apart, which is exactly the spacing
+   * at which a person starts to feel a loop.
+   */
+  useEffect(() => {
+    if (!smiling) {
+      setSmileWorn(false);
+      return;
+    }
+    // The exemption. No clock at all rather than a very long one: the caller is
+    // saying this ends when something happens, and a timer would be this file
+    // guessing when.
+    if (smileSustain) {
+      setSmileWorn(true);
+      return;
+    }
+
+    const pending: number[] = [];
+    const wear = () => {
+      setSmileWorn(true);
+      if (smileHold > 0) pending.push(window.setTimeout(release, smileHold * 1000));
+    };
+    const release = () => {
+      setSmileWorn(false);
+      if (smileGap > 0) {
+        pending.push(window.setTimeout(wear, smileGap * 1000 * (0.45 + Math.random())));
+      }
+    };
+
+    // A hold of nothing is the feature off, and the way it is off is that the
+    // pose is never worn — not that it is worn for a frame and snatched back,
+    // which with a 420ms fade under it would read as a flinch.
+    if (smileHold > 0) wear();
+    else setSmileWorn(false);
+
+    return () => pending.forEach(clearTimeout);
+  }, [smiling, smileSustain, smileHold, smileGap]);
 
   /**
    * The head's own clock, which is the blink's argument applied to the rest of
@@ -641,7 +745,14 @@ export default function Face({
    * `rest`, and the smile is on its way out that same frame — SMILE_OUT_MS, not
    * a term that decays as the loudness climbs.
    */
-  const smiled = smiling && viseme === 'rest' ? 1 : 0;
+  //
+  // Reads `smileWorn` and not the prop, so the analyser's veto and the hold's
+  // expiry are the same line and neither can outvote the other: whichever says
+  // no, the answer is no. The schedule keeps running underneath a veto rather
+  // than pausing for it, which is right — a smile whose hold expired during a
+  // sentence has expired, and reappearing as the sentence ends would be a
+  // gesture arriving on a cue that had already gone by.
+  const smiled = smileWorn && viseme === 'rest' ? 1 : 0;
 
   /**
    * The drawn face, wearing artwork.

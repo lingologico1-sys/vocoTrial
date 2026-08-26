@@ -46,6 +46,8 @@ import {
   DEFAULT_NOD_CHANCE,
   DEFAULT_NOD_DEPTH,
   DEFAULT_PRESS_TRIGGERS,
+  DEFAULT_SMILE_GAP,
+  DEFAULT_SMILE_HOLD,
   DEFAULT_TILT_CHANCE,
   DEFAULT_TILT_ROLL,
   DEFAULT_TILT_SETTLE,
@@ -55,6 +57,10 @@ import {
   NOD_DEPTH_MAX,
   NOD_DEPTH_MIN,
   PRESS_TRIGGERS,
+  SMILE_GAP_MAX,
+  SMILE_GAP_MIN,
+  SMILE_HOLD_MAX,
+  SMILE_HOLD_MIN,
   TILT_ROLL_MAX,
   TILT_ROLL_MIN,
   TILT_SETTLE_MAX,
@@ -183,6 +189,8 @@ interface Prefs {
   nodDepth: number;
   nodChance: number;
   browFlashChance: number;
+  smileHold: number;
+  smileGap: number;
   roundness: RoundnessMode;
 }
 
@@ -321,7 +329,21 @@ export default function Studio() {
   );
 
   /*
-    The ten controls the Head motion fieldset owns, gathered so it can be put
+    The mouth's other movement that is not speech, and the only pair on this
+    panel that tunes something this page cannot show you.
+
+    The stage below never smiles: `smiling` is computed from where a lesson has
+    got to, which is a thing the student page knows and the workshop does not.
+    That is not an argument for hiding these — the values travel with a published
+    setup like every other dial here, and a face that greeted a learner and then
+    froze for ten minutes was the bug that produced them. It is an argument for
+    saying so, which the note under the sliders does.
+  */
+  const [smileHold, setSmileHold] = useState<number>(prefs.smileHold ?? DEFAULT_SMILE_HOLD);
+  const [smileGap, setSmileGap] = useState<number>(prefs.smileGap ?? DEFAULT_SMILE_GAP);
+
+  /*
+    The fifteen controls the Head motion fieldset owns, gathered so it can be put
     back. Listed in the order the panel shows them rather than the order Prefs
     declares them, so that adding a row and forgetting it here is a discrepancy
     visible from the row itself.
@@ -346,7 +368,9 @@ export default function Studio() {
     sameSet(tilt, DEFAULT_TILT_TRIGGERS) &&
     tiltRoll === DEFAULT_TILT_ROLL &&
     tiltSettle === DEFAULT_TILT_SETTLE &&
-    tiltChance === DEFAULT_TILT_CHANCE;
+    tiltChance === DEFAULT_TILT_CHANCE &&
+    smileHold === DEFAULT_SMILE_HOLD &&
+    smileGap === DEFAULT_SMILE_GAP;
 
   const resetMotion = () => {
     setMotion(DEFAULT_HEAD_MOTION);
@@ -362,6 +386,8 @@ export default function Studio() {
     setTiltRoll(DEFAULT_TILT_ROLL);
     setTiltSettle(DEFAULT_TILT_SETTLE);
     setTiltChance(DEFAULT_TILT_CHANCE);
+    setSmileHold(DEFAULT_SMILE_HOLD);
+    setSmileGap(DEFAULT_SMILE_GAP);
   };
 
   const [showLog, setShowLog] = useState(false);
@@ -508,6 +534,8 @@ export default function Studio() {
           nodDepth,
           nodChance,
           browFlashChance,
+          smileHold,
+          smileGap,
           roundness,
         } satisfies Prefs),
       );
@@ -533,6 +561,8 @@ export default function Studio() {
     nodDepth,
     nodChance,
     browFlashChance,
+    smileHold,
+    smileGap,
     roundness,
   ]);
 
@@ -695,6 +725,8 @@ export default function Studio() {
     nodDepth,
     nodChance,
     browFlashChance,
+    smileHold,
+    smileGap,
   });
 
   const saveHousePerformance = async () => {
@@ -1399,6 +1431,109 @@ export default function Studio() {
           </div>
 
           {/*
+            The smile, which is a row rather than a checkbox because the question
+            it answers is not whether but for how long.
+
+            It sits under the press for the reason the press sits apart from the
+            brows: these are the two things the mouth does with no sound behind
+            them, and they are now the same argument twice. The difference worth
+            seeing from the panel is that the press is a maintenance movement a
+            silent face can make honestly, while the smile is an expression — so
+            the press gets a box you tick and the smile gets a leash you shorten.
+
+            Seconds, not milliseconds, and no unit conversion in the readout.
+            Every other slider here is a shape and reads as a percentage or an
+            angle; these two are durations, and a duration is the one quantity on
+            this panel you can check against the face with your own eyes.
+          */}
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+            <span className="w-16 shrink-0 text-xs text-slate-500">Smile</span>
+            <label
+              title="How long the tutor wears its smile once it arrives — before the first word of a call and after its goodbye. It then lets it go and waits with the neutral face, which is where blinking and the waiting press live. Zero is no smile at all."
+              className="flex min-w-[11rem] flex-1 cursor-help items-center gap-2 text-xs text-slate-500"
+            >
+              Held for
+              <input
+                type="range"
+                min={SMILE_HOLD_MIN}
+                max={SMILE_HOLD_MAX}
+                step={0.5}
+                value={smileHold}
+                onChange={(event) => setSmileHold(Number(event.target.value))}
+                className="flex-1 accent-sky-500"
+              />
+              <span className="w-24 text-right font-mono text-slate-300">
+                {smileHold === 0 ? 'never' : `${smileHold.toFixed(1)}s`}
+              </span>
+            </label>
+
+            {/*
+              Hidden at a hold of zero, which is the tilt's rule about `waiting`
+              applied to a pair instead of a row: with no smile to wear there is
+              nothing for a gap between smiles to space out, and a live slider
+              under a dead one is a control that does nothing you can see.
+            */}
+            {smileHold > 0 && (
+              <label
+                title="How long the face waits before smiling again through a silence nobody is filling — jittered, like every other schedule here. This is the one movement on the face with no cause in the conversation at all, which is why it is spaced three times further apart than anything else. Zero is one smile per moment and no repeat."
+                className="flex min-w-[11rem] flex-1 cursor-help items-center gap-2 text-xs text-slate-500"
+              >
+                Again every
+                <input
+                  type="range"
+                  min={SMILE_GAP_MIN}
+                  max={SMILE_GAP_MAX}
+                  step={5}
+                  value={smileGap}
+                  onChange={(event) => setSmileGap(Number(event.target.value))}
+                  className="flex-1 accent-sky-500"
+                />
+                <span className="w-24 text-right font-mono text-slate-300">
+                  {smileGap === 0 ? 'once only' : `${smileGap}s`}
+                </span>
+              </label>
+            )}
+          </div>
+
+          {/*
+            Owed harder than the tilt's or the press's, because those two govern
+            a gesture you could at least catch by watching long enough. This one
+            governs a gesture that cannot happen on this page at all.
+          */}
+          <Why
+            summary={
+              smileHold === 0
+                ? 'No smile. The tutor meets a learner with the same face it wears between sentences.'
+                : smileGap === 0
+                  ? `Smiling for ${smileHold.toFixed(1)}s at each end of a call, once.`
+                  : `Smiling for ${smileHold.toFixed(1)}s at each end of a call, then again every ${smileGap}s of quiet.`
+            }
+          >
+            <p>
+              The stage above will not show you this. A smile is worn where a lesson is — before
+              the tutor's first word and after its goodbye — and this page has no lesson, so the
+              face here never wears one whatever these say. The student page is where to judge it,
+              and these values travel there with a published setup.
+            </p>
+            {smileHold > 0 && (
+              <p>
+                What the hold buys is what happens after it. The smile paints over the resting
+                mouth at full strength, so while it is worn nothing else the mouth does is visible
+                — including the waiting press, which is the only movement a silent face is allowed.
+                Letting the smile go is what uncovers it.
+              </p>
+            )}
+            {smileHold > 0 && smileGap > 0 && (
+              <p>
+                The repeat is the one thing on this face that moves with nothing in the
+                conversation to answer, which is the test every other idle movement here was
+                refused for. It is set far apart on purpose. Drag it to zero if you would rather the
+                tutor greeted a learner once and then simply waited.
+              </p>
+            )}
+          </Why>
+
+          {/*
             Spelled out rather than left in the tooltip, because the three
             cadences differ in a way their labels cannot carry: two of them are
             distinguished by how *often* they move rather than by how they look
@@ -1494,7 +1629,7 @@ export default function Studio() {
           </Why>
 
           {/*
-            Thirteen controls, and no way back from them but this.
+            Fifteen controls, and no way back from them but this.
 
             They are not thirteen independent settings. The lockouts, schedules
             and odds in headMotion.ts are picked against one another — the

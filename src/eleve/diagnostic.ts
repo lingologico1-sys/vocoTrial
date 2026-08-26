@@ -246,6 +246,10 @@ function performanceBlock(setup: PublishedSetup): string {
       ` · brow blink ${setup.browBlink}` +
       maybe('brow flash', setup.browFlashChance),
     `listen nod ${setup.listenNod} · depth ${setup.nodDepth}` + maybe('chance', setup.nodChance),
+    // Both halves or neither, because either one alone is unreadable: a hold
+    // with no gap beside it looks like a smile that never comes back, and a gap
+    // with no hold looks like one that never leaves.
+    `smile` + maybe('hold', setup.smileHold) + maybe('gap', setup.smileGap),
   ].join('\n');
 }
 

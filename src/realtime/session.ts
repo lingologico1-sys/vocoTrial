@@ -128,6 +128,18 @@ export interface PerformanceProfile {
   nodDepth: number;
   nodChance?: number;
   browFlashChance?: number;
+  /**
+   * How long the tutor wears its smile at the ends of a call, in seconds, and
+   * how long it waits before wearing it again while nothing happens.
+   *
+   * Optional for `tiltSettle`'s reason and by its mechanism, and this pair has
+   * the sharpest version of the argument for it: a setup published before these
+   * existed described a face that smiled *permanently* on an idle page, and the
+   * fix is the face's own defaults rather than zeroes. Zero here would republish
+   * the old bug inverted — a tutor that never smiles at all.
+   */
+  smileHold?: number;
+  smileGap?: number;
 
   /**
    * Turn-taking, and the reason this block is optional throughout.
@@ -406,6 +418,8 @@ export function looksLikeSetup(value: unknown): value is PublishedSetup {
     typeof setup.listenNod === 'boolean' &&
     typeof setup.nodDepth === 'number' &&
     (setup.nodChance === undefined || typeof setup.nodChance === 'number') &&
-    (setup.browFlashChance === undefined || typeof setup.browFlashChance === 'number')
+    (setup.browFlashChance === undefined || typeof setup.browFlashChance === 'number') &&
+    (setup.smileHold === undefined || typeof setup.smileHold === 'number') &&
+    (setup.smileGap === undefined || typeof setup.smileGap === 'number')
   );
 }

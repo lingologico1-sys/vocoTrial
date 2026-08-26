@@ -74,8 +74,13 @@ interface SpeakingFaceProps {
   tiltCue?: TiltCue | null;
   /** Whether the agent's audio is playing. Only the tilt reads it. */
   speaking?: boolean;
-  /** Whether to wear the smile pose, at the two ends of a call. See Face. */
+  /** Whether a smile is warranted, at the two ends of a call. See Face. */
   smiling?: boolean;
+  /** Whether that smile is held rather than let go on a clock. See Face. */
+  smileSustain?: boolean;
+  /** How long it is worn, and how long until the next. See DEFAULT_SMILE_HOLD. */
+  smileHold?: number;
+  smileGap?: number;
   /** Lets a kit paint past the frame, for a caller that clips already. See Face. */
   bleed?: boolean;
   mouthRef?: React.Ref<SVGCircleElement>;
@@ -111,6 +116,9 @@ export default function SpeakingFace({
   tiltCue,
   speaking,
   smiling,
+  smileSustain,
+  smileHold,
+  smileGap,
   bleed,
   mouthRef,
 }: SpeakingFaceProps) {
@@ -213,6 +221,9 @@ export default function SpeakingFace({
       tiltCue={tiltCue}
       speaking={speaking}
       smiling={smiling}
+      smileSustain={smileSustain}
+      smileHold={smileHold}
+      smileGap={smileGap}
       bleed={bleed}
       mouthRef={mouthRef}
     />

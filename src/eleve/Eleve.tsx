@@ -908,6 +908,25 @@ export default function Eleve() {
     !call.live || !lastAgentTurn || (closing && closingTurnDone && !call.speaking);
 
   /**
+   * The one of those three moments that is allowed to hold the smile rather than
+   * let it go.
+   *
+   * IT IS THE SECOND TERM ABOVE, NARROWED BY THE FIRST. `!lastAgentTurn` alone
+   * is true on a page nobody has called yet, which is the state this must not
+   * cover — that page is open for as long as the learner leaves it open, and it
+   * is precisely where a held smile stopped reading as warmth. With `call.live`
+   * in front of it the term is the connecting wait and nothing else: a second or
+   * two, ending at a word, and worth covering whole. See `smileSustain` in
+   * live/Face.tsx.
+   *
+   * The other two moments get the clock. An idle page and a finished lesson are
+   * both open-ended, and the face's answer to open-ended is to greet, settle,
+   * and then wait like something alive rather than hold the greeting until the
+   * next thing happens.
+   */
+  const smileSustain = call.live && !lastAgentTurn;
+
+  /**
    * The first tab, which is two things in sequence rather than one thing with a
    * fixed name.
    *
@@ -1094,6 +1113,7 @@ export default function Eleve() {
               openingDone={call.openingDone}
               busy={call.busy}
               smiling={smiling}
+              smileSustain={smileSustain}
               tiltCue={call.tiltCue}
               idleHint={idleHint}
               onCall={() => {

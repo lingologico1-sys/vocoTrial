@@ -201,6 +201,8 @@ export const FALLBACK_PERFORMANCE: PerformanceProfile = {
   nodDepth: 1.5,
   nodChance: 0.35,
   browFlashChance: 0.25,
+  smileHold: 4,
+  smileGap: 45,
 };
 
 /**

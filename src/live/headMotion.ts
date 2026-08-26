@@ -1287,6 +1287,44 @@ export const PRESS_TRIGGERS: Array<{ id: PressTrigger; label: string; hint: stri
 ];
 
 /**
+ * How long the smile is worn once it arrives, and how long the face waits
+ * before wearing it again, in seconds.
+ *
+ * THE SMILE IS NOT PERFORMED HERE and never touches this class — it is an
+ * opacity on a patch in Face.tsx, driven by a CSS transition rather than by the
+ * frame clock everything else on this page runs on. Its two dials live here
+ * anyway, because they are read by the panel that reads all the others and
+ * because the argument for them is the waiting press's argument continued: this
+ * file is where the question of what a face does with nobody talking to it is
+ * settled, and the answer had better be settled in one place.
+ *
+ * THE HOLD IS THE WHOLE FIX. Before it the smile was a state and not a gesture:
+ * true for the entire idle page, painted at full opacity over `rest`, and so
+ * over the waiting press and everything else the schedules below were putting
+ * under it. A face frozen mid-smile for as long as a learner takes to press a
+ * button is not warm, it is taxidermy — and worse, it was hiding the only
+ * movement the mouth is allowed to make while waiting. Four seconds is long
+ * enough to read as a greeting and short enough that nobody watches it set.
+ *
+ * THE GAP IS THE CONCESSION AND IT IS A REAL ONE. A smile arriving out of a
+ * silence has no cause in the conversation, which is exactly what the sway lost
+ * on and what the waiting press only survived by travelling toward a closed
+ * mouth. This one does not have that defence: it is a mouth changing shape with
+ * nothing to answer. It ships anyway, at a spacing an order of magnitude longer
+ * than any other schedule here — the press is fourteen seconds, this is
+ * forty-five — because the thing it buys is that a learner who looks up two
+ * minutes later finds a face that has been waiting rather than one that has
+ * stopped. Jittered like the rest. Set it to zero for one greeting and no more,
+ * which is the honest reading of the paragraph above and is one slider away.
+ */
+export const DEFAULT_SMILE_HOLD = 4;
+export const DEFAULT_SMILE_GAP = 45;
+export const SMILE_HOLD_MIN = 0;
+export const SMILE_HOLD_MAX = 12;
+export const SMILE_GAP_MIN = 0;
+export const SMILE_GAP_MAX = 120;
+
+/**
  * The lips closing at the edge of a turn — the mouth's one movement that is not
  * speech.
  *

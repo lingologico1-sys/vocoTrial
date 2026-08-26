@@ -40,11 +40,17 @@ interface TutorStageProps {
   /** Mid-connect. The microphone carries this too — see LearnerPill. */
   busy: boolean;
   /**
-   * Whether the face wears its smile: before the tutor speaks, and once its
-   * goodbye has played out. Computed in Eleve, which holds the lesson's clock —
-   * this component knows what is on screen, not where the conversation is.
+   * Whether a smile is warranted: before the tutor speaks, and once its goodbye
+   * has played out. Computed in Eleve, which holds the lesson's clock — this
+   * component knows what is on screen, not where the conversation is.
+   *
+   * Warranted, not worn. How long it is actually worn out of a warrant this
+   * open-ended is the face's own business and is timed there. See `smiling` and
+   * the smile's schedule in live/Face.tsx.
    */
   smiling: boolean;
+  /** Whether that smile is held instead: the wait for the first word. See Face. */
+  smileSustain: boolean;
   tiltCue: TiltCue | null;
   /** What the pill says before a call: start, or start again. */
   idleHint: string;
@@ -65,6 +71,7 @@ export default function TutorStage({
   openingDone,
   busy,
   smiling,
+  smileSustain,
   tiltCue,
   idleHint,
   onCall,
@@ -165,6 +172,9 @@ export default function TutorStage({
             tiltCue={tiltCue}
             speaking={speaking}
             smiling={smiling}
+            smileSustain={smileSustain}
+            smileHold={session.smileHold}
+            smileGap={session.smileGap}
             bleed
           />
         </div>
