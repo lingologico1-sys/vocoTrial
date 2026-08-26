@@ -167,7 +167,14 @@ export async function publishKit(
   kit: FaceKit,
   options: { ready: boolean; hasOriginal: boolean },
 ): Promise<PublishedFace> {
-  const thumb = await thumbnail(kit.base);
+  // The smiling portrait when the author drew one, and this is the only place
+  // it is ever used. It is not the base and never becomes it — see
+  // SMILE_BASE_PROMPT — so a face that has one is neutral everywhere except in
+  // the picker, where a smile is worth more than accuracy about a resting mouth
+  // nobody is comparing it against. Baked in here rather than chosen at draw
+  // time so that a browser picking a face has one image to fetch, as it always
+  // did.
+  const thumb = await thumbnail(kit.bases?.smile ?? kit.base);
   // Split rather than deleted from a copy: `original` is one member among data
   // URLs, and pulling it out by name here is what makes the request's two
   // halves independent.

@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { CANVAS_EDGE } from '../facekit/imageModels';
 import { browHeadroom, type FaceKit } from '../facekit/kit';
-import { BROW_BOXES } from '../facekit/slots';
+import { BROW_BOXES, type SlotId } from '../facekit/slots';
 import {
   DEFAULT_BROW_BLINK,
   DEFAULT_BROW_FLASH_CHANCE,
@@ -246,6 +246,32 @@ interface FaceProps {
    */
   hold?: boolean;
   /**
+   * Whether the face is at the edges of a conversation rather than inside one.
+   *
+   * The `smile` pose goes on while this is true, over `rest` and under nothing.
+   * Two moments set it and no others — before the tutor has said its first word,
+   * and once its goodbye has finished playing — which is what keeps it from
+   * becoming a face that smiles through every silence a learner leaves while
+   * thinking. See Eleve.tsx, which computes it.
+   *
+   * Ignored while the analyser is reporting anything but `rest`, so a caller
+   * that leaves it on into a turn gets a mouth that talks rather than a smile
+   * ghosting over a vowel. That is a guard and not a licence: the fade is timed
+   * for the ends of a call, and a caller holding this through speech would be
+   * asking the guard to do the work of a decision it should have made itself.
+   *
+   * Absent in a kit is absent on the face: a kit with no smile patch simply
+   * stays at `rest`, which VISEMES.rest already draws faintly upturned.
+   *
+   * The placeholder ignores it, and cannot do otherwise. A LipShape is three
+   * numbers describing an opening — half-width, how far the upper lip rises, how
+   * far the lower one drops — and none of them is curvature. There is no smile
+   * to interpolate towards in that table, and adding a fourth number to draw one
+   * would be inventing a mouth for a face whose whole job is to prove the driver
+   * works.
+   */
+  smiling?: boolean;
+  /**
    * Lets a kit's artwork paint past the frame, for a caller that clips already.
    *
    * The clip this turns off is described where it is applied: the picture is
@@ -288,7 +314,24 @@ const toHead = (value: number) => (value / CANVAS_EDGE) * 200;
  * analyser cannot select it, so today it sits at opacity 0 for the whole of
  * every call, waiting for a driver that can.
  */
-const VISEME_ORDER: Viseme[] = ['rest', 'mbp', 'fv', 'ee', 'uh', 'aa', 'oh'];
+const VISEME_ORDER: SlotId[] = ['rest', 'mbp', 'fv', 'ee', 'uh', 'aa', 'oh', 'smile'];
+
+/**
+ * How long the smile takes to arrive and to leave, in milliseconds.
+ *
+ * A CSS transition rather than the rAF loop everything else here runs on, and
+ * that is the one place in this file where the frame clock is the wrong tool:
+ * this pose is worn when there is no audio, and with no audio there is no tap,
+ * no loop and no frames — a fade driven from here would have nothing to drive
+ * it. The browser eases an opacity with the tab idle; this component cannot.
+ *
+ * Slower in than out because the two do different jobs. Arriving, it is the
+ * whole gesture and wants to be seen happening. Leaving, it is getting out of
+ * the way of a mouth that has started talking, and the only thing that matters
+ * is that it is gone before the first word lands.
+ */
+const SMILE_IN_MS = 420;
+const SMILE_OUT_MS = 160;
 
 export default function Face({
   shape,
@@ -312,6 +355,7 @@ export default function Face({
   tiltCue,
   speaking = false,
   hold = false,
+  smiling = false,
   bleed = false,
   mouthRef,
 }: FaceProps) {
@@ -582,6 +626,22 @@ export default function Face({
    * already done its work upstream, deciding that there was a press at all.
    */
   const pressed = perf.press * Math.max(0, 1 - level / SILENCE);
+
+  /**
+   * The smile, on or off, with the browser easing between the two.
+   *
+   * The cliff the press goes to such lengths to avoid, taken deliberately —
+   * because here it is not a cliff. `pressed` has to ramp because it is read on
+   * every frame of a fade this file is running itself; this is a target handed
+   * to a CSS transition, and a target is *supposed* to jump. What the eye gets
+   * is still the gradual thing.
+   *
+   * Sharing the analyser's test rather than the ramp keeps the rule honest at
+   * the one moment it matters: the tutor starts its first word, `viseme` leaves
+   * `rest`, and the smile is on its way out that same frame — SMILE_OUT_MS, not
+   * a term that decays as the loudness climbs.
+   */
+  const smiled = smiling && viseme === 'rest' ? 1 : 0;
 
   /**
    * The drawn face, wearing artwork.
@@ -862,6 +922,14 @@ export default function Face({
               `pressed` is what keeps the second branch from ever firing during
               speech: it is zero for every frame the analyser is not reporting
               `rest`, so `mbp` cannot be laid over a vowel.
+
+              The smile is the same arrangement again, with the same guard said
+              a different way — `viseme === 'rest'` is exactly `level < SILENCE`,
+              which is the test `pressed` performs with a ramp. It is last in the
+              order and so painted over both, which costs nothing: the two never
+              overlap in practice, since a press fires at the edges of a turn and
+              a smile is only worn when there are no turns left to be at the edge
+              of.
             */}
             {VISEME_ORDER.map((id) => {
               const patch = kit.patches[id];
@@ -874,7 +942,14 @@ export default function Face({
                   y={toHead(mouth.y)}
                   width={toHead(mouth.width)}
                   height={toHead(mouth.height)}
-                  opacity={viseme === id ? 1 : id === 'mbp' ? pressed : 0}
+                  opacity={id === 'smile' ? smiled : viseme === id ? 1 : id === 'mbp' ? pressed : 0}
+                  style={
+                    id === 'smile'
+                      ? {
+                          transition: `opacity ${smiled ? SMILE_IN_MS : SMILE_OUT_MS}ms ease-in-out`,
+                        }
+                      : undefined
+                  }
                 />
               );
             })}

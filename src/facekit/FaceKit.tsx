@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import BoxPicker from './BoxPicker';
 import DiagnosticsPanel from './DiagnosticsPanel';
 import Filmstrip from './Filmstrip';
@@ -95,11 +95,18 @@ type Candidate = {
 const MOUTH_SLOTS = SLOTS.filter((entry) => entry.region === 'mouth');
 
 /**
- * The rest poses the Base card can draw, in the order the buttons show them.
+ * The whole-frame passes the Base card can draw, in the order the buttons show
+ * them.
  *
  * Kept beside the region tabs rather than in the Base card because the two
  * controls answer the same question in different keys: the tabs pick which box
  * to judge, these pick which face the boxes are judged against.
+ *
+ * Only one of them is a rest pose now. The neutral is the face every patch is
+ * cut from and composited onto; the smile is the portrait this face is listed
+ * by and nothing else — see SMILE_BASE_PROMPT. They still belong on one switch,
+ * because what the switch does is put a drawn frame in the picker, and both of
+ * these are drawn frames.
  */
 const BASE_KINDS: ReadonlyArray<{ kind: BaseKind; label: string }> = [
   { kind: 'neutral', label: 'Neutral' },
@@ -221,6 +228,29 @@ function ChinNote({ box, locked }: { box: MouthBox; locked: boolean }) {
       figure is not zero is all this can tell you: how far a jaw actually drops is a fact about
       this portrait and this prompt, so the depth still wants judging against the picture.
     </p>
+  );
+}
+
+/**
+ * A paragraph of instruction, folded away until it is wanted.
+ *
+ * The long notes on this page are worth their length the first time a box is
+ * placed and are dead weight every time after, and they were long enough
+ * between the controls that the controls stopped reading as a sequence. Folded,
+ * the page is a column of things to press; the prose is one click away and its
+ * label says what it answers, so it can be found again without being read again.
+ */
+function Guidance({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <details className="group rounded-lg border border-slate-800/80">
+      <summary className="flex cursor-pointer select-none list-none items-center gap-1.5 px-3 py-2 text-[11px] uppercase tracking-wide text-slate-500 hover:text-slate-400">
+        <span className="text-slate-600 transition-transform group-open:rotate-90">&rsaquo;</span>
+        {label}
+      </summary>
+      <div className="border-t border-slate-800/80 px-3 py-2 text-xs leading-relaxed text-slate-500">
+        {children}
+      </div>
+    </details>
   );
 }
 
@@ -1271,41 +1301,54 @@ export default function FaceKit() {
               been cut already — so it belongs above the work it invalidates
               rather than beside a model dropdown.
             */}
-            <div className="flex flex-wrap items-start justify-between gap-3 rounded-xl border border-slate-800 p-4">
-              <div className="space-y-1">
+            <div className="space-y-3 rounded-xl border border-slate-800 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
                 <h2 className="text-sm font-medium text-slate-300">Base</h2>
-                <p className="max-w-xl text-xs text-slate-500">
-                  Neutralise sets the resting mouth every later pose is drawn over, and clears any
-                  poses cut for the old one — worth doing first if the portrait arrived smiling.
-                  Smile draws the same face grinning and keeps it beside the neutral one as a look;
-                  it never becomes the base. Both run against the picture you uploaded, so pressing
-                  again is another attempt rather than an edit of the last one.
-                </p>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    disabled={Boolean(busy['base:neutralise'] || busy['base:smile'])}
+                    onClick={() => void neutralise()}
+                    className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:border-slate-500 disabled:opacity-40"
+                  >
+                    {busy['base:neutralise']
+                      ? `Neutralising${busyMark(busy['base:neutralise'])}`
+                      : 'Neutralise base'}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={Boolean(busy['base:neutralise'] || busy['base:smile'])}
+                    onClick={() => void smile()}
+                    className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:border-slate-500 disabled:opacity-40"
+                  >
+                    {busy['base:smile'] ? `Smiling${busyMark(busy['base:smile'])}` : 'Smile base'}
+                  </button>
+                </div>
               </div>
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  disabled={Boolean(busy['base:neutralise'] || busy['base:smile'])}
-                  onClick={() => void neutralise()}
-                  className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:border-slate-500 disabled:opacity-40"
-                >
-                  {busy['base:neutralise']
-                    ? `Neutralising${busyMark(busy['base:neutralise'])}`
-                    : 'Neutralise base'}
-                </button>
-                <button
-                  type="button"
-                  disabled={Boolean(busy['base:neutralise'] || busy['base:smile'])}
-                  onClick={() => void smile()}
-                  className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:border-slate-500 disabled:opacity-40"
-                >
-                  {busy['base:smile'] ? `Smiling${busyMark(busy['base:smile'])}` : 'Smile base'}
-                </button>
-              </div>
+
+              <Guidance label="What the two buttons do">
+                Neutralise sets the resting mouth every later pose is drawn over, and clears any
+                poses cut for the old one — worth doing first if the portrait arrived smiling.
+                Smile draws the same face beaming and keeps it beside the neutral one; it never
+                becomes the base, and no call ever wears it. It is the picture this face is
+                offered by, in the library and the face picker — the smile a conversation
+                actually shows is the Smile pose below. Both run against the picture you
+                uploaded, so pressing again is another attempt rather than an edit of the last
+                one.
+              </Guidance>
             </div>
 
-            <section className="grid gap-5 md:grid-cols-2">
-              <div className="space-y-3">
+            {/*
+              Four cells rather than two columns, placed explicitly, so that the
+              headings share a grid row and the two pictures share the next one.
+              The left column carries a base toggle the right one has no
+              counterpart to, and stacking that inside a column put the picker a
+              row lower than the strip it exists to be compared against.
+              Placement is `md:` only: in one column the cells fall back to
+              source order, which is heading, picker, heading, strip.
+            */}
+            <section className="grid gap-x-5 gap-y-3 md:grid-cols-2">
+              <div className="flex flex-col justify-end gap-2 md:col-start-1 md:row-start-1">
                 <div className="flex items-center justify-between gap-3">
                   <h2 className="text-sm font-medium text-slate-300">Regions</h2>
                   <div className="flex gap-1 rounded-lg border border-slate-800 p-0.5 text-xs">
@@ -1353,7 +1396,9 @@ export default function FaceKit() {
                     })}
                   </div>
                 </div>
+              </div>
 
+              <div className="space-y-3 md:col-start-1 md:row-start-2">
                 <BoxPicker
                   base={
                     shownBase
@@ -1426,7 +1471,7 @@ export default function FaceKit() {
                       note="Neither brow is placed, so neither brow moves — what you can see here is the head motion, which every kit has."
                     />
 
-                    <p className="text-xs text-slate-500">
+                    <Guidance label="How to place a brow band">
                       Not a mask and not a crop — no generator ever sees this box, so it
                       never locks and the glasses are never at risk. Cover the brow, give it
                       plenty of plain forehead <em>above</em>, and end it on the last clear row
@@ -1441,7 +1486,7 @@ export default function FaceKit() {
                       size of the first, and with its line at the same height, so only its{' '}
                       <em>position</em> needs the diagonal thought — until you size it yourself,
                       after which it holds what you gave it.
-                    </p>
+                    </Guidance>
                   </>
                 ) : (
                   <>
@@ -1470,7 +1515,11 @@ export default function FaceKit() {
                       <ChinNote box={kit.boxes.mouth} locked={committed[region] > 0} />
                     )}
 
-                    <p className="text-xs text-slate-500">
+                    <Guidance
+                      label={
+                        region === 'mouth' ? 'How to place the mouth box' : 'How to place an eye box'
+                      }
+                    >
                       The box is the mask, the crop, and where the patch lands.
                       {region === 'mouth' ? (
                         <>
@@ -1500,13 +1549,16 @@ export default function FaceKit() {
                           what you gave it.
                         </>
                       )}
-                    </p>
+                    </Guidance>
                   </>
                 )}
               </div>
 
-              <div className="space-y-3">
+              <div className="flex flex-col justify-end md:col-start-2 md:row-start-1">
                 <h2 className="text-sm font-medium text-slate-300">In motion</h2>
+              </div>
+
+              <div className="space-y-3 md:col-start-2 md:row-start-2">
                 <Filmstrip kit={kit} />
                 <p className="text-xs text-slate-500">
                   Drift between generations is invisible in stills and obvious here. If the face
@@ -1795,7 +1847,7 @@ export default function FaceKit() {
               `seed`.
             */}
             {!seeded && (
-              <div className="flex flex-wrap items-center gap-3 rounded-lg border border-slate-800 bg-slate-900/40 px-3 py-2.5">
+              <div className="space-y-2 rounded-lg border border-slate-800 bg-slate-900/40 px-3 py-2.5">
                 <button
                   type="button"
                   onClick={() => void seed()}
@@ -1805,7 +1857,7 @@ export default function FaceKit() {
                 >
                   {seeding ? 'Importing…' : 'Import the shipped face'}
                 </button>
-                <p className="max-w-prose text-xs text-slate-500">
+                <Guidance label="Why the shipped face is imported">
                   The face checked into <code>public/faces/</code> is the only kit that is
                   not in here, which is why pickers have had to offer it as an unnamed
                   &ldquo;default&rdquo; tile with no persona behind it. Import it once and it
@@ -1813,7 +1865,7 @@ export default function FaceKit() {
                   a voice and a biography like the rest. Nothing else changes — it is the
                   same artwork, and it stays checked in as the fallback for a browser that
                   can reach no library at all.
-                </p>
+                </Guidance>
               </div>
             )}
 

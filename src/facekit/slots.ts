@@ -7,9 +7,15 @@ import type { Viseme } from '../live/visemes';
  * `Viseme` union the mouth driver classifies into (live/visemes.ts), so a shape
  * cannot exist in one file and be missing from the other — add a viseme there
  * and this file stops compiling until it is authored here.
+ *
+ * The three that are not visemes are the two closed lids and the smile, and
+ * they are alike in the way that matters: no driver ever selects them. The lids
+ * answer a blink and the smile answers the page, both from outside the audio
+ * altogether, which is why neither belongs in a union the analyser classifies
+ * into.
  */
 
-export type SlotId = Viseme | 'eyeLeftClosed' | 'eyeRightClosed';
+export type SlotId = Viseme | 'smile' | 'eyeLeftClosed' | 'eyeRightClosed';
 
 /**
  * Which of the kit's boxes a slot is cropped to.
@@ -361,7 +367,33 @@ const JAW_DROPS = [
   'the outer edges of the jaw.',
 ].join(' ');
 
+/**
+ * The corner exemption, for the one pose that is made of corners.
+ *
+ * The exact inverse of CORNERS_FIXED, and it has to be: everything that clause
+ * protects the speech poses from is what a smile *is*. A mouth that opens by
+ * parting the lips cannot smile, so the licence is granted here and nowhere
+ * else, and it is granted narrowly — the corners lift, the seam curves, and the
+ * mouth still does not slide, tilt or change colour.
+ *
+ * The cheeks are the deliberate omission. FACE_FIXED holds them still for every
+ * speech pose because a jaw drop has no business moving them; a smile lifts the
+ * skin just outside the corners and a drawing that refuses to reads as a mouth
+ * pasted onto a straight face. The crop is what makes that safe to allow — the
+ * mouth box reaches a little past the corners and no further, so whatever the
+ * model does to the cheekbones is discarded on the way out.
+ */
+const SMILE_SPREADS = [
+  'The corners of the mouth lift and travel outward a little, and the line where',
+  'the lips meet curves upward along its whole length rather than only at the',
+  'ends. Keep the lips the same colour, thickness and line weight as the',
+  'original, and keep the mouth centred exactly where it is: it does not slide,',
+  'tilt or move up or down the face. Do not change the nose or the jawline, and',
+  'add no dimples or creases.',
+].join(' ');
+
 const MOUTH_NOTE = [CORNERS_FIXED, MOUTH_STYLE, FACE_FIXED].join(' ');
+const SMILE_NOTE = [SMILE_SPREADS, MOUTH_STYLE].join(' ');
 const MBP_NOTE = [MBP_COMPRESSES, MOUTH_STYLE, FACE_FIXED].join(' ');
 const TEETH_NOTE = [CORNERS_FIXED, MOUTH_STYLE, TEETH_BAND, FACE_FIXED].join(' ');
 /** The one pose that both shows teeth and thins a lip. */
@@ -488,6 +520,42 @@ export const SLOTS: Slot[] = [
       'Purse the lips into a small rounded O, slightly taller than it is wide, with a plain dark opening in the middle. The lips stay full and clearly outlined and the jaw stays mostly closed.',
     ),
   },
+  /*
+   * The pose the conversation never selects, and the only one a learner sees
+   * while nothing is happening.
+   *
+   * It is worn at the two ends of a call — before the tutor has said anything
+   * and after its goodbye has finished playing — and at no other moment. Both
+   * are moments the mouth is otherwise at rest, which is what makes a pose the
+   * right shape for this and a second base the wrong one: painted at the mouth
+   * box over `rest`, it dissolves in and out exactly the way the lip press
+   * does, and nothing outside that rectangle can drift. See `smiling` in
+   * live/Face.tsx.
+   *
+   * CLOSED LIPS, ON PURPOSE, where the base pass is deliberately left to choose.
+   * A smile is held here for as long as the page is idle, which is a length of
+   * time no speech pose is ever asked to survive: teeth showing for a second
+   * reads as warmth, teeth showing for a minute reads as a rictus. Closed lips
+   * are also what dissolves cleanly to and from `rest`, which is a closed mouth
+   * — a pose that has to grow teeth on the way in cannot cross-fade, it can only
+   * cut.
+   *
+   * Written against a relaxed closed mouth for the reason the note above rest
+   * and mbp gives at length: this is generated from a base that has usually just
+   * been neutralised into one, and a prompt a generator considers already
+   * satisfied comes back as its input. The difference is named twice — corners
+   * higher, seam curved along its length — because "smile" alone is exactly the
+   * kind of instruction a face already faintly upturned can claim to have met.
+   */
+  {
+    id: 'smile',
+    label: 'Smile',
+    region: 'mouth',
+    prompt: mouth(
+      'Curve the closed lips into a gentle, warm smile. Compared with a relaxed closed mouth, both corners sit clearly higher and slightly further apart, and the line where the lips meet becomes one continuous upward curve instead of a level line. The lips stay together along their whole length: no gap, no teeth and no opening anywhere. The result has to be plainly distinguishable from a mouth at rest — a smile that reads from across a room — while staying an easy closed smile rather than a grin.',
+      SMILE_NOTE,
+    ),
+  },
   {
     id: 'eyeLeftClosed',
     label: 'Left eye closed',
@@ -514,21 +582,29 @@ export const NEUTRALISE_BASE_PROMPT =
   'Close the mouth into a relaxed, neutral, closed-lip expression with no teeth visible. Keep everything else about the portrait identical.';
 
 /**
- * The alternative base pass: a gentle smile instead of the neutral mouth.
+ * The other base pass: the face's portrait, which is a different job entirely.
  *
- * Where neutralising is the answer to a portrait that arrived mid-smile, this
- * is the author choosing that smile on purpose as the rest pose. It is a base
- * pass exactly like neutralising — same model, same discard of cut poses — so
- * the two sit beside each other on the page rather than one being a follow-up
- * to the other.
+ * It began as an alternative rest pose and is not one any more. The rest pose a
+ * call wears is the `smile` slot above — a patch at the mouth box, cut from the
+ * neutral base like every other pose — and this pass is what is left once that
+ * moved out: a whole-frame picture of the same person smiling, which nothing is
+ * ever composited onto and which no call ever displays. It is the thumbnail. See
+ * publishKit in library.ts, which is its only reader.
  *
- * Deliberately under-specified next to the neutralise prompt: whether the lips
- * stay together or part to show teeth is left to the model, on the argument
- * that a "gentle, natural" smile drawn to match the portrait reads better than
- * one pinned to a lip state the portrait may not suit.
+ * WHICH IS WHY IT ASKS FOR MORE THAN THE POSE DOES. Every constraint on the
+ * `smile` slot comes from the same two facts — that it has to dissolve against
+ * `rest`, and that it is held for as long as a page sits idle. Neither applies
+ * to a still picture in a picker, seen for a moment beside a dozen others and
+ * competing with them. Teeth are welcome here, the cheeks and eyes may go with
+ * it, and "gentle" would be the wrong word: a thumbnail that hedges is a
+ * thumbnail nobody picks.
+ *
+ * The one thing held is identity, and the sentence saying so is doing real work
+ * — a model given a free hand with a warm smile will happily return a warmer
+ * *person*.
  */
 export const SMILE_BASE_PROMPT =
-  'Give the mouth a gentle, natural smile. Keep everything else about the portrait identical.';
+  'Give this person a broad, warm, genuine smile, as if greeting someone they are pleased to see: the mouth clearly smiling and the cheeks and eyes going with it. Change nothing else about the portrait — the same face, the same hair, the same clothes, the same drawing style, the same pose, the same background.';
 
 export function slot(id: SlotId): Slot {
   const found = SLOTS.find((entry) => entry.id === id);

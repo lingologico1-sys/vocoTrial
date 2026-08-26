@@ -876,6 +876,37 @@ export default function Eleve() {
   const idleHint = call.lastCallMs === null ? FR.pillStart : FR.pillAgain;
 
   /**
+   * When the tutor smiles, which is at the two ends of a conversation and
+   * nowhere in the middle of one.
+   *
+   * THE OPENING IS NOT `!call.live`, and the difference is the whole of the
+   * first term. A call is live from the moment the socket connects, which is a
+   * second or two before the tutor has drawn breath — a face that dropped its
+   * smile there would sit neutral through the wait it was drawn to cover. So it
+   * holds until the tutor actually has a turn, and the mouth takes over from
+   * there on its own: the smile is ignored the instant the analyser reports
+   * anything but rest. See `smiling` in live/Face.tsx.
+   *
+   * THE CLOSE IS TIMED TO THE AUDIO, NOT TO THE HANG-UP. Three facts, and each
+   * of them is load-bearing. `closing` says this is the end of the lesson rather
+   * than a gap in it, which is what keeps the smile off every pause a learner
+   * leaves while thinking. `closingTurnDone` says the model finished the turn
+   * the goodbye was in. And `!call.speaking` says the audio of it has actually
+   * drained, which is later than the turn closing and by more than it sounds —
+   * the speaker runs behind the socket by design. Together they mean the smile
+   * lands on the last word of the farewell rather than two seconds afterwards
+   * when the page hangs up, which is a face going warm at the end of a lesson
+   * rather than a face reacting to a disconnection.
+   *
+   * A lesson that ends any other way — the cap, the idle timer, a learner
+   * pressing the microphone — never sets `closing`, and gets its smile from the
+   * first term as the call goes down. That is the right answer for all three:
+   * none of them has a goodbye to be timed against.
+   */
+  const smiling =
+    !call.live || !lastAgentTurn || (closing && closingTurnDone && !call.speaking);
+
+  /**
    * The first tab, which is two things in sequence rather than one thing with a
    * fixed name.
    *
@@ -1057,6 +1088,7 @@ export default function Eleve() {
               live={call.live}
               openingDone={call.openingDone}
               busy={call.busy}
+              smiling={smiling}
               tiltCue={call.tiltCue}
               idleHint={idleHint}
               onCall={() => {

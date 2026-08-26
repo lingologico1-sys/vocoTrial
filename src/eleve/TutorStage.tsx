@@ -39,6 +39,12 @@ interface TutorStageProps {
   openingDone: boolean;
   /** Mid-connect. The microphone carries this too — see LearnerPill. */
   busy: boolean;
+  /**
+   * Whether the face wears its smile: before the tutor speaks, and once its
+   * goodbye has played out. Computed in Eleve, which holds the lesson's clock —
+   * this component knows what is on screen, not where the conversation is.
+   */
+  smiling: boolean;
   tiltCue: TiltCue | null;
   /** What the pill says before a call: start, or start again. */
   idleHint: string;
@@ -58,6 +64,7 @@ export default function TutorStage({
   live,
   openingDone,
   busy,
+  smiling,
   tiltCue,
   idleHint,
   onCall,
@@ -157,6 +164,7 @@ export default function TutorStage({
             tiltChance={session.tiltChance}
             tiltCue={tiltCue}
             speaking={speaking}
+            smiling={smiling}
             bleed
           />
         </div>
