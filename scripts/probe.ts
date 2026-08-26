@@ -43,7 +43,6 @@ import { LANGUAGES, findLanguage } from '../src/realtime/languages';
 import { findModel } from '../src/realtime/models';
 import { patienceSettings } from '../src/realtime/settings';
 import {
-  LESSON_DONE_SIGNAL,
   PROGRESS_TOOL,
   TIME_UP_SIGNAL,
   composeTutorPrompt,
@@ -224,10 +223,34 @@ function buildPrompt(): string {
 
 function buildSetup(prompt: string): Record<string, unknown> {
   const model = findModel(MODEL_KEY)!;
-  return geminiSetup(model, aiStudioModel(model.id), findLanguage('fr')!, prompt, {
+  const setup = geminiSetup(model, aiStudioModel(model.id), findLanguage('fr')!, prompt, {
     voice: PERSONA.voice,
     ...patienceSettings('patient'),
   });
+
+  /*
+   * An experiment the app cannot run, bolted on here rather than in _setup.ts.
+   *
+   * `thinkingLevel` is not in SETTING_FIELDS and should not be until something
+   * measured says it earns a place — this is where that measuring happens. The
+   * documented default for gemini-3.1-flash-live-preview is `minimal`, chosen
+   * for latency, so pinning it is expected to change nothing; a run that says
+   * otherwise means the default is not what the docs claim, which is the whole
+   * reason to ask a socket instead of a doc page.
+   *
+   *   THINKING=minimal|low|medium|high npm run probe
+   *
+   * Absent sends no field at all, which is settings.ts's rule and the only way
+   * to keep a control run honest.
+   */
+  const level = process.env.THINKING;
+  if (level) {
+    const generationConfig = setup.generationConfig as Record<string, unknown>;
+    generationConfig.thinkingConfig = { thinkingLevel: level };
+    console.log(`  (thinkingLevel pinned to "${level}")`);
+  }
+
+  return setup;
 }
 
 // --- The socket.
@@ -569,31 +592,45 @@ function check(events: Event[]): Finding[] {
   });
 
   /*
-   * A tutor that says goodbye before the closing note has ended the lesson on
-   * its own authority, which is the thing the page is supposed to decide.
+   * A tutor that says goodbye before the last question has been answered has
+   * ended the lesson early, which is what this watches for.
+   *
+   * IT USED TO BE WRITTEN THE OTHER WAY ROUND — a goodbye before the page's
+   * closing note — and that note is gone. The close moved into the prompt: the
+   * tutor flags the last question, then comments and says goodbye in one turn,
+   * on its own authority. Waiting to be told is now the fault rather than the
+   * rule. So the boundary is the final question's report, and a run that never
+   * reported it makes every goodbye an early one. See the deleted
+   * LESSON_DONE_SIGNAL in tutorPrompt.ts.
    */
-  const beforeClose = events.slice(0, events.findIndex((event) => event.text === LESSON_DONE_SIGNAL));
+  const finalReport = events.findIndex(
+    (event) =>
+      event.kind === 'tool' &&
+      event.text.startsWith(PROGRESS_TOOL) &&
+      Number(event.text.match(/"number"\s*:\s*(\d+)/)?.[1]) === LESSON.questions.length,
+  );
+  const beforeClose = finalReport === -1 ? events : events.slice(0, finalReport);
   const earlyGoodbye = beforeClose.find(
     (event) => event.kind === 'tutor' && /au revoir|à bientôt|bonne journée/i.test(event.text),
   );
   findings.push({
     ok: !earlyGoodbye,
-    what: 'the tutor waits to be told to close',
+    what: 'no goodbye before the last answer',
     detail: earlyGoodbye ? earlyGoodbye.text.slice(0, 80) : 'it never said goodbye early',
   });
 
   /*
-   * And the other half of the same rule: told to close, it closes. The last
-   * turn of the run should be a goodbye and should not end on a question — the
-   * one turn in the whole lesson that is exempt from ending on one. A tutor
-   * that answers a closing note with another question leaves the page hanging
-   * up mid-conversation, which the learner experiences as being cut off.
+   * And the other half of the same rule: the list done, it closes itself. The
+   * last turn of the run should be a goodbye and should not end on a question
+   * — the one turn in the whole lesson exempt from ending on one. A tutor that
+   * finishes the list and asks a twelfth question leaves the page hanging up
+   * mid-conversation, which the learner experiences as being cut off.
    */
   const last = spoken.at(-1) ?? '';
   findings.push({
     ok: /au revoir|à bientôt|bonne journée|bonne continuation|salut/i.test(last) && !last.includes('?'),
-    what: 'the closing note is acted on',
-    detail: last ? last.slice(0, 90) : 'the tutor said nothing at all after the note',
+    what: 'the lesson closes itself',
+    detail: last ? last.slice(0, 90) : 'the tutor said nothing at all',
   });
 
   return findings;
@@ -658,14 +695,14 @@ async function runLesson(): Promise<number> {
   }
 
   /*
-   * The note the page would actually send from here, which is not always the
-   * warm one. A run that ends with questions unreported is the state
-   * TIME_UP_SIGNAL exists for, and sending the other one would be testing the
-   * tutor's response to a claim it can see is false — the model reads the same
-   * transcript we do.
+   * The only note the page still sends from here, and a finished lesson gets
+   * none. TIME_UP_SIGNAL is for the run that ends with questions unreported,
+   * which is the state it exists for; a run that finished the list has already
+   * been closed by the tutor, and a note after that would be the page talking
+   * past an ending it asked for. See the deleted LESSON_DONE_SIGNAL.
    */
   const finished = reported(events) >= LESSON.questions.length;
-  await call.say(finished ? LESSON_DONE_SIGNAL : TIME_UP_SIGNAL, 'note');
+  if (!finished) await call.say(TIME_UP_SIGNAL, 'note');
   call.close();
 
   console.log('\n--- WHAT THE RUN SHOWS ---');
