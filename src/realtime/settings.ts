@@ -146,6 +146,40 @@ const isNativeAudio = (model: ModelChoice) => model.key === 'gemini-native-audio
 export const acceptsLanguageCode = (model: ModelChoice): boolean => !isNativeAudio(model);
 
 /**
+ * The thinking level this rig pins, on the models that have one.
+ *
+ * A PINNED VALUE RATHER THAN AN ABSENT FIELD, which is this file's one rule
+ * broken on purpose and for the reason `PATIENCE` breaks it: the default is not
+ * what the documentation says it is. Google publishes `minimal` as the default
+ * for gemini-3.1-flash-live-preview, chosen for latency. Sending no
+ * `thinkingConfig`, a probe run of an ordinary five-question lesson had four
+ * turns speak their reasoning out loud, in English, into the audio:
+ *
+ *   "Based on the user's brief response, I interpret that they have completed
+ *    their answer to the first question. I will call questionDone with number
+ *    1. ... I must adhere strictly to speaking French. Ah, super ! Quel âge
+ *    as-tu ?"
+ *
+ * A learner hears all of that. Pinning the value the docs call the default took
+ * it to zero across the runs after, which is the whole argument: an absent
+ * field is only "the provider's default" when the provider agrees, and this one
+ * does not. Run `THINKING=… npm run probe` to check it again on a new model.
+ *
+ * IT IS NOT A SETTING AND MUST NOT BECOME ONE without evidence. There is no
+ * SETTING_FIELDS entry, nothing on /teach and nothing in the house profile: a
+ * knob offered to a teacher is a knob somebody has to understand, and nothing
+ * measured so far says a room ever wants this turned up. If a run ever shows
+ * the protocol handled better at `low` than at `minimal`, that is the evidence,
+ * and this is where it would start.
+ *
+ * ABSENT ON NATIVE AUDIO, which is a 2.5 model: those take `thinkingBudget` as
+ * a token count and reject a level outright, and sending both is a 400. Nothing
+ * has measured a leak there, so nothing is sent there.
+ */
+export const thinkingLevelFor = (model: ModelChoice): string | undefined =>
+  isNativeAudio(model) ? undefined : 'minimal';
+
+/**
  * How long the tutor waits before deciding the learner has finished.
  *
  * A TEACHER'S WORD FOR TWO PROVIDER KNOBS. `endSensitivity` and

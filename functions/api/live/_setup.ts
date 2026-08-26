@@ -18,7 +18,11 @@
  * SessionSettings for why that distinction is load-bearing.
  */
 
-import { acceptsLanguageCode, type SessionSettings } from '../../../src/realtime/settings';
+import {
+  acceptsLanguageCode,
+  thinkingLevelFor,
+  type SessionSettings,
+} from '../../../src/realtime/settings';
 import type { LanguageChoice } from '../../../src/realtime/languages';
 import type { ModelChoice } from '../../../src/realtime/models';
 import { PROGRESS_TOOL } from '../../../src/realtime/tutorPrompt';
@@ -143,6 +147,14 @@ export function geminiSetup(
     silenceDurationMs: settings.silenceDurationMs,
   });
 
+  /*
+   * Pinned rather than left to the provider, which is the one place this file
+   * does that. The documented default is the value being sent — and the socket
+   * disagrees with the documentation, loudly enough that a learner hears it.
+   * See `thinkingLevelFor`, which carries the transcript.
+   */
+  const thinkingLevel = thinkingLevelFor(model);
+
   return {
     model: modelPath,
     generationConfig: compact({
@@ -150,6 +162,7 @@ export function geminiSetup(
       temperature: settings.temperature,
       maxOutputTokens: settings.maxOutputTokens,
       speechConfig: present(speechConfig) ? speechConfig : undefined,
+      thinkingConfig: thinkingLevel ? { thinkingLevel } : undefined,
     }),
     systemInstruction: { parts: [{ text: instructions }] },
     tools: [{ functionDeclarations: [progressDeclaration(model)] }],
