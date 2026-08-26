@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import BuildBadge from '../BuildBadge';
+import ReturnButton from '../ReturnButton';
 import BoxPicker from './BoxPicker';
 import DiagnosticsPanel from './DiagnosticsPanel';
 import Filmstrip from './Filmstrip';
@@ -1186,7 +1188,8 @@ export default function FaceKit() {
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
-      <div className="mx-auto flex min-h-screen max-w-5xl flex-col gap-5 px-5 py-8">
+      <BuildBadge look="workshop" />
+      <div className="mx-auto flex min-h-screen max-w-5xl flex-col gap-5 px-5 pb-8 pt-12">
         <header className="flex items-baseline justify-between gap-3">
           <div>
             <h1 className="text-xl font-semibold tracking-tight">faceKit</h1>
@@ -1194,13 +1197,11 @@ export default function FaceKit() {
               One portrait in, a mouth and a pair of eyelids out.
             </p>
           </div>
-          <nav className="flex gap-4 text-xs text-slate-500">
+          <nav className="flex items-center gap-4 text-xs text-slate-500">
             <a href="/studio" className="underline-offset-4 hover:underline">
               studio →
             </a>
-            <a href="/" className="underline-offset-4 hover:underline">
-              start →
-            </a>
+            <ReturnButton look="workshop" />
           </nav>
         </header>
 

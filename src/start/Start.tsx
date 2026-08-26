@@ -1,4 +1,5 @@
 import { ClipboardPen, GraduationCap, Layers, Smile, SlidersHorizontal } from 'lucide-react';
+import BuildBadge from '../BuildBadge';
 
 /**
  * The front door.
@@ -85,6 +86,8 @@ function Card({ href, name, blurb, Icon }: Place) {
 export default function Start() {
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
+      {/* No Return beside it: this is where Return goes. See ReturnButton.tsx. */}
+      <BuildBadge look="workshop" />
       <div className="mx-auto flex min-h-screen max-w-2xl flex-col gap-6 px-6 py-12">
         <header>
           <h1 className="text-2xl font-semibold tracking-tight">vocoTrial</h1>

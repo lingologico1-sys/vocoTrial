@@ -15,6 +15,7 @@ import {
 } from '../realtime/presets';
 import type { SessionSettings } from '../realtime/settings';
 import BuildBadge from '../BuildBadge';
+import ReturnButton from '../ReturnButton';
 import SettingsPanel from './SettingsPanel';
 import {
   MIN_PROJECTION_SECONDS,
@@ -580,10 +581,8 @@ export default function TutorBench() {
           <h1 className="text-2xl font-semibold tracking-tight">tutorBench</h1>
           {/* Plain links, not a router push: main.tsx reads the path once at
               startup, so crossing between the pages is a reload by design. */}
-          <nav className="flex items-center gap-4">
-            <a href="/" className="text-xs text-slate-500 underline-offset-4 hover:underline">
-              start →
-            </a>
+          <nav className="flex items-center gap-3">
+            <ReturnButton look="workshop" />
             <a
               href="/studio"
               className="rounded-lg border border-slate-800 px-3 py-1.5 text-sm font-medium text-slate-400 transition hover:border-slate-700 hover:text-slate-200"

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import BrandBar from '../lingo/BrandBar';
+import BuildBadge from '../BuildBadge';
 import type { FaceKit } from '../facekit/kit';
 import { loadBundledKit } from '../facekit/bundled';
 import { publishedKit } from '../facekit/store';
@@ -938,6 +939,10 @@ export default function Eleve() {
 
   return (
     <div className="lingo-light flex h-screen flex-col overflow-hidden bg-lingo-mat font-lingo text-lingo-ink">
+      {/* The stamp, but no Return: a lesson does not offer a student the
+          workshop. See ReturnButton.tsx. It is `fixed`, so the column below
+          staying `overflow-hidden` costs it nothing. */}
+      <BuildBadge look="lingo" />
       <BrandBar tagline={FR.tagline} onTripleTap={() => setDiagnostic(true)}>
         <label className="flex items-center gap-2">
           <span className="text-[11px] uppercase tracking-wide text-lingo-paper/70">

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Check, Copy, Loader2, Plus, X } from 'lucide-react';
 import BrandBar from '../lingo/BrandBar';
 import BuildBadge from '../BuildBadge';
+import ReturnButton from '../ReturnButton';
 import { LANGUAGES, defaultLanguageCode, findLanguage } from '../realtime/languages';
 import {
   ADVANCED_OPTIONS,
@@ -543,12 +544,17 @@ export default function Teach() {
           in the far corner from the brand bar's own link. See BuildBadge.tsx. */}
       <BuildBadge look="lingo" />
       <BrandBar tagline="Prepare a lesson">
-        <a
-          href="/eleve"
-          className="rounded-lg border-2 border-white/20 bg-white/10 px-2.5 py-1 text-[13px] text-lingo-paper transition-colors hover:border-lingo-accent-light"
-        >
-          Student page →
-        </a>
+        {/* The way out first, then the way on: the same left-to-right the page
+            body reads in, and the same order the two get used in. */}
+        <div className="flex items-center gap-2">
+          <ReturnButton look="lingo" />
+          <a
+            href="/eleve"
+            className="rounded-lg border-2 border-white/20 bg-white/10 px-2.5 py-1 text-[13px] text-lingo-paper transition-colors hover:border-lingo-accent-light"
+          >
+            Student page →
+          </a>
+        </div>
       </BrandBar>
 
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-5 px-4 py-6">

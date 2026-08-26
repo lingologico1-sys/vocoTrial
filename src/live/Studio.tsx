@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Mic, MicOff, PhoneOff, Radio, SlidersHorizontal, User } from 'lucide-react';
+import BuildBadge from '../BuildBadge';
+import ReturnButton from '../ReturnButton';
 import { findModel } from '../realtime/models';
 import { LANGUAGES, defaultLanguageCode, findLanguage } from '../realtime/languages';
 import { findPreset, lastUsedKey, listPresets, rememberPreset, renderPreset } from '../realtime/presets';
@@ -806,19 +808,18 @@ export default function Studio() {
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
-      <div className="mx-auto flex min-h-screen max-w-3xl flex-col gap-5 px-5 py-8">
+      <BuildBadge look="workshop" />
+      <div className="mx-auto flex min-h-screen max-w-3xl flex-col gap-5 px-5 pb-8 pt-12">
         <header className="flex items-baseline justify-between gap-3">
           <div>
             <h1 className="text-xl font-semibold tracking-tight">studio</h1>
             <p className="text-xs text-slate-500">{model?.label ?? MODEL_KEY}</p>
           </div>
-          <nav className="flex gap-4 text-xs text-slate-500">
+          <nav className="flex items-center gap-4 text-xs text-slate-500">
             <a href="/facekit" className="underline-offset-4 hover:underline">
               {kit ? `faceKit · ${kit.name}` : 'faceKit'} →
             </a>
-            <a href="/" className="underline-offset-4 hover:underline">
-              start →
-            </a>
+            <ReturnButton look="workshop" />
           </nav>
         </header>
 
