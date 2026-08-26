@@ -164,6 +164,48 @@ const MAX_EXCHANGES = 16;
  */
 const TURN_TIMEOUT_MS = 90_000;
 
+/**
+ * Bytes of output audio per millisecond of speech: 24 kHz, 16-bit, mono.
+ *
+ * The rate is OUTPUT_SAMPLE_RATE in audio.ts and the format is what
+ * PcmPlayer.enqueue is handed. Restated rather than imported because that
+ * module is built on AudioContext and this one runs in Node.
+ */
+const AUDIO_BYTES_PER_MS = (24_000 * 2) / 1_000;
+
+/**
+ * The longest playout this will sit through before answering anyway.
+ *
+ * A turn whose audio runs past a minute is a tutor delivering a monologue,
+ * which is a finding rather than a reason to stall the run — and the checks
+ * below can only report it if the run reaches them.
+ */
+const MAX_PLAYOUT_MS = 60_000;
+
+/**
+ * A goodbye, in the words this tutor actually uses to say one.
+ *
+ * ONE PATTERN FOR TWO READERS, and it has to be: the loop below stops on it and
+ * the checks measure it, and a run that kept talking past an ending the checks
+ * then called an ending would be measuring two different lessons.
+ */
+const GOODBYE = /au revoir|à bientôt|bonne journée|bonne continuation|salut/i;
+
+/** A person's beat before replying. Not a fudge factor: see `say`. */
+const HUMAN_BEAT_MS = 700;
+
+/**
+ * How long to keep listening after generation ends, for the sound of it.
+ *
+ * `generationComplete` can land before a single audio frame has, and a turn
+ * measured at that instant measures as silent — which is a barge-in dressed up
+ * as arithmetic. The drain closes on the first quiet stretch, so an ordinary
+ * turn costs the quiet window and nothing more; the budget is the ceiling for
+ * a turn whose audio never comes at all.
+ */
+const DRAIN_QUIET_MS = 600;
+const DRAIN_BUDGET_MS = 8_000;
+
 // --- Reading the key, which is the one thing here that is not in the repo.
 
 /**
@@ -263,7 +305,7 @@ interface LiveFrame {
     turnComplete?: boolean;
     generationComplete?: boolean;
     interrupted?: boolean;
-    modelTurn?: unknown;
+    modelTurn?: { parts?: Array<{ inlineData?: { data?: string } }> };
   };
   usageMetadata?: unknown;
 }
@@ -391,6 +433,35 @@ async function connect(setup: Record<string, unknown>, events: Event[]) {
       };
     });
 
+  /**
+   * Keeps reading frames after a turn has ended, until they stop coming.
+   *
+   * Same two handles `waitFor` uses and never at the same time as it: a turn
+   * is either being waited for or being drained. `onEach` is handed every
+   * frame, and says `true` when it has seen enough — which for `say` is a
+   * `turnComplete` that may or may not ever arrive.
+   */
+  const drain = (onEach: (frame: LiveFrame) => boolean): Promise<void> =>
+    new Promise((resolve) => {
+      let quiet: ReturnType<typeof setTimeout> | null = null;
+      const stop = () => {
+        clearTimeout(budget);
+        if (quiet) clearTimeout(quiet);
+        onFrame = null;
+        waiting = null;
+        resolve();
+      };
+      const budget = setTimeout(stop, DRAIN_BUDGET_MS);
+      // A closed socket has no more frames to give, which is a drain that is
+      // finished rather than one that failed.
+      waiting = () => stop();
+      onFrame = (frame) => {
+        if (onEach(frame)) return stop();
+        if (quiet) clearTimeout(quiet);
+        quiet = setTimeout(stop, DRAIN_QUIET_MS);
+      };
+    });
+
   await new Promise<void>((resolve, reject) => {
     // A socket that neither opens nor errors would otherwise wait for ever:
     // every other wait here is bounded and this one was not.
@@ -425,6 +496,41 @@ async function connect(setup: Record<string, unknown>, events: Event[]) {
     );
 
     let spoken = '';
+    /*
+     * How much speech this turn produced, and when it started arriving.
+     *
+     * WHY A PROBE WITH NO SPEAKERS COUNTS AUDIO. `turnComplete` says the model
+     * has finished *generating*, and the server goes on streaming the sound of
+     * it in something close to real time — so the turn is over on this socket
+     * a second or two before it would be over in the room. Answering at
+     * `turnComplete` is therefore a barge-in, and a barge-in cancels generation
+     * without closing the turn: the frame says `interrupted`, the reply is
+     * thrown away, and the run fills with tutor turns that said nothing.
+     *
+     * That is what most of the dead air and the repeated `questionDone` reports
+     * in the runs before this were — the probe interrupting its own tutor and
+     * then reporting it as a fault of the tutor's. A probe that manufactures
+     * the bug it is looking for is worse than no probe, which this file has
+     * had to learn once already; see TOPICS.
+     *
+     * The fixed 1.5-second pause that used to stand in for this was a guess at
+     * the length of a sentence, and it is a bad one twice over: too long after
+     * "Ah, super !" and far too short after a turn that comments on an answer
+     * before asking the next question. Counting the bytes is not an estimate.
+     */
+    let audioMs = 0;
+    let firstAudioAt: number | null = null;
+    const countAudio = (frame: LiveFrame) => {
+      for (const part of frame.serverContent?.modelTurn?.parts ?? []) {
+        const data = part.inlineData?.data;
+        if (!data) continue;
+        if (firstAudioAt === null) firstAudioAt = Date.now();
+        // Base64 without decoding it: four characters carry three bytes, less
+        // whatever the padding claims. Nothing here needs the samples.
+        const padding = data.endsWith('==') ? 2 : data.endsWith('=') ? 1 : 0;
+        audioMs += ((data.length / 4) * 3 - padding) / AUDIO_BYTES_PER_MS;
+      }
+    };
     /*
      * The partial is printed if the wait gives up, and that is not a nicety.
      * A turn that never closes is the one case where the words are the whole
@@ -461,13 +567,63 @@ async function connect(setup: Record<string, unknown>, events: Event[]) {
       }
       const said = frame.serverContent?.outputTranscription?.text;
       if (said) spoken += said;
-      return frame.serverContent?.turnComplete ? true : undefined;
+
+      countAudio(frame);
+
+      /*
+       * EITHER SIGNAL ENDS THE WAIT, and `generationComplete` is the one that
+       * usually arrives. `turnComplete` was the only terminator here until the
+       * barge-in above was fixed, which hid this: a probe that interrupted
+       * every turn was manufacturing its own turn boundaries, and the first
+       * run that let a turn finish on its own sat through the whole 90-second
+       * timeout watching audio frames land after a `generationComplete` that
+       * no `turnComplete` ever followed.
+       *
+       * Waiting for both is not available: the model does not promise the
+       * second one, and a wait for a frame that may never come is the timeout
+       * this just spent. Generation being finished is what the caller needs to
+       * know anyway — the sound of it is counted separately and sat through
+       * below.
+       */
+      const content = frame.serverContent;
+      return content?.turnComplete || content?.generationComplete ? true : undefined;
     }, 'the tutor to finish a turn').catch((error) => {
       partial();
       throw error;
     });
 
-    note(events, Date.now() - started, 'tutor', spoken.trim() || '(said nothing)');
+    /*
+     * The tail of the turn, before any of it is measured.
+     *
+     * `generationComplete` is not a promise that the audio has arrived — it
+     * routinely lands first — and a turn measured at that instant measures as
+     * silent, which puts the barge-in straight back. So the frames are read
+     * until they stop, and the words that arrive with them join the turn.
+     */
+    const endedAt = Date.now();
+    await drain((frame) => {
+      countAudio(frame);
+      const more = frame.serverContent?.outputTranscription?.text;
+      if (more) spoken += more;
+      return !!frame.serverContent?.turnComplete;
+    });
+
+    // Stamped when generation ended rather than when the draining did, so the
+    // timeline keeps saying how long the model took.
+    note(events, endedAt - started, 'tutor', spoken.trim() || '(said nothing)');
+
+    /*
+     * The rest of the sound, sat through before the caller may speak.
+     *
+     * Recorded above and waited for here, deliberately in that order: the
+     * timeline should say when the turn was generated, which is the number
+     * worth having, and the wait is the room rather than the socket. What is
+     * left is the audio's own length less however much of it has already
+     * streamed while the last frames were arriving.
+     */
+    const streamed = firstAudioAt === null ? 0 : Date.now() - firstAudioAt;
+    const remaining = Math.min(audioMs - streamed, MAX_PLAYOUT_MS);
+    if (remaining > 0) await new Promise((resume) => setTimeout(resume, remaining));
     return spoken.trim();
   };
 
@@ -611,7 +767,7 @@ function check(events: Event[]): Finding[] {
   );
   const beforeClose = finalReport === -1 ? events : events.slice(0, finalReport);
   const earlyGoodbye = beforeClose.find(
-    (event) => event.kind === 'tutor' && /au revoir|à bientôt|bonne journée/i.test(event.text),
+    (event) => event.kind === 'tutor' && GOODBYE.test(event.text),
   );
   findings.push({
     ok: !earlyGoodbye,
@@ -628,7 +784,7 @@ function check(events: Event[]): Finding[] {
    */
   const last = spoken.at(-1) ?? '';
   findings.push({
-    ok: /au revoir|à bientôt|bonne journée|bonne continuation|salut/i.test(last) && !last.includes('?'),
+    ok: GOODBYE.test(last) && !last.includes('?'),
     what: 'the lesson closes itself',
     detail: last ? last.slice(0, 90) : 'the tutor said nothing at all',
   });
@@ -664,21 +820,21 @@ async function runLesson(): Promise<number> {
     return SHRUGS[shrugs++ % SHRUGS.length];
   };
 
+  let closed = false;
   let heard = await call.say(openingSignal('morning'), 'note');
   for (let exchange = 0; exchange < MAX_EXCHANGES; exchange += 1) {
     const line = answer(heard);
     /*
      * A beat before answering, because a person has one.
      *
-     * `turnComplete` says the model has finished generating, not that the
-     * learner has finished hearing it — the audio is still playing out on a
-     * real call. Replying on the same millisecond is a barge-in, and a
-     * barge-in cancels generation without ever closing the turn, which is a
-     * wait that can only end in a timeout. The probe is not trying to test
-     * interruption handling here; it is trying to hold an ordinary
-     * conversation, and an ordinary conversation has gaps in it.
+     * Only the beat now. This used to be 1.5 seconds standing in for the
+     * playout as well, which is the barge-in `say` now handles by counting the
+     * audio — see it there. What is left is the pause a learner takes after
+     * the tutor has actually stopped talking, and it is short on purpose: the
+     * endpointing this probe cannot test is the thing that would make it
+     * longer.
      */
-    await new Promise((resume) => setTimeout(resume, 1_500));
+    await new Promise((resume) => setTimeout(resume, HUMAN_BEAT_MS));
     heard = await call.say(line, 'learner');
     /*
      * A SILENT TURN IS NOT AN ENDING, and reading it as one cost a whole run.
@@ -692,6 +848,25 @@ async function runLesson(): Promise<number> {
      * sitting in the same output as the real ones.
      */
     if (reported(events) >= LESSON.questions.length) break;
+
+    /*
+     * THE OTHER WAY A LESSON ENDS, and leaving it out cost a whole run.
+     *
+     * The count was the only exit, so a single dropped report — one
+     * `questionDone` lost to an interrupted turn — left the probe feeding
+     * shrugs to a tutor that had already said goodbye. It said goodbye seven
+     * times and re-reported its last question four times, and every one of
+     * those went into the findings as a fault: turns spoken twice, questions
+     * reported twice, dead air. All of it after the lesson was over.
+     *
+     * So a goodbye ends the run too, and `closed` remembers which exit was
+     * taken — because a tutor that has already closed must not then be handed
+     * a note telling it the time ran out.
+     */
+    if (GOODBYE.test(heard)) {
+      closed = true;
+      break;
+    }
   }
 
   /*
@@ -702,7 +877,7 @@ async function runLesson(): Promise<number> {
    * past an ending it asked for. See the deleted LESSON_DONE_SIGNAL.
    */
   const finished = reported(events) >= LESSON.questions.length;
-  if (!finished) await call.say(TIME_UP_SIGNAL, 'note');
+  if (!finished && !closed) await call.say(TIME_UP_SIGNAL, 'note');
   call.close();
 
   console.log('\n--- WHAT THE RUN SHOWS ---');
