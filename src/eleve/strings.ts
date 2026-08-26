@@ -107,7 +107,20 @@ export const FR = {
   evalIdle: 'Ton évaluation apparaîtra ici à la fin de la conversation.',
   evalDuring: 'Parle avec ton tuteur. L’évaluation viendra après.',
   evalTooShort: 'Il faut parler au moins deux minutes pour être évalué.',
-  evalRemaining: (text: string) => `Encore ${text} de conversation pour être évalué.`,
+  /*
+   * Why the button under this line is greyed out.
+   *
+   * IT NAMES THE REASON, NOT THE RULE. "Encore 40 s de conversation" told the
+   * learner what the app wanted without saying why it wanted it, and a button
+   * they can see but cannot press needs the why or it reads as broken. What is
+   * short is their own answers — a level is read off how much they said, and
+   * under two minutes of conversation there is not enough of it to place them
+   * honestly. The shortfall still gets named, because a learner who is told
+   * only "too short" cannot tell whether they are ten seconds or five minutes
+   * away.
+   */
+  evalRemaining: (text: string) =>
+    `Tes réponses sont trop courtes pour évaluer ton niveau avec justesse. Encore ${text} de conversation.`,
   /*
    * The same shortfall, said to somebody who did finish. It has to differ,
    * because the plain line reads as "you did not do enough" to a learner who
@@ -115,15 +128,7 @@ export const FR = {
    * reason instead, which is that a minute of speech is not enough to read.
    */
   evalRemainingDone: (text: string) =>
-    `Tu as répondu à tout, mais très vite : encore ${text} de conversation pour être évalué.`,
-  /*
-   * Shown above the button after a short but finished lesson, so the reading
-   * that arrives is the one that was promised. A student who expected a level
-   * and got "pas assez d'éléments" reads the feature as broken; one who was
-   * told to expect their best sentences reads the same page as what it is.
-   */
-  evalShortSample:
-    'Conversation courte : tu auras surtout tes meilleures phrases et ta consigne.',
+    `Tu as répondu à tout, mais très vite : tes réponses sont trop courtes pour évaluer ton niveau avec justesse. Encore ${text} de conversation.`,
   evalButton: 'Évalue-moi',
   evalWorking: 'Je relis notre conversation…',
   evalFailed: 'L’évaluation n’a pas pu être écrite.',

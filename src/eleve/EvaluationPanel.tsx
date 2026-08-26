@@ -241,35 +241,28 @@ export default function EvaluationPanel({ report }: EvaluationPanelProps) {
 }
 
 /**
- * Below this an unfinished conversation has not produced enough to read.
+ * Below this a conversation has not produced enough to read.
  *
- * Two minutes, for the reason MIN_CAP_MINUTES gives: a level judgement needs
+ * TWO MINUTES, AND THE SAME TWO MINUTES FOR EVERYONE. It was briefly two
+ * doors — two minutes for a lesson that stopped partway, ninety seconds for one
+ * that got through its questions — on the argument that a student who answered
+ * a short list should not be held back by the teacher's list being brief. What
+ * that bought was a report with no level in it, which is the thing the learner
+ * opened the panel for. A floor that admits conversations it cannot place is
+ * not a floor.
+ *
+ * The number itself is the one MIN_CAP_MINUTES gives: a level judgement needs
  * learner speech, and the learner's share of a conversation is realistically
- * 35-50% of the clock. It applies to a lesson that stopped partway — someone
- * who hung up, or a call the cap cut short with questions outstanding. A
- * finished lesson is measured against the floor below instead.
+ * 35-50% of the clock, so two minutes of call is under a minute of them.
+ *
+ * Falling short no longer hides the button — it greys it and says why. See the
+ * gate below.
  */
 export const MIN_EVAL_MS = 120_000;
 
 /**
- * Below this even a finished lesson has not produced enough to read.
- *
- * NINETY SECONDS, AND IT IS A DIFFERENT KIND OF NUMBER from the one above. That
- * floor is a judgement about how much speech a level needs. This one is a guard
- * against the tutor's bookkeeping being wrong: "finished" is a count the model
- * volunteers, and a model that reports five questions in the first twenty
- * seconds would otherwise be handed a transcript with nothing in it.
- *
- * A learner who has genuinely answered a short list in under ninety seconds is
- * possible and is the case this number is unfair to. It is the only place left
- * where the app second-guesses a completed lesson, and it stays because the
- * failure it prevents — a confident-looking report on four exchanges — costs
- * the student more than a wait does.
- */
-export const MIN_COMPLETE_EVAL_MS = 90_000;
-
-/**
- * The states before there is a report: mid-call, too short, and ready.
+ * The states before there is a report: mid-call, nothing said yet, and the
+ * button — greyed under two minutes of conversation, live above it.
  *
  * Kept beside the panel rather than in the page, because what they say is part
  * of the same promise — the gate is two minutes and the copy has to agree with
@@ -287,7 +280,6 @@ export function EvaluationGate({
   live,
   elapsedMs,
   lastCallMs,
-  minimumMs,
   busy,
   error,
   under,
@@ -297,15 +289,6 @@ export function EvaluationGate({
   live: boolean;
   elapsedMs: number | null;
   lastCallMs: number | null;
-  /**
-   * The floor this call has to clear, which is not a constant any more.
-   *
-   * The page picks it from whether the lesson finished — two minutes for a
-   * conversation that stopped partway, ninety seconds for one that got through
-   * its questions. See `evalFloorMs` in Eleve.tsx. It arrives as a number
-   * rather than as the rule, so the copy below can quote whatever it is.
-   */
-  minimumMs: number;
   busy: boolean;
   error: string | null;
   /** True when a consigne is rendered above this. See the header. */
@@ -348,41 +331,41 @@ export function EvaluationGate({
   }
 
   /*
-    Short of the floor. A learner who finished the list gets a different line:
-    the plain one reads as "you did not do enough" to somebody who did
-    everything they were set, and the shortfall is really the teacher's list
-    being brief. See evalRemainingDone in strings.ts.
+    Short of the floor, which is a state of the button rather than a state
+    instead of it.
+
+    THE BUTTON IS SHOWN AND GREYED, NOT WITHHELD. A gate that renders a
+    sentence where the control should be leaves the learner reading a message
+    about an evaluation with nothing on the page connecting it to one — they
+    cannot see what it is they are waiting for. Greyed, the shape of the thing
+    is there from the first conversation and the line above it is visibly the
+    reason it will not press.
+
+    A learner who finished the list gets a different line: the plain one reads
+    as "you did not do enough" to somebody who did everything they were set.
+    Both say the same thing about why — their answers are too short to place a
+    level on. See evalRemaining and evalRemainingDone in strings.ts.
   */
-  if (lastCallMs < minimumMs) {
-    return (
-      <div className={`${pad} text-center`}>
-        <p className="text-sm leading-relaxed text-lingo-muted">
-          {complete
-            ? FR.evalRemainingDone(frenchDuration(minimumMs - lastCallMs))
-            : FR.evalRemaining(frenchDuration(minimumMs - lastCallMs))}
-        </p>
-      </div>
-    );
-  }
+  const short = lastCallMs < MIN_EVAL_MS;
 
   return (
     <div className={pad}>
-      {/*
-        Said before the button and not after the report, because it is a promise
-        rather than an excuse. A short finished lesson produces a reading with no
-        level in it — the scale needs more speech than four questions give — and
-        a learner who was expecting one reads "pas assez d'éléments" as the app
-        failing. Told first, the same page reads as what it is.
-      */}
-      {complete && lastCallMs < MIN_EVAL_MS && (
-        <p className="mb-2.5 text-center text-xs leading-relaxed text-lingo-muted">
-          {FR.evalShortSample}
+      {short && (
+        <p className="mb-2.5 text-center text-sm leading-relaxed text-lingo-muted">
+          {complete
+            ? FR.evalRemainingDone(frenchDuration(MIN_EVAL_MS - lastCallMs))
+            : FR.evalRemaining(frenchDuration(MIN_EVAL_MS - lastCallMs))}
         </p>
       )}
       <button
         type="button"
+        disabled={short}
         onClick={onEvaluate}
-        className="w-full rounded-xl bg-lingo-accent px-6 py-3.5 text-[15px] font-semibold text-white shadow-lingo-pop-sm transition-all hover:-translate-y-px hover:bg-lingo-accent-deep hover:shadow-lingo-pop"
+        className={`w-full rounded-xl px-6 py-3.5 text-[15px] font-semibold text-white transition-all ${
+          short
+            ? 'cursor-not-allowed bg-lingo-accent/40'
+            : 'bg-lingo-accent shadow-lingo-pop-sm hover:-translate-y-px hover:bg-lingo-accent-deep hover:shadow-lingo-pop'
+        }`}
       >
         {FR.evalButton}
       </button>

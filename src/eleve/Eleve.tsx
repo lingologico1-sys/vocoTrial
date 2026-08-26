@@ -27,11 +27,7 @@ import { useVoiceCall, type Turn } from '../live/useVoiceCall';
 import ConsignePanel from './ConsignePanel';
 import DiagnosticPanel from './DiagnosticPanel';
 import DictionaryPanel, { type LookupRequest } from './DictionaryPanel';
-import EvaluationPanel, {
-  EvaluationGate,
-  MIN_COMPLETE_EVAL_MS,
-  MIN_EVAL_MS,
-} from './EvaluationPanel';
+import EvaluationPanel, { EvaluationGate } from './EvaluationPanel';
 import TutorStage from './TutorStage';
 import VocabPanel from './VocabPanel';
 import { FR } from './strings';
@@ -869,32 +865,6 @@ export default function Eleve() {
   ]);
 
   /**
-   * Whether the conversation that just ended is worth reading.
-   *
-   * TWO DOORS, AND COMPLETING THE LESSON IS ONE OF THEM. The gate was a flat
-   * two minutes, on the sound argument that a level judgement needs a couple of
-   * minutes of learner speech to stand on. What that missed is a short lesson
-   * done properly: three questions, answered fully, over in ninety seconds. The
-   * student has finished everything they were set and the page told them they
-   * had not talked enough — which is the app punishing them for the teacher's
-   * list being short.
-   *
-   * So a completed lesson opens the gate at MIN_COMPLETE_EVAL_MS instead. The
-   * report that comes back is honestly smaller: most bands stay `not-shown` and
-   * the diagnosis is free to answer `too-little-evidence`, which the panel
-   * already renders as "not placed" rather than as a bad mark. What still works
-   * on ninety seconds is the half a student actually reads — their best
-   * sentences, whether they hit the consigne, whether they reached for
-   * anything. See report.ts, which is told to expect a short sample rather than
-   * to apologise for one.
-   *
-   * The floor does not go away entirely, because "completed" is the tutor's
-   * word. A model that reports all five questions in the first twenty seconds
-   * would otherwise produce a report on nothing at all.
-   */
-  const evalFloorMs = lessonDone ? MIN_COMPLETE_EVAL_MS : MIN_EVAL_MS;
-
-  /**
    * What the arrow in the pill points at when there is no call running.
    *
    * All that survives of a call button that used to say four different things:
@@ -1191,7 +1161,6 @@ export default function Eleve() {
                       live={call.live && !closing}
                       elapsedMs={elapsedMs}
                       lastCallMs={closing ? elapsedMs : call.lastCallMs}
-                      minimumMs={evalFloorMs}
                       complete={lessonDone}
                       busy={reporting}
                       error={reportError}
