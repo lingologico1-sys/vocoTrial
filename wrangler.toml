@@ -125,3 +125,23 @@ bucket_name = "vocotrial-sheets"
 [[r2_buckets]]
 binding = "HOUSE"
 bucket_name = "vocotrial-house"
+
+# The shared prompt library: the prompts saved on tutorBench, which studio
+# publishes as manners. They lived in localStorage until now, and the note in
+# src/realtime/savedPrompts.ts records why that stopped being defensible — a
+# prompt drafted on the laptop could not be published from the desktop, and the
+# two machines held different libraries behind the same picker.
+#
+# CREATE THE BUCKET BEFORE PUSHING A BINDING FOR IT, for the reason spelled out
+# above on EVALUATORS — Pages validates bindings at build time, so a block
+# naming a bucket that does not exist fails the whole deployment:
+#
+#   npx wrangler r2 bucket create vocotrial-prompts
+#
+# Its own bucket rather than a prefix inside HOUSE, on the same reasoning as
+# every block above. HOUSE is what an administrator decides for every teacher; a
+# prompt still being drafted is not that, and it becomes a house style only when
+# somebody presses Publish. See functions/api/prompts/.
+[[r2_buckets]]
+binding = "PROMPTS"
+bucket_name = "vocotrial-prompts"

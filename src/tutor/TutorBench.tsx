@@ -5,13 +5,16 @@ import { defaultModelKey, findModel, visibleModels } from '../realtime/models';
 import { LANGUAGES, defaultLanguageCode, findLanguage } from '../realtime/languages';
 import { MAX_INSTRUCTIONS } from '../realtime/instructions';
 import {
+  builtInPresets,
   deletePreset,
+  findIn,
   lastUsedKey,
   listPresets,
   rememberPreset,
-  renderPreset as renderFor,
+  renderFrom,
   savePreset,
   updatePreset,
+  type Preset,
 } from '../realtime/presets';
 import type { SessionSettings } from '../realtime/settings';
 import BuildBadge from '../BuildBadge';
@@ -72,9 +75,11 @@ const IDLE_POLL_MS = 5_000;
  * constant. Nothing here is a secret — the credentials live in an HttpOnly
  * cookie precisely so that they never touch this store.
  *
- * Distinct from the preset store in realtime/presets.ts, which holds the
- * prompts you deliberately saved and is shared with the studio page. This is
- * the scratch copy: the text in the box right now, whether or not it has a name.
+ * Distinct from the prompt library in realtime/presets.ts, which holds the
+ * prompts you deliberately saved and now lives in R2 so that studio on another
+ * machine can publish one. This is the scratch copy: the text in the box right
+ * now, whether or not it has a name — and it stays in this browser, because a
+ * half-typed prompt is not something another machine should be handed.
  */
 const PREFS_KEY = 'vocotrial.prefs.v1';
 
@@ -82,11 +87,11 @@ interface Prefs {
   /**
    * Which preset the saved `instructions` were being written against.
    *
-   * Stored so it can be *compared*, not to decide what opens — the preset store
-   * decides that, because it is the one both pages write to. If the two
-   * disagree, a pick was made somewhere else since this was written and the
-   * scratch text belongs to a prompt that is no longer selected; see the load
-   * below, which drops it rather than showing it under the wrong name.
+   * Stored so it can be *compared*, not to decide what opens on its own. If it
+   * disagrees with the remembered pick, a pick was made somewhere else since
+   * this was written and the scratch text belongs to a prompt that is no longer
+   * selected; the load below drops it rather than showing it under the wrong
+   * name.
    */
   presetKey: string;
   instructions: string;
@@ -103,14 +108,29 @@ interface Prefs {
 }
 
 /**
- * Renders a preset straight from the store.
+ * What the page opens on, before the shared library has answered.
  *
- * Only for the initial state, which runs once. Everything after mount goes
- * through the in-memory list instead — see renderPreset inside the component,
- * and the note there on why that distinction earns its keep.
+ * THE FIRST PAINT HAS ONLY THE BUILT-INS, which is the price of the prompts
+ * living in R2 rather than in this browser: five of them compile into the
+ * bundle and the rest are a request away. The scratch copy covers the gap for
+ * the case that matters — a reload mid-trial — because the text of the prompt
+ * being worked on is in the prefs, whatever its name turns out to be. So an
+ * opening on a saved prompt shows the right words immediately and gets its
+ * label back when the list lands.
  */
-function renderStoredPreset(presetKey: string, languageCode: string): string {
-  return renderFor(presetKey, findLanguage(languageCode) ?? LANGUAGES[0]);
+function opening(
+  prefs: Partial<Prefs>,
+  key: string,
+  presets: Preset[],
+  languageCode: string,
+): { instructions: string; edited: boolean } {
+  if (prefs.presetKey === key && prefs.instructions !== undefined) {
+    return { instructions: prefs.instructions, edited: prefs.edited ?? false };
+  }
+  return {
+    instructions: renderFrom(presets, key, findLanguage(languageCode) ?? LANGUAGES[0]),
+    edited: false,
+  };
 }
 
 /** Anything malformed is discarded rather than repaired: it is only a cache. */
@@ -146,17 +166,32 @@ export default function TutorBench() {
    * against that same preset — see Prefs.presetKey.
    */
   const [prefs] = useState(loadPrefs);
-  const [presets, setPresets] = useState(listPresets);
-  const [presetKey, setPresetKey] = useState(lastUsedKey);
-  const [instructions, setInstructions] = useState(() => {
-    const key = lastUsedKey();
-    return prefs.presetKey === key && prefs.instructions !== undefined
-      ? prefs.instructions
-      : renderStoredPreset(key, defaultLanguageCode());
-  });
-  const [edited, setEdited] = useState(
-    () => (prefs.presetKey === lastUsedKey() ? (prefs.edited ?? false) : false),
+  const [presets, setPresets] = useState(builtInPresets);
+  /**
+   * The prompt this page opens on.
+   *
+   * The scratch copy's own key wins over the remembered pick while the library
+   * is still in flight, and only then: it names the prompt whose text is
+   * already in the box, and opening on something else would throw that text
+   * away to show a built-in nobody asked for. Once the list lands the pick is
+   * resolved properly against it — see the load effect below.
+   */
+  const [presetKey, setPresetKey] = useState(
+    () => prefs.presetKey ?? lastUsedKey(builtInPresets()),
   );
+  const [opened] = useState(() =>
+    opening(prefs, prefs.presetKey ?? lastUsedKey(builtInPresets()), builtInPresets(), defaultLanguageCode()),
+  );
+  const [instructions, setInstructions] = useState(opened.instructions);
+  const [edited, setEdited] = useState(opened.edited);
+  /**
+   * Whether the shared library has answered.
+   *
+   * Gates the language effect below, which would otherwise run at first paint
+   * against a list holding only the built-ins and overwrite a restored prompt
+   * with whichever built-in the fallback landed on.
+   */
+  const [loaded, setLoaded] = useState(false);
   const [settings, setSettings] = useState<SessionSettings>(prefs.settings ?? {});
   /**
    * Why a save or a delete could not be done. Shown beside the panel rather
@@ -215,10 +250,8 @@ export default function TutorBench() {
    * slower the more prompts you save.
    */
   const renderPreset = useCallback(
-    (key: string, languageCode: string) => {
-      const preset = presets.find((option) => option.key === key) ?? presets[0];
-      return preset.render(findLanguage(languageCode) ?? LANGUAGES[0]);
-    },
+    (key: string, languageCode: string) =>
+      renderFrom(presets, key, findLanguage(languageCode) ?? LANGUAGES[0]),
     [presets],
   );
 
@@ -250,8 +283,35 @@ export default function TutorBench() {
     }
   }, [presetKey, instructions, edited, settings, l1Code]);
 
-  // The library, once, at mount. A failure leaves the built-in selected and
-  // says so beside the panel rather than blocking the page.
+  /**
+   * The prompt library, once, at mount.
+   *
+   * A failure leaves the five built-ins in the picker and says so beside the
+   * panel rather than blocking the page — the same posture the evaluator load
+   * below takes, and for the same reason: a bench that will not render because
+   * a bucket is unreachable is worse than one with a shorter dropdown.
+   *
+   * The pick is re-resolved against what came back, because the key held since
+   * first paint may name a prompt deleted from another machine. Anything the
+   * list does not contain falls back to the remembered pick, then to the
+   * default built-in.
+   */
+  useEffect(() => {
+    let live = true;
+    void listPresets().then(({ presets: found, error }) => {
+      if (!live) return;
+      setPresets(found);
+      setPresetKey((current) => (findIn(found, current) ? current : lastUsedKey(found)));
+      if (error) setPresetError(error);
+      setLoaded(true);
+    });
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  // The evaluator library, once, at mount. A failure leaves the built-in
+  // selected and says so beside the panel rather than blocking the page.
   useEffect(() => {
     let live = true;
     void listEvaluators().then(({ evaluators: found, error }) => {
@@ -277,9 +337,9 @@ export default function TutorBench() {
    * than to special-case.
    */
   useEffect(() => {
-    if (edited) return;
+    if (!loaded || edited) return;
     setInstructions(renderPreset(presetKey, language));
-  }, [presetKey, language, edited, renderPreset]);
+  }, [loaded, presetKey, language, edited, renderPreset]);
 
   const appendTranscript = useCallback((delta: TranscriptDelta) => {
     // Any transcript at all means somebody just said something.
@@ -411,31 +471,38 @@ export default function TutorBench() {
   };
 
   /**
-   * Runs a change to the preset store and re-reads the list from it.
+   * Runs a change to the shared library and re-reads the list from it.
    *
-   * Re-reading rather than patching the array in place: the store is the thing
-   * both pages share, and a list assembled here from what we *think* happened
-   * would be the copy that drifts.
+   * Re-reading rather than patching the array in place: the library is the
+   * thing both pages and both machines share, and a list assembled here from
+   * what we *think* happened would be the copy that drifts. It costs a round
+   * trip on a save, which is a button press rather than a keystroke.
+   *
+   * The re-read happens whether or not the change succeeded, because a failed
+   * save is one of the ways to discover that somebody else changed the library
+   * underneath this tab.
    */
-  const withPresets = (change: () => void): boolean => {
+  const withPresets = async (change: () => Promise<void>): Promise<boolean> => {
     let ok = true;
     try {
-      change();
+      await change();
       setPresetError(null);
     } catch (error) {
       ok = false;
       setPresetError(error instanceof Error ? error.message : 'Could not save the prompt');
     }
-    setPresets(listPresets());
+    const { presets: found, error } = await listPresets();
+    setPresets(found);
+    if (error) setPresetError(error);
     return ok;
   };
 
   /** Keeps the text in the box as a preset of its own, and selects it. */
-  const saveAsPreset = (label: string): boolean =>
-    withPresets(() => {
+  const saveAsPreset = (label: string): Promise<boolean> =>
+    withPresets(async () => {
       // savePreset records the new key as the last-used one itself, so there is
       // no rememberPreset call to pair with this the way choosePreset has.
-      const created = savePreset(label, instructions);
+      const created = await savePreset(label, instructions);
       setPresetKey(created.key);
       // Saved *is* the preset now, so there is nothing left to be edited from.
       setEdited(false);
@@ -443,8 +510,8 @@ export default function TutorBench() {
 
   /** Writes the box over the selected saved preset, keeping its name and key. */
   const updateSelectedPreset = () => {
-    withPresets(() => {
-      updatePreset(presetKey, instructions);
+    void withPresets(async () => {
+      await updatePreset(presets, presetKey, instructions);
       setEdited(false);
     });
   };
@@ -452,19 +519,26 @@ export default function TutorBench() {
   /**
    * Deletes the selected saved preset and falls back to the built-in default.
    *
-   * Confirmed first, and worth the interruption: this is text the user wrote,
-   * the store keeps no history, and the button sits one row from Save.
+   * Confirmed first, and worth the interruption: this is text somebody wrote,
+   * the library keeps no history, the button sits one row from Save — and it
+   * now deletes on every machine rather than only this one.
    */
   const deleteSelectedPreset = () => {
-    const preset = presets.find((option) => option.key === presetKey);
+    const preset = findIn(presets, presetKey);
     if (!preset || preset.builtIn) return;
-    if (!window.confirm(`Delete the saved prompt “${preset.label}”? This cannot be undone.`)) {
+    if (
+      !window.confirm(
+        `Delete the saved prompt “${preset.label}”? It goes from the shared library, on every machine, and this cannot be undone.`,
+      )
+    ) {
       return;
     }
 
-    withPresets(() => {
-      deletePreset(presetKey);
-      choosePreset(lastUsedKey());
+    void withPresets(async () => {
+      await deletePreset(presetKey);
+      // deletePreset drops the remembered pick with it, so this resolves to the
+      // default built-in — which is in the bundle and cannot itself be gone.
+      choosePreset(lastUsedKey(builtInPresets()));
     });
   };
 

@@ -4,7 +4,14 @@ import BuildBadge from '../BuildBadge';
 import ReturnButton from '../ReturnButton';
 import { findModel } from '../realtime/models';
 import { LANGUAGES, defaultLanguageCode, findLanguage } from '../realtime/languages';
-import { findPreset, lastUsedKey, listPresets, rememberPreset, renderPreset } from '../realtime/presets';
+import {
+  builtInPresets,
+  findIn,
+  lastUsedKey,
+  listPresets,
+  rememberPreset,
+  renderFrom,
+} from '../realtime/presets';
 import { MAX_INSTRUCTIONS, withPersona } from '../realtime/instructions';
 import { VOICES } from '../realtime/settings';
 import {
@@ -236,13 +243,21 @@ export default function Studio() {
   const [prefs] = useState(loadPrefs);
   const [language, setLanguage] = useState(prefs.language ?? defaultLanguageCode());
   /**
-   * Not in this page's prefs, unlike everything else here: the prompt list and
-   * the last pick live in realtime/presets.ts, which tutorBench writes
-   * to as well. A prompt saved over there is offered here, and picking one here
-   * is what that page opens on next.
+   * Not in this page's prefs, unlike everything else here: the prompt library
+   * lives in R2 behind realtime/presets.ts, which tutorBench writes to as well.
+   * A prompt saved over there is offered here — on any machine now, which is
+   * the whole point of the move — and picking one here is what that page opens
+   * on next.
+   *
+   * FETCHED RATHER THAN READ, AND RE-FETCHED. It used to be `useState(listPresets)`
+   * over a localStorage store, which had a quieter version of the same bug the
+   * network introduces: a prompt saved on the bench in another tab did not
+   * appear until this page was reloaded. It reloads on focus now, so publishing
+   * a manner from a prompt written a minute ago does not require a refresh.
    */
-  const [presets] = useState(listPresets);
-  const [presetKey, setPresetKey] = useState(lastUsedKey);
+  const [presets, setPresets] = useState(builtInPresets);
+  const [presetKey, setPresetKey] = useState(() => lastUsedKey(builtInPresets()));
+  const [presetError, setPresetError] = useState('');
   /**
    * Which prebuilt voice the tutor speaks in. Empty means Google's default,
    * which is a third state rather than a synonym for whichever name that
@@ -587,10 +602,10 @@ export default function Studio() {
   const composed = useMemo(
     () =>
       withPersona(
-        renderPreset(presetKey, findLanguage(language) ?? LANGUAGES[0]),
+        renderFrom(presets, presetKey, findLanguage(language) ?? LANGUAGES[0]),
         persona ? kit?.persona : undefined,
       ),
-    [presetKey, language, persona, kit],
+    [presets, presetKey, language, persona, kit],
   );
 
   /**
@@ -603,8 +618,8 @@ export default function Studio() {
    * costs nothing worth protecting.
    */
   const presetChars = useMemo(
-    () => renderPreset(presetKey, findLanguage(language) ?? LANGUAGES[0]).length,
-    [presetKey, language],
+    () => renderFrom(presets, presetKey, findLanguage(language) ?? LANGUAGES[0]).length,
+    [presets, presetKey, language],
   );
   const tooLong = composed.length > MAX_INSTRUCTIONS;
 
@@ -701,6 +716,37 @@ export default function Studio() {
   useEffect(loadHouse, []);
 
   /**
+   * The prompt library, at mount and whenever this tab is looked at again.
+   *
+   * The focus listener is what makes the two pages feel like one library: the
+   * habit this page is built around is writing a prompt on the bench, coming
+   * back here and publishing it as a manner, and a picker that answers only to
+   * a reload turns that into a refresh nobody remembers to do.
+   *
+   * The pick is re-resolved against what came back, because the remembered key
+   * may name a prompt deleted from another machine. A failure leaves the
+   * built-ins in the picker and says so under it.
+   */
+  useEffect(() => {
+    let alive = true;
+    const load = () => {
+      void listPresets().then(({ presets: found, error }) => {
+        if (!alive) return;
+        setPresets(found);
+        setPresetKey((current) => (findIn(found, current) ? current : lastUsedKey(found)));
+        setPresetError(error ?? '');
+      });
+    };
+
+    load();
+    window.addEventListener('focus', load);
+    return () => {
+      alive = false;
+      window.removeEventListener('focus', load);
+    };
+  }, []);
+
+  /**
    * The sliders on this page, as a profile.
    *
    * Gathered at the press rather than held in state, for the reason `composed`
@@ -782,14 +828,14 @@ export default function Studio() {
         name: styleName.trim(),
         note: '',
         // Rendered, not the key. See the note beside the button.
-        text: renderPreset(presetKey, styleLanguage),
+        text: renderFrom(presets, presetKey, styleLanguage),
         language: styleLanguage.code,
         // And the key as well, when it names a built-in. That one is not in
         // this browser's localStorage — it is in the bundle and in the Worker —
         // so publishing can render the manner again for the language of the
         // lesson going out. A saved prompt sends nothing and stays frozen in
         // whatever language it was written in.
-        preset: findPreset(presetKey)?.builtIn ? presetKey : undefined,
+        preset: findIn(presets, presetKey)?.builtIn ? presetKey : undefined,
       });
       setStyleName('');
       setHouseNote(`Published “${written.name}”. Teachers can pick it on /teach.`);
@@ -1761,6 +1807,18 @@ export default function Studio() {
           </button>
         </div>
 
+        {/*
+          Said only when the library could not be read, and it says what is
+          still on offer: the five built-ins are in the bundle, so the picker
+          above is short rather than broken, and a manner published from one of
+          them is a perfectly ordinary manner.
+        */}
+        {presetError && (
+          <p className="-mt-1 text-[11px] text-amber-500">
+            {presetError}. Only the built-in prompts are listed.
+          </p>
+        )}
+
         <div className="flex gap-3">
           {live ? (
             <>
@@ -1906,9 +1964,9 @@ export default function Studio() {
             baked in here.
           */}
           <p className="mt-1.5 text-[11px] leading-relaxed text-slate-500">
-            Saves {renderPreset(presetKey, styleLanguage).length.toLocaleString()} characters of
+            Saves {renderFrom(presets, presetKey, styleLanguage).length.toLocaleString()} characters of
             prompt as it stands, rendered for {styleLanguage.label}.{' '}
-            {findPreset(presetKey)?.builtIn
+            {findIn(presets, presetKey)?.builtIn
               ? 'It is one of the built-in prompts, so a lesson published in another language gets it in that language instead.'
               : 'It is a saved prompt, so it stays in the language it was written in whatever language a lesson is published in.'}{' '}
             The face&rsquo;s persona is not included — that is applied when a teacher picks a

@@ -45,7 +45,7 @@ interface Props {
    * whether it took. False keeps the name box open over the error rather than
    * making the user retype a name they already gave.
    */
-  onSavePreset: (label: string) => boolean;
+  onSavePreset: (label: string) => Promise<boolean>;
   /** Writes the textarea over the selected saved preset. */
   onUpdatePreset: () => void;
   onDeletePreset: () => void;
@@ -171,9 +171,12 @@ export default function SettingsPanel({
     onSettings(next);
   };
 
-  const commitName = () => {
+  const commitName = async () => {
     if (naming === null) return;
-    if (onSavePreset(naming)) setNaming(null);
+    // The library is in R2 now, so this is a round trip rather than a write to
+    // this browser. Still reported the same way: false keeps the name box open
+    // over the error rather than making somebody retype a name they gave.
+    if (await onSavePreset(naming)) setNaming(null);
   };
 
   return (
@@ -314,7 +317,7 @@ export default function SettingsPanel({
               onKeyDown={(event) => {
                 if (event.key === 'Enter') {
                   event.preventDefault();
-                  commitName();
+                  void commitName();
                 }
                 if (event.key === 'Escape') setNaming(null);
               }}
@@ -322,7 +325,7 @@ export default function SettingsPanel({
             />
             <button
               type="button"
-              onClick={commitName}
+              onClick={() => void commitName()}
               disabled={!naming.trim()}
               className="rounded-md bg-sky-600 px-3 py-1 text-xs font-medium text-white hover:bg-sky-500 disabled:opacity-40"
             >

@@ -1,59 +1,65 @@
 /**
  * The prompts you can pick from: the five written into the app, plus whatever
- * you have saved yourself.
+ * has been saved into the shared library.
  *
- * WHY THIS IS NOT IN instructions.ts. That file is imported by functions/,
- * which compiles against workers-types with no DOM lib and no localStorage —
- * and it is also the server's fallback prompt, so it has to stay pure data that
- * a Worker can read. This file is the browser's half: it reads and writes the
- * store, and nothing server-side may import it.
+ * WHAT THIS FILE IS NOW. It used to be the browser's localStorage store, and
+ * the note here defended that: saved prompts were the author's own workshop
+ * notes, and only a scale — the thing a student is measured against — needed to
+ * travel. That did not survive use. A prompt written on the bench is what
+ * studio publishes as a manner and what a class eventually hears, and a library
+ * that lives in one browser cannot be published from another. So the prompts
+ * went to R2 with the faces, the evaluators and the house, and this file is the
+ * browser's half of that: it talks to /api/prompts/*, and nothing server-side
+ * may import it. The pure half is savedPrompts.ts.
  *
- * THE ONE REAL DIFFERENCE between a built-in and a saved preset is what they
+ * WHAT STAYS LOCAL, and correctly so, is the *pick* — which prompt this browser
+ * had selected last. That is a per-browser convenience like a scroll position,
+ * not authored content, and evaluatorStore.ts keeps its own for the same
+ * reason.
+ *
+ * THE BUILT-INS ARE MERGED HERE, NOT STORED, the way the built-in evaluator is.
+ * list returns only what has been authored, so a deployment with no bucket, no
+ * saves, or a failed request still shows five working prompts rather than an
+ * empty picker.
+ *
+ * THE ONE REAL DIFFERENCE between a built-in and a saved prompt is what they
  * are made of. A built-in is a *function of the language* — pick Italian and
  * every one of them says "Italian" throughout, because they are written to be
- * rendered rather than stored. A saved preset is text, captured once, in
+ * rendered rather than stored. A saved prompt is text, captured once, in
  * whatever language it was written in. It cannot follow the language picker
  * afterwards, and pretending otherwise would mean rewriting someone's own words
  * on a dropdown change. So it does not follow, the panel says so, and both are
  * exposed through one `render` so nothing downstream has to care which it got.
+ *
+ * ASYNC IS THE VISIBLE COST of the move, and it is paid at the picker rather
+ * than at the call: `listPresets` is a request, and everything after it —
+ * finding one, rendering one, resolving the last-used key — takes the list it
+ * returned and stays synchronous. That is what keeps the per-keystroke compare
+ * in the prompt box off the network. See `renderFrom`.
  */
 
 import type { LanguageChoice } from './languages';
 import { INSTRUCTION_PRESETS, defaultPresetKey } from './instructions';
+import {
+  CUSTOM_PREFIX,
+  MAX_PRESET_NAME,
+  MAX_SAVED_PRESETS,
+  type SavedPrompt,
+  newPromptKey,
+} from './savedPrompts';
+
+export { MAX_PRESET_NAME, MAX_SAVED_PRESETS };
 
 /**
- * Where saved prompts and the last-used pick live.
+ * Where the last-used pick is remembered, and — until it is migrated — the old
+ * library alongside it.
  *
- * Separate from either page's own prefs key on purpose: both pages read this
- * one, and a prompt you wrote on tutorBench is usable on the face page
- * without retyping it. Nothing here is a secret.
+ * The key is unchanged from when this store held everything, which is what lets
+ * the migration below find prompts written before the move. Nothing here is a
+ * secret; the credentials live in an HttpOnly cookie precisely so they never
+ * touch this store.
  */
 const STORE_KEY = 'vocotrial.presets.v1';
-
-/** Custom keys are namespaced so they can never collide with a built-in's. */
-const CUSTOM_PREFIX = 'custom:';
-
-/** A ceiling on the picker, not on you. Well past any plausible use. */
-export const MAX_SAVED_PRESETS = 50;
-
-/** How long a name may be. Long enough to be descriptive, short enough to fit. */
-export const MAX_PRESET_NAME = 60;
-
-/** What one saved prompt is, on disk. */
-interface StoredPreset {
-  key: string;
-  label: string;
-  /** The prompt itself, exactly as it was when saved. */
-  text: string;
-  /** Last written. Sorts the picker, so the ones you are working on stay near. */
-  savedAt: number;
-}
-
-interface Store {
-  custom: StoredPreset[];
-  /** The key last chosen, on either page. Absent until something is picked. */
-  lastUsed?: string;
-}
 
 /**
  * What the pickers render and what a call is built from.
@@ -71,47 +77,21 @@ export interface Preset {
   render: (language: LanguageChoice) => string;
 }
 
-const EMPTY: Store = { custom: [] };
+async function post<T>(path: string, body: unknown): Promise<T> {
+  const response = await fetch(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'same-origin',
+    body: JSON.stringify(body),
+  });
 
-/** Anything malformed is discarded rather than repaired. */
-function read(): Store {
-  try {
-    const raw = window.localStorage.getItem(STORE_KEY);
-    const parsed: unknown = raw ? JSON.parse(raw) : null;
-    if (!parsed || typeof parsed !== 'object') return EMPTY;
-
-    const store = parsed as Partial<Store>;
-    const custom = Array.isArray(store.custom) ? store.custom : [];
-
-    return {
-      // Each entry is checked on its own, so one corrupt row does not cost you
-      // the rest of them.
-      custom: custom.filter(
-        (entry): entry is StoredPreset =>
-          !!entry &&
-          typeof entry === 'object' &&
-          typeof (entry as StoredPreset).key === 'string' &&
-          typeof (entry as StoredPreset).label === 'string' &&
-          typeof (entry as StoredPreset).text === 'string',
-      ),
-      lastUsed: typeof store.lastUsed === 'string' ? store.lastUsed : undefined,
-    };
-  } catch {
-    return EMPTY;
-  }
+  const answer = (await response.json().catch(() => null)) as (T & { error?: string }) | null;
+  if (!response.ok) throw new Error(answer?.error || 'That did not work');
+  if (!answer) throw new Error('Empty reply');
+  return answer;
 }
 
-function write(store: Store): void {
-  try {
-    window.localStorage.setItem(STORE_KEY, JSON.stringify(store));
-  } catch {
-    // Private browsing, or a full quota. A prompt that fails to save is worth
-    // knowing about, unlike a lost cache — see savePreset, which reports it.
-    throw new Error('Could not save. Browser storage is full or unavailable.');
-  }
-}
-
-function toPreset(stored: StoredPreset): Preset {
+function toPreset(stored: SavedPrompt): Preset {
   return {
     key: stored.key,
     label: stored.label,
@@ -129,104 +109,262 @@ const builtIns: Preset[] = INSTRUCTION_PRESETS.map((preset) => ({
   render: preset.render,
 }));
 
-/** Built-ins first, in their written order; saved ones after, newest first. */
-export function listPresets(): Preset[] {
-  const custom = [...read().custom]
-    .sort((a, b) => (b.savedAt ?? 0) - (a.savedAt ?? 0))
-    .map(toPreset);
-  return [...builtIns, ...custom];
+/** The five in the bundle, and nothing else. What a page opens on. */
+export function builtInPresets(): Preset[] {
+  return builtIns;
 }
 
-export function findPreset(key: string): Preset | undefined {
-  return listPresets().find((preset) => preset.key === key);
+function merge(prompts: SavedPrompt[]): Preset[] {
+  const saved = [...prompts]
+    .sort((a, b) => (b.savedAt ?? 0) - (a.savedAt ?? 0))
+    .map(toPreset);
+  return [...builtIns, ...saved];
+}
+
+// --- The migration off localStorage ------------------------------------------
+
+/**
+ * The prompts this browser saved before the library moved to R2.
+ *
+ * Read defensively and structurally, exactly as the old store read itself: one
+ * corrupt row must not cost the rest of them, because this is the only copy
+ * that exists and it is about to be either uploaded or abandoned.
+ */
+function strandedPrompts(): SavedPrompt[] {
+  try {
+    const raw = window.localStorage.getItem(STORE_KEY);
+    const parsed: unknown = raw ? JSON.parse(raw) : null;
+    if (!parsed || typeof parsed !== 'object') return [];
+
+    const custom = (parsed as { custom?: unknown }).custom;
+    if (!Array.isArray(custom)) return [];
+
+    return custom
+      .filter(
+        (entry): entry is SavedPrompt =>
+          !!entry &&
+          typeof entry === 'object' &&
+          typeof (entry as SavedPrompt).key === 'string' &&
+          typeof (entry as SavedPrompt).label === 'string' &&
+          typeof (entry as SavedPrompt).text === 'string' &&
+          !!(entry as SavedPrompt).text.trim(),
+      )
+      .map((entry) => ({
+        key: entry.key.startsWith(CUSTOM_PREFIX) ? entry.key : newPromptKey(),
+        label: entry.label,
+        text: entry.text,
+        savedAt: typeof entry.savedAt === 'number' ? entry.savedAt : Date.now(),
+      }));
+  } catch {
+    return [];
+  }
+}
+
+/** Drops the old library, keeping the last-used pick. Called only after a save. */
+function clearStranded(): void {
+  try {
+    const raw = window.localStorage.getItem(STORE_KEY);
+    const parsed: unknown = raw ? JSON.parse(raw) : null;
+    const lastUsed =
+      parsed && typeof parsed === 'object'
+        ? (parsed as { lastUsed?: unknown }).lastUsed
+        : undefined;
+    window.localStorage.setItem(
+      STORE_KEY,
+      JSON.stringify({ custom: [], lastUsed: typeof lastUsed === 'string' ? lastUsed : undefined }),
+    );
+  } catch {
+    // Failing to clear costs a second upload attempt on the next load, which
+    // the key check below turns into a no-op. Nothing is lost either way.
+  }
+}
+
+/**
+ * Lifts this browser's stranded prompts into the shared library, once.
+ *
+ * RUNS ON EVERY MACHINE, AND ONLY ONCE ON EACH. The keys carry time and
+ * entropy, so two machines that never shared a prompt cannot collide, and each
+ * one contributes what it holds the first time it loads a page after the move.
+ * Anything already up there by key is left alone — that is what makes a second
+ * run, after a failed clear, harmless.
+ *
+ * THE SECOND FILTER IS FOR THE OBVIOUS DUPLICATE: the same prompt typed into
+ * two laptops before there was any way to share it. Identical name and
+ * identical text is not a coincidence worth preserving twice in a picker, and
+ * the local copy is the one that yields — the shared library was there first.
+ *
+ * A FAILURE IS NOT REPORTED AND NOT FATAL. The local store is left intact, the
+ * page shows the shared library as it stands, and the next load tries again.
+ * The one thing that must not happen is dropping the only copy of somebody's
+ * writing because a request failed, and clearing only after a successful save
+ * is what prevents it.
+ */
+async function migrate(existing: SavedPrompt[]): Promise<SavedPrompt[]> {
+  const stranded = strandedPrompts();
+  if (!stranded.length) return existing;
+
+  const keys = new Set(existing.map((entry) => entry.key));
+  const twins = new Set(existing.map((entry) => `${entry.label} ${entry.text}`));
+  const fresh = stranded.filter(
+    (entry) => !keys.has(entry.key) && !twins.has(`${entry.label} ${entry.text}`),
+  );
+
+  if (!fresh.length) {
+    clearStranded();
+    return existing;
+  }
+
+  try {
+    const { prompts } = await post<{ prompts: SavedPrompt[] }>('/api/prompts/save', {
+      prompts: fresh.slice(0, MAX_SAVED_PRESETS),
+    });
+    clearStranded();
+    return [...prompts, ...existing];
+  } catch {
+    return existing;
+  }
+}
+
+// --- The library -------------------------------------------------------------
+
+/**
+ * Built-ins first, in their written order; saved ones after, newest first.
+ *
+ * A failed request yields the built-ins alone rather than throwing, the posture
+ * listEvaluators takes: a picker with five entries is a survivable state, and a
+ * bench that refuses to render because the bucket is unreachable is not.
+ */
+export async function listPresets(): Promise<{ presets: Preset[]; error?: string }> {
+  try {
+    const { prompts } = await post<{ prompts: SavedPrompt[] }>('/api/prompts/list', {});
+    return { presets: merge(await migrate(prompts)) };
+  } catch (error) {
+    return {
+      presets: builtIns,
+      error: error instanceof Error ? error.message : 'Could not read the prompt library',
+    };
+  }
+}
+
+/**
+ * One preset out of a list already in hand.
+ *
+ * Takes the list rather than fetching, and that is the point rather than an
+ * inconvenience: the prompt box compares what has been typed against the
+ * preset's own text on every keystroke, and a version of this that reached the
+ * network would make typing a prompt an act of network traffic.
+ */
+export function findIn(presets: Preset[], key: string): Preset | undefined {
+  return presets.find((preset) => preset.key === key);
 }
 
 /**
  * Renders a preset, falling back to the first built-in.
  *
- * The fallback is not defensive padding: a saved preset can be deleted while a
- * page that remembers it is still open in another tab, and a call is a bad
- * moment to discover it.
+ * The fallback is not defensive padding: a saved prompt can be deleted from
+ * another machine while a page that remembers it is still open here, and a call
+ * is a bad moment to discover it.
  */
-export function renderPreset(key: string, language: LanguageChoice): string {
-  const preset = findPreset(key) ?? builtIns[0];
-  return preset.render(language);
+export function renderFrom(presets: Preset[], key: string, language: LanguageChoice): string {
+  return (findIn(presets, key) ?? presets[0] ?? builtIns[0]).render(language);
+}
+
+export async function savePreset(label: string, text: string): Promise<Preset> {
+  const name = label.trim().slice(0, MAX_PRESET_NAME);
+  if (!name) throw new Error('Give the prompt a name.');
+  if (!text.trim()) throw new Error('There is nothing to save.');
+
+  const { prompts } = await post<{ prompts: SavedPrompt[] }>('/api/prompts/save', {
+    prompt: { key: newPromptKey(), label: name, text, savedAt: Date.now() },
+  });
+  rememberPreset(prompts[0].key);
+  return toPreset(prompts[0]);
 }
 
 /**
- * The preset to open on, which is the one last picked.
+ * Writes over a saved prompt in place, keeping its key.
  *
- * Checked against the list rather than trusted, because the remembered key may
- * name a preset that has since been deleted — on this page or the other one.
+ * Keeping the key is the point: it is what the pages remember as last-used, so
+ * an update is not allowed to look like a delete-and-recreate to them.
  */
-export function lastUsedKey(): string {
-  const remembered = read().lastUsed;
-  if (remembered && findPreset(remembered)) return remembered;
+export async function updatePreset(
+  presets: Preset[],
+  key: string,
+  text: string,
+): Promise<Preset | undefined> {
+  const existing = findIn(presets, key);
+  if (!existing || existing.builtIn) return undefined;
+
+  const { prompts } = await post<{ prompts: SavedPrompt[] }>('/api/prompts/save', {
+    prompt: { key, label: existing.label, text, savedAt: Date.now() },
+  });
+  return toPreset(prompts[0]);
+}
+
+/** Removes a saved prompt. Built-in keys are ignored rather than refused. */
+export async function deletePreset(key: string): Promise<void> {
+  if (!key.startsWith(CUSTOM_PREFIX)) return;
+  await post('/api/prompts/delete', { key });
+  forgetPreset(key);
+}
+
+// --- The pick, which stays in this browser -----------------------------------
+
+/**
+ * The preset to open on, checked against what actually exists.
+ *
+ * The remembered key may name a prompt since deleted — on this browser or
+ * another, since the library is shared now — and a call is a bad moment to find
+ * out. Falls back to the first built-in, which is always present.
+ */
+export function lastUsedKey(available: Preset[]): string {
+  try {
+    const raw = window.localStorage.getItem(STORE_KEY);
+    const parsed: unknown = raw ? JSON.parse(raw) : null;
+    const remembered =
+      parsed && typeof parsed === 'object' ? (parsed as { lastUsed?: unknown }).lastUsed : null;
+    if (typeof remembered === 'string' && available.some((entry) => entry.key === remembered)) {
+      return remembered;
+    }
+  } catch {
+    // Private browsing. The default is the answer.
+  }
   return defaultPresetKey();
 }
 
-/** Records a pick. Cheap and frequent; a failure here is not worth reporting. */
-export function rememberPreset(key: string): void {
+function writeLastUsed(key: string | undefined): void {
   try {
-    write({ ...read(), lastUsed: key });
+    const raw = window.localStorage.getItem(STORE_KEY);
+    const parsed: unknown = raw ? JSON.parse(raw) : null;
+    const custom =
+      parsed && typeof parsed === 'object' && Array.isArray((parsed as { custom?: unknown }).custom)
+        ? (parsed as { custom: unknown[] }).custom
+        : [];
+    window.localStorage.setItem(STORE_KEY, JSON.stringify({ custom, lastUsed: key }));
   } catch {
     // Losing the pick costs one dropdown change on the next visit.
   }
 }
 
-function makeKey(): string {
-  // Time for ordering, entropy so two saves in one millisecond stay distinct.
-  return `${CUSTOM_PREFIX}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+/** Records a pick. Cheap and frequent; a failure here is not worth reporting. */
+export function rememberPreset(key: string): void {
+  writeLastUsed(key);
 }
 
 /**
- * Saves the given text under a new name and selects it.
+ * Drops the pick if it names this key.
  *
- * Throws with something worth showing rather than failing quietly: unlike the
- * prefs cache elsewhere in the app, this is the user's own writing and losing
- * it silently would be the worst outcome available.
+ * A deleted prompt must not stay the default. Left alone, lastUsedKey would
+ * fall back for the rest of time without the store ever being right.
  */
-export function savePreset(label: string, text: string): Preset {
-  const name = label.trim().slice(0, MAX_PRESET_NAME);
-  if (!name) throw new Error('Give the prompt a name.');
-  if (!text.trim()) throw new Error('There is nothing to save.');
-
-  const store = read();
-  if (store.custom.length >= MAX_SAVED_PRESETS) {
-    throw new Error(`That is ${MAX_SAVED_PRESETS} saved prompts. Delete one first.`);
+export function forgetPreset(key: string): void {
+  try {
+    const raw = window.localStorage.getItem(STORE_KEY);
+    const parsed: unknown = raw ? JSON.parse(raw) : null;
+    const remembered =
+      parsed && typeof parsed === 'object' ? (parsed as { lastUsed?: unknown }).lastUsed : null;
+    if (remembered === key) writeLastUsed(undefined);
+  } catch {
+    // Nothing to forget if the store cannot be read.
   }
-
-  const stored: StoredPreset = { key: makeKey(), label: name, text, savedAt: Date.now() };
-  write({ custom: [...store.custom, stored], lastUsed: stored.key });
-  return toPreset(stored);
-}
-
-/**
- * Writes over a saved preset in place, keeping its key.
- *
- * Keeping the key is the point: it is what the pages remember as last-used, so
- * an update is not allowed to look like a delete-and-recreate to them.
- */
-export function updatePreset(key: string, text: string): Preset | undefined {
-  const store = read();
-  const existing = store.custom.find((entry) => entry.key === key);
-  if (!existing) return undefined;
-
-  const stored: StoredPreset = { ...existing, text, savedAt: Date.now() };
-  write({
-    ...store,
-    custom: store.custom.map((entry) => (entry.key === key ? stored : entry)),
-  });
-  return toPreset(stored);
-}
-
-/** Removes a saved preset. Built-in keys are ignored rather than refused. */
-export function deletePreset(key: string): void {
-  const store = read();
-  write({
-    custom: store.custom.filter((entry) => entry.key !== key),
-    // A deleted preset must not stay the default. Left alone, lastUsedKey()
-    // would fall back for the rest of time without the store ever being right.
-    lastUsed: store.lastUsed === key ? undefined : store.lastUsed,
-  });
 }
