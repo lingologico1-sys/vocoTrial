@@ -157,6 +157,20 @@ const GOOGLE_QUIET_MS = 3_000;
  */
 const SPLIT_MS = 250;
 
+/**
+ * Below this, a microphone open is too short to have been an answer.
+ *
+ * NOT A THRESHOLD ANYTHING ACTS ON — it only decides whether a `floor` line
+ * says so out loud. Every open resets the silence clock in Eleve.tsx whatever
+ * its length, which is the behaviour under suspicion; this is here so a reader
+ * scanning an account can see at once which opens were speech and which were a
+ * beginner drawing breath in front of a question they cannot answer yet.
+ *
+ * Three quarters of a second: shorter than any real answer, longer than a
+ * breath or a chair.
+ */
+const MIC_FLICKER_MS = 750;
+
 export interface Turn {
   role: 'user' | 'agent';
   text: string;
@@ -279,6 +293,25 @@ export interface CallEvent {
      * one of these above it was the right call, and a nudge without one
      * interrupted a turn that was still coming. See onSilentTurn.
      */
+    /**
+     * The floor changed hands: one of the two voices stopped.
+     *
+     * THE ONE MOMENT THE ACCOUNT NEVER RECORDED, and it is the moment every
+     * silence clock in the page is started by. On 2026-08-27 a nudge announced
+     * fifteen seconds of silence having begun counting thirteen seconds after
+     * the room actually went quiet — a twenty-eight second hole, the largest in
+     * the call — and there was no way to tell which of the two resets in
+     * Eleve.tsx had held the clock off, because neither `speaking` nor `heard`
+     * going false left a mark anywhere.
+     *
+     * NOT THE STARTS, ONLY THE ENDS, for the tutor: a turn's beginning already
+     * has an `audio` line and a TUTOR line under it, and a third would say
+     * nothing new. The learner's microphone gets both halves, because the
+     * flicker is the hypothesis — a hesitant beginner's false starts and breath
+     * each reset the clock, and a run of very short opens is what that looks
+     * like from out here.
+     */
+    | 'floor'
     | 'silent-turn'
     /** Something asked for the call to stop, and said why. */
     | 'hung-up';
@@ -607,6 +640,14 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
    * mid-sentence cannot leave the face believing it is still being spoken to.
    */
   const [heard, setHeard] = useState(false);
+
+  /**
+   * When the microphone last opened, so its close can say how long it was.
+   *
+   * A ref and not state: nothing renders from it, and it is read in the same
+   * handler that wrote it, where a render behind would be a render wrong.
+   */
+  const micOpenedAt = useRef<number | null>(null);
   /**
    * See `transcribing` on VoiceCall. The timer beside it is the giving up.
    *
@@ -1295,6 +1336,15 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
         // user, which is the whole of what a listening tilt responds to. The
         // channel's own lockout takes care of a provider that says it twice.
         if (!next) cue('listening');
+        /*
+         * The tutor's audio queue running out, written down where the silence
+         * that follows it starts. Every silence clock in the page is held off
+         * by `speaking`, so this is where each of them is free to begin — and
+         * a nudge that claims fifteen seconds while sitting thirty below this
+         * line is a nudge that was measuring something else. See the `floor`
+         * kind above.
+         */
+        if (!next) record('floor', 'the tutor stopped speaking — the room is quiet from here');
       },
       /**
        * The user's voice, straight through to the face.
@@ -1322,6 +1372,37 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
         // button promising a tutor that has plainly already finished.
         if (active) setOpeningDone(true);
         setHeard(active);
+        /*
+         * Both halves, and the length of the open on the close.
+         *
+         * THE LENGTH IS THE WHOLE POINT. A learner answering opens the
+         * microphone for seconds; a false start, a breath or a chair opens it
+         * for a fraction of one — and both reset the silence clock in Eleve.tsx
+         * identically, because from out here they are the same fact. A run of
+         * sub-second opens under a nudge that fired far too late is the answer
+         * to the twenty-eight second hole, and it is unreadable without the
+         * duration on the line.
+         *
+         * Two lines per answer on an ordinary lesson, which the event log's own
+         * limit is far above. A lesson noisy enough to flood this is a lesson
+         * whose account should say so.
+         */
+        if (active) {
+          micOpenedAt.current = Date.now();
+          record('floor', 'the microphone opened — the learner is making a sound');
+        } else {
+          const open = micOpenedAt.current === null ? null : Date.now() - micOpenedAt.current;
+          micOpenedAt.current = null;
+          record(
+            'floor',
+            open === null
+              ? 'the microphone closed'
+              : `the microphone closed after ${(open / 1000).toFixed(1)}s` +
+                  (open < MIC_FLICKER_MS
+                    ? ' — too short to be an answer, and it reset the silence clock all the same'
+                    : ''),
+          );
+        }
         /*
          * The loader's span, which starts here and usually ends at a
          * transcript. A voice starting arms it; a voice stopping starts the

@@ -677,6 +677,15 @@ export default function Eleve() {
    * nudged. See NUDGE_AFTER_MS.
    */
   const silentSince = useRef<number | null>(null);
+  /**
+   * What last started that clock, in words, for the nudge line to quote.
+   *
+   * A nudge saying only how long it waited cannot be checked against the
+   * timeline above it, because the thing it waited from is exactly what was
+   * never written down. See the nudge below and the `floor` events in
+   * useVoiceCall, which are the same fact at full resolution.
+   */
+  const silentBecause = useRef('the call opening');
   /** Whether the microphone has already been shut for the close. */
   const micClosed = useRef(false);
   const nudges = useRef(0);
@@ -709,6 +718,7 @@ export default function Eleve() {
       doneSince.current = null;
       spokeInClose.current = false;
       silentSince.current = null;
+      silentBecause.current = 'the call opening';
       micClosed.current = false;
       nudges.current = 0;
       // Nothing to unmute here: `connect` clears it, so the next call opens
@@ -721,8 +731,21 @@ export default function Eleve() {
     // Nobody is making a sound: not the tutor, and not the microphone. Held as
     // one clock because what `nudge` waits for is the room being silent, and
     // either of them talking is the reason not to.
-    if (call.speaking || call.heard) silentSince.current = null;
-    else {
+    if (call.speaking || call.heard) {
+      silentSince.current = null;
+      /*
+       * Which of the two is holding the clock off, kept for the nudge line to
+       * quote. The `floor` events in useVoiceCall have the transitions at full
+       * resolution; this is the coarse one-second answer to "and what was it
+       * this time", which is the question a reader of the account asks first.
+       */
+      silentBecause.current =
+        call.speaking && call.heard
+          ? 'both of them talking at once, and whichever stopped last'
+          : call.speaking
+            ? 'the tutor stopping'
+            : 'the microphone closing on the learner';
+    } else {
       if (silentSince.current === null) silentSince.current = Date.now();
       /*
        * A note already sent is a silence already being worked on.
@@ -734,8 +757,10 @@ export default function Eleve() {
        * forward, and only inside a silence: a note sent while the tutor was
        * talking is not a silence at all. See NUDGE_AFTER_MS.
        */
-      if (call.notedAt !== null && call.notedAt > silentSince.current)
+      if (call.notedAt !== null && call.notedAt > silentSince.current) {
         silentSince.current = call.notedAt;
+        silentBecause.current = 'a note was sent and the clock restarted on it';
+      }
     }
 
     if (lessonDone && doneSince.current === null) {
@@ -807,9 +832,18 @@ export default function Eleve() {
         silentSince.current = Date.now();
         call.say(
           KEEP_GOING_SIGNAL,
-          `nudge — ${NUDGE_AFTER_MS / 1000}s of silence, ${
-            total ? `${call.answered.length} of ${total} answered` : 'and this lesson has no list'
-          }`,
+          /*
+           * The clock's own start is on the line, because the count alone was
+           * misread. "15s of silence" reads as fifteen seconds after the room
+           * went quiet, and on 2026-08-27 it was fifteen seconds after a clock
+           * that had itself started thirteen seconds late — a twenty-eight
+           * second hole reported as fifteen. The number is what this waited;
+           * the rest is what it waited from.
+           */
+          `nudge — ${(silent / 1000).toFixed(0)}s of silence, measured from ` +
+            `${silentBecause.current}, ${
+              total ? `${call.answered.length} of ${total} answered` : 'and this lesson has no list'
+            }`,
         );
       }
       return;
