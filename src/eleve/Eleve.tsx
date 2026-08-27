@@ -23,7 +23,7 @@ import { defaultInstructions } from '../realtime/instructions';
 import { findLanguage, defaultLanguageCode } from '../realtime/languages';
 import { codeFromUrl, fetchSetup } from '../realtime/sessionStore';
 import { defaultModelKey, findModel } from '../realtime/models';
-import type { SessionSettings } from '../realtime/settings';
+import { withLearnerTurnTaking, type SessionSettings } from '../realtime/settings';
 import { useVoiceCall, type Turn } from '../live/useVoiceCall';
 import ConsignePanel from './ConsignePanel';
 import DiagnosticPanel from './DiagnosticPanel';
@@ -313,8 +313,13 @@ export default function Eleve() {
   const settings = useMemo<SessionSettings>(() => {
     if (!session) return {};
     // Absent rather than empty throughout — see settings.ts on why "leave it
-    // upstream" and "pin today's default" have to stay distinguishable.
-    return {
+    // upstream" and "pin today's default" have to stay distinguishable. The
+    // turn-taking fields are the exception, filled underneath whatever the
+    // lesson pinned: this page's speaker is always a learner, and the
+    // provider's own detection has been measured losing their answers. See
+    // LEARNER_TURN_TAKING for the runs. Because this memo is also what the
+    // diagnostic reports, those fields now truthfully read as sent.
+    return withLearnerTurnTaking({
       ...(session.voice ? { voice: session.voice } : {}),
       ...(session.silenceDurationMs !== undefined
         ? { silenceDurationMs: session.silenceDurationMs }
@@ -332,7 +337,7 @@ export default function Eleve() {
       ...(session.maxOutputTokens !== undefined
         ? { maxOutputTokens: session.maxOutputTokens }
         : {}),
-    };
+    });
   }, [session]);
 
   /**
@@ -689,6 +694,19 @@ export default function Eleve() {
   /** Whether the microphone has already been shut for the close. */
   const micClosed = useRef(false);
   const nudges = useRef(0);
+  /**
+   * Whether the learner has made any sound since the last nudge.
+   *
+   * THE TEST THAT STOPS A NUDGE HARANGUING AN ENDED CONVERSATION. A nudge is
+   * for a learner left sitting in a silence, and the proof it reached one is
+   * the microphone opening afterwards. On 2026-08-27 a tutor whose count was
+   * stuck said its full goodbye, the first nudge made it repeat that goodbye
+   * verbatim into a room the learner had already finished with, and the second
+   * nudge — measured only against fresh silence — bought a third performance
+   * of it. A tutor that answered a nudge and got nothing back is not a stalled
+   * lesson; it is an ended one, and the idle timer is the right closer.
+   */
+  const heardSinceNudge = useRef(true);
   const capMs = session ? capMinutesOf(session) * 60_000 : 0;
 
   /**
@@ -721,6 +739,7 @@ export default function Eleve() {
       silentBecause.current = 'the call opening';
       micClosed.current = false;
       nudges.current = 0;
+      heardSinceNudge.current = true;
       // Nothing to unmute here: `connect` clears it, so the next call opens
       // with a live microphone whatever this one ended as.
       setClosing(false);
@@ -731,6 +750,8 @@ export default function Eleve() {
     // Nobody is making a sound: not the tutor, and not the microphone. Held as
     // one clock because what `nudge` waits for is the room being silent, and
     // either of them talking is the reason not to.
+    if (call.heard) heardSinceNudge.current = true;
+
     if (call.speaking || call.heard) {
       silentSince.current = null;
       /*
@@ -827,9 +848,13 @@ export default function Eleve() {
        * has nothing useful left to say and the idle timer is the right answer.
        */
       const silent = silentSince.current === null ? 0 : Date.now() - silentSince.current;
-      if (silent >= NUDGE_AFTER_MS && nudges.current < MAX_NUDGES) {
+      // The heardSinceNudge test only ever withholds a *repeat*: the first
+      // nudge of a call is always available. See the ref for the goodbye it
+      // stops being performed three times.
+      if (silent >= NUDGE_AFTER_MS && nudges.current < MAX_NUDGES && heardSinceNudge.current) {
         nudges.current += 1;
         silentSince.current = Date.now();
+        heardSinceNudge.current = false;
         call.say(
           KEEP_GOING_SIGNAL,
           /*

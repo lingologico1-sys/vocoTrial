@@ -228,6 +228,50 @@ export const PATIENCE: Array<{
   },
 ];
 
+/**
+ * The turn-taking /eleve sends when the lesson pinned nothing, filled under
+ * whatever the teacher did pin.
+ *
+ * A SECOND DELIBERATE BREAK OF THE ABSENT-MEANS-UPSTREAM RULE, argued the same
+ * way as `thinkingLevelFor`: the provider's default is measurably wrong for
+ * this page's speaker. Three diagnostics on 2026-08-27 showed Google's own
+ * detection failing a hesitant learner outright — one answer retried seven
+ * times over 47 seconds before a turn was committed, and one ten-second answer
+ * to the last question that was never committed at all, which stranded the
+ * lesson one question short. The common thread was the setup sending none of
+ * these fields, so the sensitivity in force was one tuned for fluent speakers.
+ *
+ * HIGH start sensitivity is the direct answer to speech never starting a turn;
+ * the prefix padding guards the first syllable of an utterance the detector
+ * was slow to believe; LOW end sensitivity with an explicit silence duration
+ * makes the commit deterministic instead of whatever the provider felt like.
+ * The silence duration sits under the `patient` preset's 1200ms on purpose:
+ * a teacher who chose a patience chose these two fields, and this only speaks
+ * where they said nothing.
+ *
+ * FOR THE STUDENT PAGE ONLY. The workshop pages keep sending nothing, because
+ * comparing models includes comparing their defaults, and a bench that
+ * silently pins four fields is a bench lying about what it measured.
+ */
+export const LEARNER_TURN_TAKING: Pick<
+  SessionSettings,
+  'startSensitivity' | 'endSensitivity' | 'silenceDurationMs' | 'prefixPaddingMs'
+> = {
+  startSensitivity: 'START_SENSITIVITY_HIGH',
+  endSensitivity: 'END_SENSITIVITY_LOW',
+  silenceDurationMs: 1000,
+  prefixPaddingMs: 300,
+};
+
+/**
+ * Those defaults underneath whatever was pinned: a set field always wins, and
+ * a field absent from both stays absent (there are none such today, but the
+ * spread keeps that true if the default set ever shrinks).
+ */
+export function withLearnerTurnTaking(settings: SessionSettings): SessionSettings {
+  return { ...LEARNER_TURN_TAKING, ...settings };
+}
+
 /** The turn-taking a lesson's patience asks for. Unknown reads as standard. */
 export function patienceSettings(
   patience: string | undefined,

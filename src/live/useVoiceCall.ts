@@ -811,6 +811,22 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
   const held = useRef<number | null>(null);
 
   /**
+   * How many times the microphone has closed on something answer-length since
+   * the learner's last *transcribed* turn.
+   *
+   * THE EVIDENCE FOR RELEASING A HELD REPORT AT HANG-UP. A held report waits
+   * for the learner's next turn to commit — and on 2026-08-27 that turn never
+   * came: the learner gave a ten-second answer to the last question, Google
+   * never transcribed it, the tutor's report for question five sat in `held`,
+   * and a finished lesson closed as an unfinished one. The microphone is the
+   * one witness this side of the wire that the answer happened: an open of
+   * MIC_FLICKER_MS or more is a learner talking, whatever became of the audio
+   * upstream. Cleared when a turn does commit, because then the ordinary path
+   * (`takeHeld` on the transcript) has already spent it.
+   */
+  const micAnswers = useRef(0);
+
+  /**
    * The last thing that happened worth leaning at.
    *
    * State rather than a ref because the face has to be told, and told by a
@@ -988,8 +1004,44 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
           refuse(named, 'it was counted already');
           continue;
         }
+        /*
+         * A report past uncounted questions, where the learner's turns can
+         * vouch for the gap: the skipped ones are counted by implication.
+         *
+         * THE STRICT REFUSAL HAD NO WAY BACK, and on 2026-08-27 that cost a
+         * whole lesson. The tutor lost its footing in a pile-up of
+         * interruptions and never reported question 2 — then 3, 4 and 5 were
+         * each refused for standing on the gap, the count sat at one of five
+         * forever, and a learner who had answered everything was nudged
+         * through three repeats of the goodbye until they hung up themselves.
+         * One missed bookkeeping call, and the page could never recover.
+         *
+         * WHY THE IMPLICATION IS SAFE TO DRAW. The prompt has the tutor work
+         * the list in order and report in order, so a report for N is the
+         * tutor saying it is past everything before N — evidence about the
+         * gap, not just about N. What keeps it honest is the same ceiling
+         * that governs every count: a question is only filled in if the
+         * learner has finished enough turns to have answered it, so a tutor
+         * claiming five into an empty room still gets nothing. The count
+         * still only ever decides when the call hangs up; the report reads
+         * the transcript afterwards and marks what was actually said.
+         */
+        while (number > seen.length + 1 && seen.length + 1 <= learnerTurns.current) {
+          const implied = seen.length + 1;
+          seen.push(implied);
+          took = true;
+          record(
+            'progress',
+            `question ${implied} counted by implication — the tutor reported ${named} from past it, ` +
+              `and the learner's ${learnerTurns.current} finished turn(s) cover it — ${seen.length} of ${total}`,
+          );
+        }
         if (number > seen.length + 1) {
-          refuse(named, `the ${number - seen.length - 1} question(s) before it are not counted yet`);
+          refuse(
+            named,
+            `the ${number - seen.length - 1} question(s) before it are not counted yet, ` +
+              `and the learner's ${learnerTurns.current} finished turn(s) cannot vouch for them`,
+          );
           continue;
         }
         if (seen.length + 1 > learnerTurns.current) {
@@ -1051,6 +1103,9 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
         // Partials arrive on the way to it and must not each count as a turn.
         if (delta.done) {
           learnerTurns.current += 1;
+          // The transcript has caught up with the microphone: whatever the
+          // mic heard is now spoken for by a committed turn. See micAnswers.
+          micAnswers.current = 0;
           // The words the loader was standing in for. Cleared here rather than
           // on the turn appearing in `turns`, because this is the same frame
           // and the pill would otherwise flicker back to the previous sentence
@@ -1176,6 +1231,26 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
       // closed — logging those would fill the account with hang-ups that hung
       // nothing up.
       if (session.current) {
+        /*
+         * A report still held at the end of the call, with the microphone as
+         * its witness: the learner spoke an answer the transcription never
+         * committed, so the turn the hold was waiting for cannot come. Credit
+         * the turn the microphone heard and put the report back through the
+         * ordinary tests, before the close is recorded — so a lesson that was
+         * in fact finished closes as finished. The end-of-call report still
+         * reads the transcript and remains the authority on what was said;
+         * this decides nothing but how the call ends. See micAnswers.
+         */
+        if (held.current !== null && micAnswers.current > 0) {
+          learnerTurns.current += 1;
+          micAnswers.current = 0;
+          record(
+            'progress',
+            `question ${held.current} released at hang-up — the microphone heard an answer ` +
+              `the transcription never committed, so the turn it waited for was credited`,
+          );
+          takeHeld();
+        }
         record('hung-up', why ?? notice ?? 'asked to stop, with no reason given');
       }
       session.current?.stop();
@@ -1184,7 +1259,7 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
       // after. Only the notice is ever shown: `why` is for the account.
       if (notice) setDetail(notice);
     },
-    [record],
+    [record, takeHeld],
   );
 
   useEffect(() => {
@@ -1430,6 +1505,9 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
         } else {
           const open = micOpenedAt.current === null ? null : Date.now() - micOpenedAt.current;
           micOpenedAt.current = null;
+          // Long enough to be an answer, whatever the transcription upstream
+          // makes of it. See micAnswers, which hangUp spends.
+          if (open !== null && open >= MIC_FLICKER_MS) micAnswers.current += 1;
           record(
             'floor',
             open === null
@@ -1744,6 +1822,7 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
       held.current = null;
       setAnswered([]);
       learnerTurns.current = 0;
+      micAnswers.current = 0;
       const { modelKey, language: code, instructions, settings } = latest.current;
       const started = await startGeminiSession(handlers, modelKey, code, {
         instructions,
