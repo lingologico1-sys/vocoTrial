@@ -302,6 +302,15 @@ function personaLine(persona: PublishedSetup['persona']): string {
  * The handshake is the Worker's own reach and is measured once, at connect —
  * see the relay Worker for why there is no way to sample it during a call.
  * Added to the round trip it bounds the whole detour.
+ *
+ * AND THE PARAGRAPH ABOVE OVERCLAIMED, WHICH IS WHY THERE IS A THIRD NUMBER.
+ * "A worst of forty milliseconds means the silence was Google's" is true only
+ * of the two legs those samples cross. Neither one watches the socket from the
+ * Worker up to Google, which is the leg the whole call is carried on: on
+ * 2026-08-27 a call whose worst sample was 23ms still had six seconds where
+ * nothing came down from Google mid-turn, and every number in this block was
+ * clean through the whole of it. The quiet is that leg, reported by the Worker
+ * because nowhere else can see it.
  */
 function relayLine(relay: RelayHealth): string {
   if (!relay.samples) return 'not measured yet — the first ping goes out when the call opens';
@@ -311,9 +320,22 @@ function relayLine(relay: RelayHealth): string {
       ? '; the relay did not say what its own reach to Google cost'
       : `; the relay reached Google in ${relay.upgradeMs}ms`;
 
+  /*
+   * Quiet on the upstream leg is only interesting once it is long, and between
+   * turns it is the protocol working — so a small worst-case is worth saying
+   * plainly rather than printing a number that invites reading a fault into it.
+   */
+  const quiet =
+    relay.googleMaxGapMs === null
+      ? '. This relay build does not report what its own socket to Google was doing'
+      : `. The relay's socket to Google went quiet for at most ` +
+        `${(relay.googleMaxGapMs / 1000).toFixed(1)}s in one stretch — check the timeline for ` +
+        `whether a turn was open across it, because between turns that is only the learner ` +
+        `talking`;
+
   return (
     `browser to the relay and back: ${relay.bestMs}ms at best, ${relay.worstMs}ms at worst ` +
-    `over ${relay.samples} ${relay.samples === 1 ? 'sample' : 'samples'}${reach}`
+    `over ${relay.samples} ${relay.samples === 1 ? 'sample' : 'samples'}${reach}${quiet}`
   );
 }
 

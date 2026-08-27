@@ -103,8 +103,17 @@ export interface SessionHandlers {
    *
    * Once per turn, not once per chunk: a turn's first frame is the one that
    * answers the question, and the rest are the pipe keeping up.
+   *
+   * `afterTextMs` IS THE THIRD NUMBER, AND IT WAS MISSING. Arrival plus lead
+   * splits a silence into pipe and queue only while the words and the sound of
+   * them arrive together, which is what Google does and what everything here
+   * assumed it always does. On 2026-08-27 one turn's words came six seconds
+   * ahead of its sound and the assumption broke silently: the account showed
+   * the tutor speaking at a moment the learner heard nothing, because the text
+   * had been stamped against a drained queue. This is that distance, zero on
+   * every ordinary turn and the whole story on the turn that goes wrong.
    */
-  onTurnAudio?: (leadSeconds: number) => void;
+  onTurnAudio?: (turn: { leadSeconds: number; afterTextMs?: number }) => void;
   /**
    * The relay answered a ping, and how long the round trip took.
    *
@@ -118,8 +127,24 @@ export interface SessionHandlers {
    * clock at both ends. `upgradeMs` is the Worker's own reach to Google, taken
    * once at the handshake and repeated on every pong because the Worker has
    * nowhere else to volunteer it. Their sum bounds the whole detour.
+   *
+   * NEITHER OF THEM WATCHES THE SOCKET THE CALL IS ACTUALLY ON, which is the
+   * hole `googleMaxGapMs` fills. `rttMs` measures browser to Worker and back;
+   * `upgradeMs` is the cost of opening a *fresh* connection to Google, not the
+   * health of the live one carrying this lesson. So a stall between the Worker
+   * and Google was invisible to both, and on 2026-08-27 a call whose worst
+   * relay sample was 23ms still had six seconds where Google sent nothing
+   * mid-turn. This is the longest run of quiet on that upstream socket since
+   * the last pong, measured at the Worker, which is the only place that can see
+   * it.
+   *
+   * IT IS NOT A FAULT ON ITS OWN. Google legitimately sends nothing while the
+   * learner is talking, so a large gap between turns is the protocol working.
+   * A large gap *inside* a turn is the thing worth finding, and the turn
+   * boundaries live in the browser — so this reports the raw quiet and lets the
+   * account it lands in supply the context.
    */
-  onRelay?: (sample: { rttMs: number; upgradeMs?: number }) => void;
+  onRelay?: (sample: { rttMs: number; upgradeMs?: number; googleMaxGapMs?: number }) => void;
   /**
    * A model turn ended having produced no audio at all.
    *
@@ -138,8 +163,11 @@ export interface SessionHandlers {
    *
    * `tookMs` runs from the first evidence the model was answering; `generatedMs`
    * is where `generationComplete` fell inside that, when it came at all.
+   * `textMs` is how long the turn's words had been waiting on sound that never
+   * arrived — absent on a turn that produced no words either, which is the
+   * bookkeeping case this was built for, and present on the other one.
    */
-  onSilentTurn?: (turn: { tookMs: number; generatedMs?: number }) => void;
+  onSilentTurn?: (turn: { tookMs: number; generatedMs?: number; textMs?: number }) => void;
   /**
    * Running totals for the call so far, pushed every time Google reports usage
    * rather than once at the end. A call that dies mid-flight never sends a

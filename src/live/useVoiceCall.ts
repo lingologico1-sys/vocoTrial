@@ -128,6 +128,35 @@ const TRANSCRIPT_WAIT_MS = 8_000;
  */
 const RELAY_SPIKE_MS = 500;
 
+/**
+ * How long the relay's socket to Google may go quiet before it earns a line.
+ *
+ * THREE SECONDS, WHICH IS ABOVE THE PROTOCOL AND BELOW THE FAULT. Google sends
+ * nothing while the learner is talking, and a learner's answer runs ten or
+ * twenty seconds — so a threshold that tried to catch every quiet stretch would
+ * write a line for every question on the list. What is being hunted is the
+ * other kind: the six seconds on 2026-08-27 between a turn's words arriving and
+ * its sound arriving, with the turn open across the whole of it.
+ *
+ * SO THIS OVER-REPORTS ON PURPOSE. It cannot tell the two apart — the turn
+ * boundaries are three files away — and a line that sometimes says "the learner
+ * was talking" is worth far more than a threshold tuned so fine it misses the
+ * one that matters. The reader has the timeline around it, which is the whole
+ * reason this goes there rather than only into the summary.
+ */
+const GOOGLE_QUIET_MS = 3_000;
+
+/**
+ * How far a turn's words may arrive ahead of its sound before the line says so.
+ *
+ * Google sends both in the same frame, so the ordinary turn measures zero and
+ * the ones either side of it measure single-digit milliseconds — this is not a
+ * tuned threshold, it is the line between "same frame" and "not". A quarter of
+ * a second is comfortably above frame jitter and far below anything a learner
+ * could notice, and the case it was written for was six seconds.
+ */
+const SPLIT_MS = 250;
+
 export interface Turn {
   role: 'user' | 'agent';
   text: string;
@@ -283,6 +312,23 @@ export interface RelayHealth {
    * relay is an older build that does not report it.
    */
   upgradeMs: number | null;
+  /**
+   * The longest the Worker saw its own socket to Google go quiet, over the
+   * whole call, or null on a relay build that does not report it.
+   *
+   * THE LEG THE OTHER THREE NUMBERS DO NOT COVER, and the reason this interface
+   * grew. `bestMs`/`worstMs` clear the browser-to-Worker leg and `upgradeMs`
+   * prices a fresh handshake; none of them watches the socket the lesson is
+   * carried on. A call can show 23ms at its worst and still have had six
+   * seconds where Google sent nothing mid-turn, which is what happened on
+   * 2026-08-27 and what nothing on the page could say.
+   *
+   * READ IT AGAINST THE TIMELINE, NOT ALONE. Quiet between turns is the
+   * protocol; the learner is talking and Google has nothing to send. It is
+   * quiet *inside* a turn that means something, and only the timeline knows
+   * which this was.
+   */
+  googleMaxGapMs: number | null;
 }
 
 /** A call that has not been measured yet. */
@@ -292,6 +338,7 @@ const noRelay = (): RelayHealth => ({
   worstMs: 0,
   lastMs: 0,
   upgradeMs: null,
+  googleMaxGapMs: null,
 });
 
 /**
@@ -1399,11 +1446,29 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
        * Milliseconds, because the whole interesting range of a cushion is
        * hundreds of them.
        */
-      onTurnAudio: (leadSeconds: number) => {
+      onTurnAudio: ({
+        leadSeconds,
+        afterTextMs,
+      }: {
+        leadSeconds: number;
+        afterTextMs?: number;
+      }) => {
         record(
           'audio',
           `the tutor's first sound for this turn arrived; the queue holds it ` +
-            `${Math.round(leadSeconds * 1000)}ms, which is when it is heard`,
+            `${Math.round(leadSeconds * 1000)}ms, which is when it is heard` +
+            /*
+             * Named only when it is a number worth reading. The words and the
+             * sound of them share a frame on an ordinary turn, so this is zero
+             * or a few milliseconds every time and would be noise on every line
+             * in the account — until the one turn where it is six seconds and
+             * is the entire explanation. See SPLIT_MS.
+             */
+            (afterTextMs !== undefined && afterTextMs >= SPLIT_MS
+              ? `. Its words reached the socket ${(afterTextMs / 1000).toFixed(1)}s ahead of it, ` +
+                `which is the split — they were held back for it, so the TUTOR line below is ` +
+                `still where the learner heard them, and the wait was Google's`
+              : ''),
         );
       },
       /**
@@ -1412,7 +1477,15 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
        * See RELAY_SPIKE_MS for which ones earn a line. The summary takes every
        * sample either way, and it is the summary the diagnostic prints.
        */
-      onRelay: ({ rttMs, upgradeMs }: { rttMs: number; upgradeMs?: number }) => {
+      onRelay: ({
+        rttMs,
+        upgradeMs,
+        googleMaxGapMs,
+      }: {
+        rttMs: number;
+        upgradeMs?: number;
+        googleMaxGapMs?: number;
+      }) => {
         let first = false;
         setRelay((current) => {
           first = current.samples === 0;
@@ -1422,6 +1495,10 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
             worstMs: first ? rttMs : Math.max(current.worstMs, rttMs),
             lastMs: rttMs,
             upgradeMs: upgradeMs ?? current.upgradeMs,
+            googleMaxGapMs:
+              googleMaxGapMs === undefined
+                ? current.googleMaxGapMs
+                : Math.max(current.googleMaxGapMs ?? 0, googleMaxGapMs),
           };
         });
         /*
@@ -1438,6 +1515,22 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
               (first ? ' — the first sample of this call' : ' — slower than usual'),
           );
         }
+        /*
+         * Its own line, on its own threshold, because it is a fact about a
+         * different leg than the one above. Landing on the timeline rather than
+         * only in the summary is the whole point: a gap is meaningless until you
+         * can see whether a turn was in flight across it, and that is what the
+         * lines around it say. See GOOGLE_QUIET_MS.
+         */
+        if (googleMaxGapMs !== undefined && googleMaxGapMs >= GOOGLE_QUIET_MS) {
+          record(
+            'relay',
+            `the relay's own socket to Google went quiet for ` +
+              `${(googleMaxGapMs / 1000).toFixed(1)}s in the last ten — nothing arrived from ` +
+              `Google in that time. Between turns that is the learner talking; inside one it ` +
+              `is the leg no other number here watches`,
+          );
+        }
       },
       /**
        * A turn that ended without a sound in it, on the timeline where the
@@ -1448,14 +1541,34 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
        * It is written down and nothing else: see onSilentTurn for why the stall
        * watchdog is not rebuilt on it yet.
        */
-      onSilentTurn: ({ tookMs, generatedMs }: { tookMs: number; generatedMs?: number }) => {
+      onSilentTurn: ({
+        tookMs,
+        generatedMs,
+        textMs,
+      }: {
+        tookMs: number;
+        generatedMs?: number;
+        textMs?: number;
+      }) => {
         record(
           'silent-turn',
           `the tutor's turn completed without making a sound, ${(tookMs / 1000).toFixed(1)}s ` +
             `after it began` +
             (generatedMs === undefined
               ? ' — and no generationComplete arrived with it'
-              : `, generation finished ${(generatedMs / 1000).toFixed(1)}s in`),
+              : `, generation finished ${(generatedMs / 1000).toFixed(1)}s in`) +
+            /*
+             * The two silent turns are not the same animal and the fix for them
+             * is not the same either. Bookkeeping-only is the SILENT-scheduling
+             * case the stall watchdog exists for; words with no sound is the
+             * split above, gone all the way — the tutor said something and none
+             * of it was ever going to be audible.
+             */
+            (textMs === undefined
+              ? '. It said nothing either, so this is the bookkeeping case'
+              : `. IT HAD WORDS THOUGH — transcribed ${(textMs / 1000).toFixed(1)}s before the ` +
+                `turn closed and no audio ever came for them; they are released on the line ` +
+                `below rather than dropped`),
         );
       },
       // Every report, unexamined, straight to the one place allowed to

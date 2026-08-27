@@ -267,6 +267,34 @@ export async function onRequest(
 
   const upgradeMs = Date.now() - reachedAt;
 
+  /**
+   * The longest the upstream socket has gone quiet since the last pong.
+   *
+   * THE LEG NOTHING WAS WATCHING. The browser's ping measures browser to Worker
+   * and back; `upgradeMs` measures opening a fresh connection to Google. The
+   * socket this lesson is actually carried on — Worker to Google — had no
+   * instrument at all, and that is precisely where a stall would hide: on
+   * 2026-08-27 a call whose worst relay sample was 23ms still put a turn's
+   * words six seconds ahead of its sound, and every number on the page was
+   * clean.
+   *
+   * MAX SINCE THE LAST PONG, NOT QUIET RIGHT NOW. Pongs are ten seconds apart
+   * and a stall that fell between two of them would be sampled away entirely,
+   * so the gap is accumulated as frames arrive and read out on the next pong.
+   * The reset happens there, so each sample describes its own window.
+   *
+   * A GAP IS NOT A FAULT. Google says nothing while the learner talks, so quiet
+   * between turns is the protocol working. Only the browser knows where the
+   * turn boundaries are, so this stays a raw fact and the account it lands in
+   * supplies the meaning — see onRelay in types.ts.
+   *
+   * Cheap on purpose: two numbers and a subtraction per frame, no parsing, no
+   * Blob conversion. The forwarder below stays the only thing that touches the
+   * payload.
+   */
+  let lastGoogleAt = Date.now();
+  let googleMaxGapMs = 0;
+
   fromWorker.addEventListener('message', (event) => {
     /*
      * Answered here and never forwarded, and tested before the config check
@@ -282,7 +310,22 @@ export async function onRequest(
        * never takes, and read fastest exactly when the relay was most backed
        * up. See `forwarder` for why there is a queue at all.
        */
-      toClient(JSON.stringify({ pong: ping, upgradeMs }));
+      /*
+       * The gap is measured to *now* and not to the last frame, so a socket
+       * that has been silent since well before this ping reports the silence it
+       * is still in rather than the last one it finished. Reset after reading,
+       * so the next sample describes the next window and nothing is counted
+       * twice.
+       */
+      const quiet = Date.now() - lastGoogleAt;
+      toClient(
+        JSON.stringify({
+          pong: ping,
+          upgradeMs,
+          googleMaxGapMs: Math.max(googleMaxGapMs, quiet),
+        }),
+      );
+      googleMaxGapMs = 0;
       return;
     }
 
@@ -299,6 +342,13 @@ export async function onRequest(
   });
 
   google.addEventListener('message', (event) => {
+    // Stamped on arrival, before the forwarder's queue gets a say: this is
+    // meant to time Google's leg, and a frame that then waits behind a Blob
+    // conversion is the relay's cost, which `rttMs` already covers.
+    const now = Date.now();
+    const gap = now - lastGoogleAt;
+    if (gap > googleMaxGapMs) googleMaxGapMs = gap;
+    lastGoogleAt = now;
     toClient(event.data);
   });
 

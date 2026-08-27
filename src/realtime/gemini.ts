@@ -94,6 +94,8 @@ interface LiveMessage {
    */
   pong?: number;
   upgradeMs?: number;
+  /** The upstream socket's longest quiet since the last pong. See onRelay. */
+  googleMaxGapMs?: number;
 }
 
 /**
@@ -242,6 +244,41 @@ export async function startGeminiSession(
   let audioThisTurn = false;
 
   /**
+   * When this turn's first words arrived, and those words while the sound of
+   * them has not caught up.
+   *
+   * THE INVARIANT THIS EXISTS TO CATCH BREAKING. Google sends a turn's words
+   * alongside the sound of them, in the same frame, and the whole of the
+   * transcript's timing rests on it: agent text is stamped with where the audio
+   * queue had reached, so the bubble and the voice arrive together. On
+   * 2026-08-27 a turn's words arrived six seconds ahead of its first audio and
+   * nothing in the account said so — the diagnostic stamped the words as heard
+   * on an empty queue, which reads as "now" and was wrong by all six seconds.
+   * The learner read half a question in silence, said "allô", and the tutor
+   * apologised for a connection problem it has no way to observe.
+   *
+   * So the words wait here for the sound they belong to. `firstTextAt` is the
+   * arrival stamp and the split is reported on the audio line; `pendingText` is
+   * held back rather than rendered against a schedule that describes no audio
+   * at all. See `flushPendingText` and onTurnAudio in types.ts.
+   */
+  let firstTextAt = 0;
+  let pendingText = '';
+
+  /**
+   * Lets a turn's held-back words go, stamped with the audio they belong to.
+   *
+   * `at` is read from the player *before* the chunk that prompted the flush is
+   * enqueued, for the reason the old inline stamp was: a schedule read after
+   * the enqueue is when that sound ends rather than when it starts.
+   */
+  const flushPendingText = (at: number) => {
+    if (!pendingText) return;
+    handlers.onTranscript({ role: 'agent', text: pendingText, done: false, at });
+    pendingText = '';
+  };
+
+  /**
    * When the turn now being answered began, and when generation finished.
    *
    * FOR THE ONE TURN WORTH REPORTING, which is a turn that completes having
@@ -369,6 +406,8 @@ export async function startGeminiSession(
         handlers.onRelay?.({
           rttMs: Date.now() - message.pong,
           upgradeMs: typeof message.upgradeMs === 'number' ? message.upgradeMs : undefined,
+          googleMaxGapMs:
+            typeof message.googleMaxGapMs === 'number' ? message.googleMaxGapMs : undefined,
         });
         return;
       }
@@ -541,6 +580,12 @@ export async function startGeminiSession(
         audioThisTurn = false;
         turnBeganAt = 0;
         generatedAt = 0;
+        // Dropped rather than flushed, which is the same judgement `player.clear()`
+        // just made about the sound: words still waiting on audio that has been
+        // thrown away were never heard, and showing them would put a sentence on
+        // screen that the learner is certain no voice ever said.
+        firstTextAt = 0;
+        pendingText = '';
       }
 
       if (content.inputTranscription?.text) {
@@ -550,19 +595,31 @@ export async function startGeminiSession(
 
       if (content.outputTranscription?.text) {
         answerBegins();
-        handlers.onTranscript({
-          role: 'agent',
-          text: content.outputTranscription.text,
-          done: false,
-          /**
-           * Read *before* the audio in this same frame is enqueued below, so
-           * the stamp is when that audio starts rather than when it ends. The
-           * two describe the same moment of speech — Google sends the words
-           * alongside the sound of them — and the queue is what makes them
-           * arrive early together.
+        if (!firstTextAt) firstTextAt = Date.now();
+        if (audioThisTurn) {
+          handlers.onTranscript({
+            role: 'agent',
+            text: content.outputTranscription.text,
+            done: false,
+            /**
+             * Read *before* the audio in this same frame is enqueued below, so
+             * the stamp is when that audio starts rather than when it ends. The
+             * two describe the same moment of speech — Google sends the words
+             * alongside the sound of them — and the queue is what makes them
+             * arrive early together.
+             */
+            at: player.scheduledAt(),
+          });
+        } else {
+          /*
+           * NOTHING HAS SOUNDED FOR THIS TURN YET, so there is no honest answer
+           * to when these words will be heard, and the queue's own answer is
+           * the dishonest one: `scheduledAt()` on a drained queue says "now",
+           * which is a promise that the voice is already playing. Held until
+           * the audio arrives and can say. See `firstTextAt`.
            */
-          at: player.scheduledAt(),
-        });
+          pendingText += content.outputTranscription.text;
+        }
       }
 
       for (const part of content.modelTurn?.parts ?? []) {
@@ -575,10 +632,18 @@ export async function startGeminiSession(
         answerBegins();
         if (!audioThisTurn) {
           audioThisTurn = true;
-          // Before the enqueue, or the schedule read below is the time the
+          // Before the enqueue, or the schedules read here are the time the
           // chunk *ends* rather than the time it starts.
           const tap = player.tap();
-          handlers.onTurnAudio?.(tap ? tap.scheduledAt() - tap.now() : 0);
+          const at = player.scheduledAt();
+          handlers.onTurnAudio?.({
+            leadSeconds: tap ? tap.scheduledAt() - tap.now() : 0,
+            // Zero on the ordinary turn, whose words are in this same frame.
+            // Anything else is the split — see `firstTextAt`.
+            afterTextMs: firstTextAt ? Date.now() - firstTextAt : undefined,
+          });
+          // The words this turn opened with, if they arrived ahead of its sound.
+          flushPendingText(at);
         }
         handlers.onSpeaking?.(true);
         player.enqueue(decodeBase64(data), () => handlers.onSpeaking?.(false));
@@ -604,13 +669,31 @@ export async function startGeminiSession(
           handlers.onSilentTurn?.({
             tookMs: Date.now() - turnBeganAt,
             generatedMs: generatedAt ? generatedAt - turnBeganAt : undefined,
+            // A silent turn that still produced words is a different animal
+            // from one that produced nothing: the tutor said something and no
+            // sound of it ever came, rather than the tutor spending the turn on
+            // bookkeeping. Only the second is the SILENT-scheduling case the
+            // stall watchdog was built for.
+            textMs: firstTextAt ? Date.now() - firstTextAt : undefined,
           });
         }
+
+        /*
+         * A turn can end with words still waiting on sound that never came —
+         * the silent-turn line above is that fact. Unlike a barge-in there is
+         * nothing dishonest about showing them: no audio was discarded, the
+         * turn is simply over, and the words are the learner's only record of
+         * what the tutor meant to say. Stamped now, because now is when the
+         * page found out.
+         */
+        flushPendingText(player.scheduledAt());
 
         answering = false;
         audioThisTurn = false;
         turnBeganAt = 0;
         generatedAt = 0;
+        firstTextAt = 0;
+        pendingText = '';
         // The queue is about to run dry because the agent has stopped talking,
         // not because anything failed to arrive. Saying so keeps the player's
         // underrun logging honest — see PcmPlayer.endTurn.
