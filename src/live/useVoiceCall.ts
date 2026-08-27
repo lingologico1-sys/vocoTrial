@@ -553,6 +553,24 @@ export interface VoiceCall {
   /** How long the call that just ended ran, in ms. Null before the first one. */
   lastCallMs: number | null;
   /**
+   * Whether the microphone has heard an answer that never became a turn.
+   *
+   * TRUE MEANS THE LEARNER SPOKE AND THE PROVIDER LOST IT. The microphone
+   * opened for longer than MIC_FLICKER_MS — an answer, not a breath — and no
+   * transcript has committed since. It is the one thing this side of the wire
+   * knows that the tutor does not, and it changes what a silence means: a
+   * quiet room after this is a learner waiting for a reply to something they
+   * have already said, not a learner who has not spoken.
+   *
+   * WHAT READS IT is the nudge in Eleve.tsx, which asks the tutor for a
+   * repair — "they answered, you did not hear it, ask them to say it again" —
+   * instead of asking it to carry on from a lesson it thinks is still waiting.
+   * See NOT_HEARD_SIGNAL.
+   *
+   * Cleared by a transcript arriving, which is the provider catching up.
+   */
+  unheard: boolean;
+  /**
    * Which questions the page believes have been answered, in the order it came
    * to believe it.
    *
@@ -727,6 +745,11 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
    */
   const [notedAt, setNotedAt] = useState<number | null>(null);
   const [relay, setRelay] = useState<RelayHealth>(noRelay);
+  /**
+   * `micAnswers` as something the page can watch. See that ref, and `unheard`
+   * on the returned call, which is what this is for.
+   */
+  const [unheard, setUnheard] = useState(false);
 
   /**
    * Writes one line of the account. See CallEvent.
@@ -1106,6 +1129,7 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
           // The transcript has caught up with the microphone: whatever the
           // mic heard is now spoken for by a committed turn. See micAnswers.
           micAnswers.current = 0;
+          setUnheard(false);
           // The words the loader was standing in for. Cleared here rather than
           // on the turn appearing in `turns`, because this is the same frame
           // and the pill would otherwise flicker back to the previous sentence
@@ -1244,6 +1268,7 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
         if (held.current !== null && micAnswers.current > 0) {
           learnerTurns.current += 1;
           micAnswers.current = 0;
+          setUnheard(false);
           record(
             'progress',
             `question ${held.current} released at hang-up — the microphone heard an answer ` +
@@ -1271,6 +1296,13 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
       // effect would restart the interval — and with it the window it is
       // measuring — every time the page re-renders with a new options object.
       const limit = latest.current.idleTimeoutMs ?? IDLE_TIMEOUT_MS;
+      // Somebody is talking right now: an answer running longer than the
+      // whole timeout fires no edge for this to read, and the edges are all
+      // `onVoice` has. Nothing to hang up on while the microphone is open.
+      if (micOpenedAt.current !== null) {
+        lastActivity.current = Date.now();
+        return;
+      }
       if (Date.now() - lastActivity.current < limit) return;
       hangUp(
         latest.current.idleNotice ??
@@ -1474,7 +1506,21 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
        * have the call hung up underneath them.
        */
       onVoice: (active: boolean) => {
-        if (active) lastActivity.current = Date.now();
+        /*
+         * BOTH EDGES, WHICH IS THE WHOLE SPAN AND NOT JUST ITS START. This
+         * read `if (active)`, and the fix above it — counting the learner at
+         * all — stopped one hang-up short of the one that matters. `onVoice`
+         * is edge-triggered: a learner talking for fifteen seconds fires it
+         * once, at the top, so the idle timer spent all fifteen of those
+         * seconds counting down. On 2026-08-27 a learner answered question
+         * three for 15.7s, the transcription never came back, and the call was
+         * hung up 30.3s after they *started* speaking — 14.5s after they
+         * stopped — and told them nobody was talking. The silence a timer is
+         * looking for begins when the microphone closes, so that is where the
+         * clock has to start. The interval below covers the other half: an
+         * answer longer than the whole timeout, which no edge can reach.
+         */
+        lastActivity.current = Date.now();
         // A silence the learner has filled themselves. Nudging into it would
         // put a note on the wire in the middle of their sentence.
         if (active) clearStall();
@@ -1507,7 +1553,10 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
           micOpenedAt.current = null;
           // Long enough to be an answer, whatever the transcription upstream
           // makes of it. See micAnswers, which hangUp spends.
-          if (open !== null && open >= MIC_FLICKER_MS) micAnswers.current += 1;
+          if (open !== null && open >= MIC_FLICKER_MS) {
+            micAnswers.current += 1;
+            setUnheard(true);
+          }
           record(
             'floor',
             open === null
@@ -1823,6 +1872,7 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
       setAnswered([]);
       learnerTurns.current = 0;
       micAnswers.current = 0;
+      setUnheard(false);
       const { modelKey, language: code, instructions, settings } = latest.current;
       const started = await startGeminiSession(handlers, modelKey, code, {
         instructions,
@@ -1859,6 +1909,7 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
     tap,
     speaking,
     heard,
+    unheard,
     transcribing,
     openingDone,
     muted,

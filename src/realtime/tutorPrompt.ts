@@ -390,6 +390,33 @@ export const TIME_UP_SIGNAL = `${SYSTEM_NOTE} This lesson has run out of time wi
 export const KEEP_GOING_SIGNAL = `${SYSTEM_NOTE} You have gone quiet and the learner is waiting for you. Carry on now, out loud, from wherever the lesson had got to.`;
 
 /**
+ * The same silence, when the page knows the learner filled it and the tutor
+ * never got the words.
+ *
+ * A DIFFERENT SILENCE NEEDS A DIFFERENT NOTE. KEEP_GOING_SIGNAL asks a tutor
+ * that stopped to start again, and it is right whenever the quiet is the
+ * tutor's own. This one is for the quiet that is the transport's: the
+ * microphone heard an answer's worth of speech, no transcript ever committed,
+ * and the tutor is sitting on a question it believes is still unanswered. Sent
+ * KEEP_GOING there, it carries on from a lesson whose last event, as far as it
+ * knows, is its own question — so it re-asks, or fills the air, and the
+ * learner who just spoke for fifteen seconds is answered as though they had
+ * said nothing.
+ *
+ * SO IT NAMES THE FAILURE AND ASKS FOR THE REPAIR, which is a thing the style
+ * block already tells the tutor to do — say you did not catch it and ask for
+ * it again, rather than guessing. The note only supplies the fact the tutor
+ * has no way to know: that there was something to catch. Measured on
+ * 2026-08-27, where a 15.7-second answer to question three never reached
+ * Google and the lesson died there.
+ *
+ * IT DOES NOT NAME THE QUESTION, for the reason KEEP_GOING_SIGNAL does not:
+ * the tutor knows where it is, and the page guessing would be its count
+ * overruling the conversation.
+ */
+export const NOT_HEARD_SIGNAL = `${SYSTEM_NOTE} The learner answered, but their words never reached you — this is a fault on the line, not a silence. Tell them you did not catch that, warmly and briefly, and ask them to say it again. Do not move on to the next question, and do not guess at what they said.`;
+
+/**
  * Which greeting the hour has earned, on the clock of whoever is talking.
  *
  * `getHours` reads the browser's own zone, and the browser is in the room with

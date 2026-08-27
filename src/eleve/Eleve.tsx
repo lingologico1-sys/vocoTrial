@@ -15,6 +15,7 @@ import { hasLesson, type PublishedSetup } from '../realtime/session';
 import { capMinutesOf } from '../realtime/vocoSessions';
 import {
   KEEP_GOING_SIGNAL,
+  NOT_HEARD_SIGNAL,
   TIME_UP_SIGNAL,
   composeTutorPrompt,
   openingSignal,
@@ -147,7 +148,9 @@ const CLOSING_SILENT_MS = 24_000;
  * bookkeeping call with no speech behind it — it is about one turn going
  * missing. This is about the conversation stopping, which is a different
  * silence with a different cause, most often a tutor that decided the lesson
- * was over ahead of the list. Both send KEEP_GOING_SIGNAL.
+ * was over ahead of the list. The watchdog always sends KEEP_GOING_SIGNAL;
+ * this one sends NOT_HEARD_SIGNAL instead when `call.unheard` says the silence
+ * is a lost answer rather than a stopped tutor.
  *
  * THE TWO NO LONGER STACK, and they used to. Both clocks measured the same
  * silence and neither could see the other's note, so a stalled turn was nudged
@@ -855,8 +858,15 @@ export default function Eleve() {
         nudges.current += 1;
         silentSince.current = Date.now();
         heardSinceNudge.current = false;
+        /*
+         * Which silence this is. The microphone having heard an answer that
+         * never became a turn is the page knowing something the tutor cannot:
+         * the learner has already spoken, so asking it to carry on would have
+         * it answer a question it thinks is still open. See NOT_HEARD_SIGNAL.
+         */
+        const lost = call.unheard;
         call.say(
-          KEEP_GOING_SIGNAL,
+          lost ? NOT_HEARD_SIGNAL : KEEP_GOING_SIGNAL,
           /*
            * The clock's own start is on the line, because the count alone was
            * misread. "15s of silence" reads as fifteen seconds after the room
@@ -865,7 +875,8 @@ export default function Eleve() {
            * second hole reported as fifteen. The number is what this waited;
            * the rest is what it waited from.
            */
-          `nudge — ${(silent / 1000).toFixed(0)}s of silence, measured from ` +
+          `${lost ? 'nudge (answer lost on the way up — asked for a repeat)' : 'nudge'} — ` +
+            `${(silent / 1000).toFixed(0)}s of silence, measured from ` +
             `${silentBecause.current}, ${
               total ? `${call.answered.length} of ${total} answered` : 'and this lesson has no list'
             }`,
