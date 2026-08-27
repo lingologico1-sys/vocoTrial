@@ -240,6 +240,17 @@ export interface CallEvent {
      * where the rest of the samples go.
      */
     | 'relay'
+    /**
+     * A model turn completed having produced no audio.
+     *
+     * THE ONE TURN IN A CALL THAT EARNS A LINE OF ITS OWN. Every turn ends and
+     * a line for each would double an account whose value is that somebody
+     * reads all of it; this is the ending that explains a silence rather than
+     * punctuating one. Read it against the `note` line below it: a nudge with
+     * one of these above it was the right call, and a nudge without one
+     * interrupted a turn that was still coming. See onSilentTurn.
+     */
+    | 'silent-turn'
     /** Something asked for the call to stop, and said why. */
     | 'hung-up';
   detail: string;
@@ -1427,6 +1438,25 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
               (first ? ' — the first sample of this call' : ' — slower than usual'),
           );
         }
+      },
+      /**
+       * A turn that ended without a sound in it, on the timeline where the
+       * silence it caused is.
+       *
+       * Sitting directly above a stretch of nothing, this is the difference
+       * between a tutor that stopped and a tutor that was never going to start.
+       * It is written down and nothing else: see onSilentTurn for why the stall
+       * watchdog is not rebuilt on it yet.
+       */
+      onSilentTurn: ({ tookMs, generatedMs }: { tookMs: number; generatedMs?: number }) => {
+        record(
+          'silent-turn',
+          `the tutor's turn completed without making a sound, ${(tookMs / 1000).toFixed(1)}s ` +
+            `after it began` +
+            (generatedMs === undefined
+              ? ' — and no generationComplete arrived with it'
+              : `, generation finished ${(generatedMs / 1000).toFixed(1)}s in`),
+        );
       },
       // Every report, unexamined, straight to the one place allowed to
       // examine it. See `acceptProgress`.

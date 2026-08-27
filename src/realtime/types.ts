@@ -121,6 +121,25 @@ export interface SessionHandlers {
    */
   onRelay?: (sample: { rttMs: number; upgradeMs?: number }) => void;
   /**
+   * A model turn ended having produced no audio at all.
+   *
+   * THE DEAD-AIR CASE, STATED BY THE PROVIDER RATHER THAN INFERRED. A turn
+   * spent entirely on a bookkeeping call leaves the tutor mute, and the stall
+   * watchdog in useVoiceCall currently finds that out by waiting ten seconds
+   * and concluding it. This is the same fact arriving on the socket, and if it
+   * arrives reliably it is worth ten seconds of every learner's lesson.
+   *
+   * REPORTED, NOT ACTED ON, and deliberately. Nothing has ever recorded whether
+   * `turnComplete` is even sent for a turn like that, and a watchdog rebuilt on
+   * a frame that turns out not to arrive is a tutor that goes quiet for good.
+   * One lesson's account with these lines in it settles it. It also means
+   * different things per surface — see `turnBeganAt` in gemini.ts.
+   *
+   * `tookMs` runs from the first evidence the model was answering; `generatedMs`
+   * is where `generationComplete` fell inside that, when it came at all.
+   */
+  onSilentTurn?: (turn: { tookMs: number; generatedMs?: number }) => void;
+  /**
    * Running totals for the call so far, pushed every time Google reports usage
    * rather than once at the end. A call that dies mid-flight never sends a
    * final figure, so the last push is the only record we get to keep.

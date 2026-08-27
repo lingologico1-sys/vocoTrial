@@ -74,6 +74,13 @@ interface LiveMessage {
     inputTranscription?: { text?: string };
     outputTranscription?: { text?: string };
     interrupted?: boolean;
+    /**
+     * The model has finished generating, which is not the same as finished
+     * talking. Audio is produced faster than real time, so this lands while
+     * seconds of it are still queued — see `turnComplete`, which is the frame
+     * that follows and the one everything else in here keys off.
+     */
+    generationComplete?: boolean;
     turnComplete?: boolean;
   };
   goAway?: { timeLeft?: string };
@@ -235,6 +242,29 @@ export async function startGeminiSession(
   let audioThisTurn = false;
 
   /**
+   * When the turn now being answered began, and when generation finished.
+   *
+   * FOR THE ONE TURN WORTH REPORTING, which is a turn that completes having
+   * produced no sound at all. On this surface a tool response is answered
+   * `SILENT` — see the tool handling below — so a turn spent entirely on
+   * bookkeeping schedules no generation and ends the tutor mute until something
+   * asks it to carry on. The stall watchdog in useVoiceCall waits ten seconds
+   * and then guesses at exactly that.
+   *
+   * `turnComplete` on a turn with no audio in it would not be a guess: it is
+   * the provider saying the turn is over. Whether it actually arrives in that
+   * case is the open question, and it is open because nothing has ever written
+   * it down. So this measures it and reports it, and nothing acts on it yet.
+   *
+   * THE SIGNAL DOES NOT MEAN THE SAME THING ON BOTH SURFACES. AI Studio honours
+   * `scheduling` and an empty completed turn is final; Vertex ignores it, the
+   * tool response restarts the model, and the same frame is a pause. Anything
+   * built on this has to read `silentResponses` too.
+   */
+  let turnBeganAt = 0;
+  let generatedAt = 0;
+
+  /**
    * Emitted once per model turn: their turn ended when this one began.
    *
    * IT CLOSES THE LEARNER ONLY IF THE LEARNER SPOKE. `answering` still flips
@@ -245,6 +275,8 @@ export async function startGeminiSession(
   const answerBegins = () => {
     if (answering) return;
     answering = true;
+    turnBeganAt = Date.now();
+    generatedAt = 0;
     if (!heardLearner) return;
     heardLearner = false;
     handlers.onTranscript({ role: 'user', text: '', done: true });
@@ -503,6 +535,8 @@ export async function startGeminiSession(
         // and it has a new user turn in front of it to close.
         answering = false;
         audioThisTurn = false;
+        turnBeganAt = 0;
+        generatedAt = 0;
       }
 
       if (content.inputTranscription?.text) {
@@ -546,9 +580,33 @@ export async function startGeminiSession(
         player.enqueue(decodeBase64(data), () => handlers.onSpeaking?.(false));
       }
 
+      // Nothing but a stamp. The turn is not over — seconds of audio may still
+      // be queued behind this — and the only reader is the line below.
+      if (content.generationComplete && !generatedAt) generatedAt = Date.now();
+
       if (content.turnComplete) {
+        /*
+         * A turn that finished without making a sound, reported as a fact.
+         *
+         * THE ONLY TURN THAT EARNS A LINE. Every turn completes, and a line per
+         * turn would double the length of an account whose whole value is that
+         * somebody reads it to the end. A turn that completed silently is the
+         * one that carries information: it is the dead-air case the stall
+         * watchdog spends ten seconds guessing at, and if this frame really
+         * does arrive for it then the guess can be replaced by the fact. See
+         * `turnBeganAt`.
+         */
+        if (!audioThisTurn && turnBeganAt) {
+          handlers.onSilentTurn?.({
+            tookMs: Date.now() - turnBeganAt,
+            generatedMs: generatedAt ? generatedAt - turnBeganAt : undefined,
+          });
+        }
+
         answering = false;
         audioThisTurn = false;
+        turnBeganAt = 0;
+        generatedAt = 0;
         // The queue is about to run dry because the agent has stopped talking,
         // not because anything failed to arrive. Saying so keeps the player's
         // underrun logging honest — see PcmPlayer.endTurn.
