@@ -1145,12 +1145,30 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
       if (delta.role === 'user') {
         // A finished utterance, which is the unit the progress guard counts in.
         // Partials arrive on the way to it and must not each count as a turn.
-        if (delta.done) {
-          learnerTurns.current += 1;
-          // The transcript has caught up with the microphone: whatever the
-          // mic heard is now spoken for by a committed turn. See micAnswers.
+        /*
+         * Any words at all are the provider saying it heard them, and a
+         * partial says it as well as a finished turn does.
+         *
+         * THIS USED TO WAIT FOR `done` AND THAT MADE IT LIE. A learner turn is
+         * closed by `answerBegins` — by the *model* starting to answer — so a
+         * model that stalls leaves the turn open however much of it Google has
+         * transcribed. On 2026-08-27 the learner answered the last question,
+         * Google returned the words, the model then took no turn for 45
+         * seconds, and because `done` never came this still read as an answer
+         * lost on the way up. The nudge went out saying "their words never
+         * reached you" to a model holding a perfect transcript of them.
+         *
+         * The empty closing delta carries no text, so it is not what clears
+         * this — the words that arrived before it already did. A turn that
+         * completes having never produced any text leaves the flag standing,
+         * which is right: that is the lost answer this exists for.
+         */
+        if (delta.text) {
           micAnswers.current = 0;
           setUnheard(false);
+        }
+        if (delta.done) {
+          learnerTurns.current += 1;
           // The words the loader was standing in for. Cleared here rather than
           // on the turn appearing in `turns`, because this is the same frame
           // and the pill would otherwise flicker back to the previous sentence

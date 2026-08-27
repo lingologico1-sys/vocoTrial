@@ -164,6 +164,51 @@ const CLOSING_SILENT_MS = 24_000;
 const NUDGE_AFTER_MS = 15_000;
 
 /**
+ * How long the tutor may make no sound whatever before the page prods it,
+ * however busy the room has been.
+ *
+ * THE CLOCK ABOVE CANNOT MATURE WHILE THE LEARNER IS TALKING, and that is the
+ * hole this fills rather than a second opinion on the same silence.
+ * NUDGE_AFTER_MS measures the *room* going quiet, which is right for a tutor
+ * that stopped in an empty room — but a learner who answers, gets nothing
+ * back, and tries again resets it every time they speak. On 2026-08-27 that
+ * cost the last question of a lesson: the model took no turn for 45 seconds
+ * while its own transcriber kept returning the learner's words, the learner
+ * repeated themselves three times into the gap, and each repetition pushed the
+ * only clock that could have rescued them further away. One nudge went out, at
+ * fifteen seconds; the second never came due, and they hung up.
+ *
+ * So this one measures the tutor and ignores the learner entirely. It is the
+ * question the other clock cannot ask: not "has the room been quiet" but "has
+ * the tutor said anything at all lately".
+ *
+ * THIRTY SECONDS, AGAINST A MEASURED CEILING OF TWENTY-THREE. A long answer
+ * with pauses in it legitimately keeps the tutor quiet for a while — the
+ * worst across every diagnostic so far is 21.8s, on a learner who took four
+ * runs at describing their roommates, and 23.3s on another. Thirty clears
+ * that, and the settle below covers the rest.
+ */
+const TUTOR_QUIET_MS = 30_000;
+
+/**
+ * How long the learner must also have been quiet before that prod is safe.
+ *
+ * WHAT MAKES THE TEST ABOVE SAFE TO ACT ON. A tutor quiet for thirty seconds
+ * is either stalled or listening to a very long answer, and this is what
+ * separates them: with `silenceDurationMs` at a second, any pause this long
+ * is one the provider should already have closed the turn on and answered. A
+ * learner still mid-answer does not leave three-second holes — the pauses in
+ * the measured long answers run a fifth of a second — so a gap this size with
+ * no tutor in thirty seconds is not a learner being given room, it is a
+ * conversation with nobody on the other end of it.
+ *
+ * It matters because the prod is `clientContent` with `turnComplete`, which
+ * lands on whatever the learner happens to be saying. Nudging into the middle
+ * of an answer is the one way this can be worse than doing nothing.
+ */
+const TUTOR_QUIET_SETTLE_MS = 3_000;
+
+/**
  * How many times the page will do that in one call.
  *
  * Two, because the third is not a nudge any more. A tutor that has been asked
@@ -710,6 +755,14 @@ export default function Eleve() {
    * lesson; it is an ended one, and the idle timer is the right closer.
    */
   const heardSinceNudge = useRef(true);
+  /**
+   * When the tutor last made a sound, or null between calls.
+   *
+   * Kept here rather than asked of the call, because `speaking` is already on
+   * this effect's tick and a timestamp is the only thing missing from it. See
+   * TUTOR_QUIET_MS, which is the one reader.
+   */
+  const tutorSoundAt = useRef<number | null>(null);
   const capMs = session ? capMinutesOf(session) * 60_000 : 0;
 
   /**
@@ -743,6 +796,7 @@ export default function Eleve() {
       micClosed.current = false;
       nudges.current = 0;
       heardSinceNudge.current = true;
+      tutorSoundAt.current = null;
       // Nothing to unmute here: `connect` clears it, so the next call opens
       // with a live microphone whatever this one ended as.
       setClosing(false);
@@ -754,6 +808,13 @@ export default function Eleve() {
     // one clock because what `nudge` waits for is the room being silent, and
     // either of them talking is the reason not to.
     if (call.heard) heardSinceNudge.current = true;
+    /*
+     * The tutor's own clock. Started at the first live tick rather than left
+     * null, so the wait for the opening greeting is measured from the call
+     * connecting instead of counting as thirty seconds of a tutor that has
+     * not had its turn yet.
+     */
+    if (call.speaking || tutorSoundAt.current === null) tutorSoundAt.current = Date.now();
 
     if (call.speaking || call.heard) {
       silentSince.current = null;
@@ -851,10 +912,25 @@ export default function Eleve() {
        * has nothing useful left to say and the idle timer is the right answer.
        */
       const silent = silentSince.current === null ? 0 : Date.now() - silentSince.current;
+      /*
+       * The second way a nudge falls due, for the silence the first cannot
+       * see: a tutor that has said nothing in half a minute while the learner
+       * filled the gap trying to be heard. Both tests end in the same note and
+       * spend the same budget — this only widens what counts as stalled. See
+       * TUTOR_QUIET_MS.
+       */
+      const tutorQuiet =
+        tutorSoundAt.current === null ? 0 : Date.now() - tutorSoundAt.current;
+      const stranded =
+        tutorQuiet >= TUTOR_QUIET_MS && !call.heard && silent >= TUTOR_QUIET_SETTLE_MS;
       // The heardSinceNudge test only ever withholds a *repeat*: the first
       // nudge of a call is always available. See the ref for the goodbye it
       // stops being performed three times.
-      if (silent >= NUDGE_AFTER_MS && nudges.current < MAX_NUDGES && heardSinceNudge.current) {
+      if (
+        (silent >= NUDGE_AFTER_MS || stranded) &&
+        nudges.current < MAX_NUDGES &&
+        heardSinceNudge.current
+      ) {
         nudges.current += 1;
         silentSince.current = Date.now();
         heardSinceNudge.current = false;
@@ -876,8 +952,17 @@ export default function Eleve() {
            * the rest is what it waited from.
            */
           `${lost ? 'nudge (answer lost on the way up — asked for a repeat)' : 'nudge'} — ` +
-            `${(silent / 1000).toFixed(0)}s of silence, measured from ` +
-            `${silentBecause.current}, ${
+            (silent >= NUDGE_AFTER_MS
+              ? `${(silent / 1000).toFixed(0)}s of silence, measured from ${silentBecause.current}`
+              : // The other clock fired, so the other clock is what the line
+                // has to quote. Saying "3s of silence" here would read as a
+                // nudge sent twelve seconds early. See TUTOR_QUIET_MS.
+                `the tutor has made no sound for ${(tutorQuiet / 1000).toFixed(
+                  0,
+                )}s and the learner has been filling the gap; ${(silent / 1000).toFixed(
+                  0,
+                )}s since they last stopped`) +
+            `, ${
               total ? `${call.answered.length} of ${total} answered` : 'and this lesson has no list'
             }`,
         );
