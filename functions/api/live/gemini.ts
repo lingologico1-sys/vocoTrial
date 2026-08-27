@@ -47,6 +47,38 @@ import { type GateEnv, json } from '../_middleware';
 const CONFIG_GRACE_MS = 3_000;
 
 /**
+ * Reads a `{"ping": <number>}` frame, or reports that this is not one.
+ *
+ * THE ONE FRAME THE RELAY ANSWERS ITSELF. Everything else in either direction
+ * is forwarded verbatim, which is what makes this file cheap and what makes it
+ * invisible: a call that takes nine seconds to say hello looks identical from
+ * the browser whether those seconds were spent in Google or in the two extra
+ * hops this proxy adds. That was an open question on 2026-08-27 and there was
+ * no measurement anywhere that could close it.
+ *
+ * So the browser pings and the Worker pongs, and the round trip that comes back
+ * is the browser-to-Worker leg on its own — the half of the detour that runs
+ * over the learner's own connection. Paired with `upgradeMs` below it bounds
+ * the whole detour, and a bound is all that is needed here: if the two together
+ * are a fifth of a second then a nine-second silence was Google's, and no
+ * amount of removing this relay would have helped.
+ *
+ * Deliberately not forwarded upstream. Google has no idea what a ping frame is
+ * and would be within its rights to close on one.
+ */
+function readPingFrame(data: unknown): number | null {
+  if (typeof data !== 'string' || !data.includes('"ping"')) return null;
+
+  try {
+    const parsed = JSON.parse(data) as Record<string, unknown> | null;
+    if (!parsed || typeof parsed !== 'object') return null;
+    return typeof parsed.ping === 'number' ? parsed.ping : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Reads a `{"config": …}` opening frame, or reports that this is not one.
  *
  * `null` means "not a config frame" and is distinct from a config frame with
@@ -118,6 +150,18 @@ export async function onRequest(
   const upstreamUrl = new URL(liveUrl);
   upstreamUrl.searchParams.set('key', key);
 
+  /**
+   * How long the Worker took to reach Google, in ms.
+   *
+   * The other half of the detour — see readPingFrame. Measured around the
+   * upgrade rather than sampled during the call, because there is nothing in
+   * the Live protocol the Worker may send upstream purely to time it: every
+   * frame Google accepts is a frame that changes the conversation. A handshake
+   * is one honest sample of the path from this colo to that endpoint, taken on
+   * the same socket the call then runs over, and it is what the browser's own
+   * ping cannot see.
+   */
+  const reachedAt = Date.now();
   let upstream: Response;
   try {
     upstream = await fetch(upstreamUrl.toString(), { headers: { Upgrade: 'websocket' } });
@@ -221,7 +265,27 @@ export async function onRequest(
 
   const grace = setTimeout(() => sendSetup(null), CONFIG_GRACE_MS);
 
+  const upgradeMs = Date.now() - reachedAt;
+
   fromWorker.addEventListener('message', (event) => {
+    /*
+     * Answered here and never forwarded, and tested before the config check
+     * below — a ping reaching that check would be read as "this client is not
+     * going to send a config", and the call would set up on the defaults.
+     */
+    const ping = readPingFrame(event.data);
+    if (ping !== null) {
+      /*
+       * Sent through the forwarder rather than straight down the socket, so it
+       * queues behind whatever Google frames are still converting. That is the
+       * point: a pong that jumped the queue would measure a path the audio
+       * never takes, and read fastest exactly when the relay was most backed
+       * up. See `forwarder` for why there is a queue at all.
+       */
+      toClient(JSON.stringify({ pong: ping, upgradeMs }));
+      return;
+    }
+
     if (!setupSent) {
       const frame = readConfigFrame(event.data);
       // A config frame is consumed here; anything else means this client is not

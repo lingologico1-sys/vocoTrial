@@ -77,6 +77,16 @@ interface LiveMessage {
     turnComplete?: boolean;
   };
   goAway?: { timeLeft?: string };
+  /**
+   * The relay answering a ping of ours. Never Google — see the Worker.
+   *
+   * Carries back the stamp that was sent, so the round trip is measured against
+   * this browser's own clock at both ends and no clock has to agree with any
+   * other. `upgradeMs` rides along because the Worker has no other moment to
+   * volunteer it and it costs nothing to repeat.
+   */
+  pong?: number;
+  upgradeMs?: number;
 }
 
 /**
@@ -212,6 +222,19 @@ export async function startGeminiSession(
   let heardLearner = false;
 
   /**
+   * Whether any audio has arrived on the socket for the turn now being spoken.
+   *
+   * FOR ONE LINE IN THE ACCOUNT, AND IT IS THE LINE THAT SPLITS THE BLAME. Every
+   * tutor stamp in the diagnostic is the moment the words were *heard*, which is
+   * the right clock for reading a conversation and the wrong one for reading a
+   * ten-second silence: it cannot say whether the sound was late arriving or
+   * merely late playing. So the first audio frame of each turn is reported as it
+   * lands, with the cushion it will wait behind — see onTurnAudio. Two numbers,
+   * and the difference between them is the whole of what this browser added.
+   */
+  let audioThisTurn = false;
+
+  /**
    * Emitted once per model turn: their turn ended when this one began.
    *
    * IT CLOSES THE LEARNER ONLY IF THE LEARNER SPOKE. `answering` still flips
@@ -231,9 +254,26 @@ export async function startGeminiSession(
   const socket = new WebSocket(liveSocketUrl(modelKey, language));
   socket.binaryType = 'arraybuffer';
 
+  /**
+   * How often the relay is pinged, and it is deliberately not often.
+   *
+   * The measurement wanted is the shape of the path over a whole call, not a
+   * moment of it, and ten seconds gives a lesson a dozen samples — enough for a
+   * worst case to mean something and few enough that the frames are lost in the
+   * noise beside fifty audio chunks a second. A ping is about thirty bytes and
+   * the Worker answers it without waking Google, so the cost of one is the CPU
+   * to parse it.
+   */
+  const PING_EVERY_MS = 10_000;
+  let pings: number | null = null;
+
   const cleanup = () => {
     if (stopped) return;
     stopped = true;
+    if (pings !== null) {
+      clearInterval(pings);
+      pings = null;
+    }
     mic.stop();
     player.close();
     if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
@@ -284,12 +324,37 @@ export async function startGeminiSession(
         return;
       }
 
+      /*
+       * The relay's own answer, which is not part of the conversation at all.
+       * Read before everything else and returned from, so nothing downstream
+       * has to know this frame exists.
+       */
+      if (typeof message.pong === 'number') {
+        handlers.onRelay?.({
+          rttMs: Date.now() - message.pong,
+          upgradeMs: typeof message.upgradeMs === 'number' ? message.upgradeMs : undefined,
+        });
+        return;
+      }
+
       // Usage rides alongside whatever else the frame carries, including the
       // frames we return early from below, so it is read first.
       if (message.usageMetadata) recordUsage(message.usageMetadata);
 
       if (message.setupComplete) {
         handlers.onStatus('live');
+        /*
+         * The pings start here rather than at `onopen`, so every sample is
+         * taken on a socket carrying a live call. One goes out immediately —
+         * a call that dies in its first ten seconds is exactly the one worth
+         * having a reading for — and the rest follow on the interval.
+         */
+        const ping = () => {
+          if (socket.readyState !== WebSocket.OPEN) return;
+          socket.send(JSON.stringify({ ping: Date.now() }));
+        };
+        ping();
+        pings = window.setInterval(ping, PING_EVERY_MS);
         resolve();
         return;
       }
@@ -434,9 +499,10 @@ export async function startGeminiSession(
         handlers.onSpeaking?.(false);
         handlers.onInterrupted?.();
         // The turn was cut off rather than completed, so no turnComplete is
-        // coming to reset this. Whatever the model says next is a new answer,
+        // coming to reset these. Whatever the model says next is a new answer,
         // and it has a new user turn in front of it to close.
         answering = false;
+        audioThisTurn = false;
       }
 
       if (content.inputTranscription?.text) {
@@ -469,12 +535,20 @@ export async function startGeminiSession(
         // turn opens with, and a turn that opened on audio alone would leave
         // the learner's own sentence uncommitted.
         answerBegins();
+        if (!audioThisTurn) {
+          audioThisTurn = true;
+          // Before the enqueue, or the schedule read below is the time the
+          // chunk *ends* rather than the time it starts.
+          const tap = player.tap();
+          handlers.onTurnAudio?.(tap ? tap.scheduledAt() - tap.now() : 0);
+        }
         handlers.onSpeaking?.(true);
         player.enqueue(decodeBase64(data), () => handlers.onSpeaking?.(false));
       }
 
       if (content.turnComplete) {
         answering = false;
+        audioThisTurn = false;
         // The queue is about to run dry because the agent has stopped talking,
         // not because anything failed to arrive. Saying so keeps the player's
         // underrun logging honest — see PcmPlayer.endTurn.

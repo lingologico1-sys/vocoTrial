@@ -1313,6 +1313,7 @@ export default function Eleve() {
             turns: call.turns,
             events: call.events,
             connectedAt: call.connectedAt,
+            relay: call.relay,
             lastCallMs: call.lastCallMs,
             answered: call.answered,
             usage: call.usage,

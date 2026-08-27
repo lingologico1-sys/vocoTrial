@@ -1,4 +1,4 @@
-import type { CallEvent, Turn } from '../live/useVoiceCall';
+import type { CallEvent, RelayHealth, Turn } from '../live/useVoiceCall';
 import {
   AUDIO_RATES_VERIFIED_ON,
   estimateCost,
@@ -96,6 +96,8 @@ export interface DiagnosticInput {
   events: CallEvent[];
   connectedAt: number | null;
   lastCallMs: number | null;
+  /** What the browser-to-Worker-to-Google detour cost. See RelayHealth. */
+  relay: RelayHealth;
   /**
    * Which questions the page counted as answered, in the order it counted them.
    *
@@ -279,6 +281,40 @@ function personaLine(persona: PublishedSetup['persona']): string {
     : 'no background stored — the name is all the tutor gets';
 
   return `${name || 'unnamed'} — ${background}`;
+}
+
+/**
+ * What the detour through Cloudflare cost, in one line.
+ *
+ * WHY IT IS HERE AT ALL. The audio does not go browser-to-Google: it goes
+ * browser to a Worker to Google, and the Worker leg has never been visible from
+ * this side. On 2026-08-27 a lesson took nine and a half seconds to say hello
+ * and there was no way to tell whether those seconds were the model thinking or
+ * the relay dawdling — so the relay was the obvious suspect with nothing to
+ * convict or clear it. This is the reading that settles it.
+ *
+ * THE WORST IS THE NUMBER THAT DECIDES, and the best is only there to say what
+ * the path is capable of. A worst of forty milliseconds beside a ten-second
+ * silence in the timeline means the silence was Google's, and that going
+ * browser-to-Google direct would not have saved a single second of it. A worst
+ * in the seconds means the opposite, and it is the first thing worth fixing.
+ *
+ * The handshake is the Worker's own reach and is measured once, at connect —
+ * see the relay Worker for why there is no way to sample it during a call.
+ * Added to the round trip it bounds the whole detour.
+ */
+function relayLine(relay: RelayHealth): string {
+  if (!relay.samples) return 'not measured yet — the first ping goes out when the call opens';
+
+  const reach =
+    relay.upgradeMs === null
+      ? '; the relay did not say what its own reach to Google cost'
+      : `; the relay reached Google in ${relay.upgradeMs}ms`;
+
+  return (
+    `browser to the relay and back: ${relay.bestMs}ms at best, ${relay.worstMs}ms at worst ` +
+    `over ${relay.samples} ${relay.samples === 1 ? 'sample' : 'samples'}${reach}`
+  );
 }
 
 /**
@@ -694,6 +730,7 @@ export function buildDiagnostic(input: DiagnosticInput): string {
   put(
     field('Last call ran', input.lastCallMs === null ? 'none has finished yet' : length(input.lastCallMs)),
   );
+  put(field('Relay leg', relayLine(input.relay)));
   /*
    * The count the page kept, which is worth reading beside the `progress` lines
    * in the timeline rather than instead of them. This says where the lesson got

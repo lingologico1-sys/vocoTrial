@@ -115,6 +115,19 @@ const NOTE_BLAME_MS = 1_500;
  */
 const TRANSCRIPT_WAIT_MS = 8_000;
 
+/**
+ * A relay round trip worth a line of its own on the timeline, in ms.
+ *
+ * Every sample goes into the summary — see `relay` — and putting every one on
+ * the timeline as well would be a dozen lines a lesson saying nothing happened.
+ * This is the threshold for a sample that is not nothing: half a second on the
+ * browser-to-Worker leg alone means the learner's own connection is having a
+ * bad minute, and knowing *when* it had one is the whole reason the timeline
+ * exists. The first sample of a call is always written down whatever it is,
+ * because a baseline nobody can see is a summary nobody can read.
+ */
+const RELAY_SPIKE_MS = 500;
+
 export interface Turn {
   role: 'user' | 'agent';
   text: string;
@@ -215,10 +228,60 @@ export interface CallEvent {
      * putting in front of somebody reading a report.
      */
     | 'audio'
+    /**
+     * The relay round trip, on the first sample of a call and on a slow one.
+     *
+     * THE ONLY LINE HERE ABOUT THE DETOUR RATHER THAN THE PIPE. `audio` above
+     * describes a queue that ran dry, which is what the learner heard; this
+     * describes the path the sound took to reach that queue, which is what
+     * nobody could see at all until it existed. A call whose relay line says
+     * twenty milliseconds and whose timeline shows a ten-second silence has
+     * had its extra hops ruled out in one line — see RelayHealth, which is
+     * where the rest of the samples go.
+     */
+    | 'relay'
     /** Something asked for the call to stop, and said why. */
     | 'hung-up';
   detail: string;
 }
+
+/**
+ * What the browser-to-Worker-to-Google detour cost, over the whole call.
+ *
+ * ONE SUMMARY RATHER THAN A LINE PER PING, because the question this answers is
+ * about the shape of a call and not about a moment in it. A lesson that took
+ * ten seconds to say hello is diagnosed by whether the path was ever slow, not
+ * by whether it was slow at 13:29:41 — and the moments that *are* worth naming
+ * get their own timeline line anyway, at RELAY_SPIKE_MS.
+ *
+ * `worstMs` is the number that decides anything. A best of 20ms says the path
+ * can be fast; a worst of 30ms says it always was, and that a long silence
+ * belongs to Google. See SessionHandlers.onRelay.
+ */
+export interface RelayHealth {
+  /** How many pings have been answered this call. */
+  samples: number;
+  /** The quickest browser-to-Worker round trip seen, in ms. */
+  bestMs: number;
+  /** The slowest, which is the one that convicts or clears the path. */
+  worstMs: number;
+  /** The most recent, for a call still running. */
+  lastMs: number;
+  /**
+   * What the Worker's own handshake to Google cost, in ms, or null if the
+   * relay is an older build that does not report it.
+   */
+  upgradeMs: number | null;
+}
+
+/** A call that has not been measured yet. */
+const noRelay = (): RelayHealth => ({
+  samples: 0,
+  bestMs: 0,
+  worstMs: 0,
+  lastMs: 0,
+  upgradeMs: null,
+});
 
 /**
  * How many events are kept.
@@ -372,6 +435,15 @@ export interface VoiceCall {
    * each other's notes.
    */
   notedAt: number | null;
+  /**
+   * What the relay leg cost this call, or a zeroed summary before any sample.
+   *
+   * READ IT AGAINST A SILENCE IN THE TIMELINE. That is the only use it has: a
+   * gap between a note and the tutor's voice is either Google thinking or the
+   * path dawdling, and this is the half of that question the browser can
+   * actually answer. See RelayHealth.
+   */
+  relay: RelayHealth;
   /** How long the call that just ended ran, in ms. Null before the first one. */
   lastCallMs: number | null;
   /**
@@ -532,6 +604,7 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
    * are rare enough that the render costs nothing.
    */
   const [notedAt, setNotedAt] = useState<number | null>(null);
+  const [relay, setRelay] = useState<RelayHealth>(noRelay);
 
   /**
    * Writes one line of the account. See CallEvent.
@@ -1102,6 +1175,7 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
     setMuted(false);
     clearStall();
     setNotedAt(null);
+    setRelay(noRelay());
     stopWaiting();
     setTranscribing(false);
     queue.current.discard();
@@ -1300,6 +1374,60 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
             : `the audio queue is thin: ${gap.ms}ms of lead left, so the next hiccup is likely to be heard`,
         );
       },
+      /**
+       * The first sound of a turn, written down where it landed.
+       *
+       * THE LINE THAT MAKES A SILENCE READABLE. Every TUTOR line in the account
+       * is stamped when the words were heard, and a reader looking at ten
+       * seconds of nothing between a note and a voice cannot tell a model that
+       * took ten seconds to answer from a pipe that took ten seconds to deliver
+       * an answer given at once. This lands at arrival, and says how long the
+       * queue will sit on it — so the TUTOR line that follows should be exactly
+       * that far below, and anything else is the queue and not the model.
+       *
+       * Milliseconds, because the whole interesting range of a cushion is
+       * hundreds of them.
+       */
+      onTurnAudio: (leadSeconds: number) => {
+        record(
+          'audio',
+          `the tutor's first sound for this turn arrived; the queue holds it ` +
+            `${Math.round(leadSeconds * 1000)}ms, which is when it is heard`,
+        );
+      },
+      /**
+       * The relay's round trip, summarised always and written down rarely.
+       *
+       * See RELAY_SPIKE_MS for which ones earn a line. The summary takes every
+       * sample either way, and it is the summary the diagnostic prints.
+       */
+      onRelay: ({ rttMs, upgradeMs }: { rttMs: number; upgradeMs?: number }) => {
+        let first = false;
+        setRelay((current) => {
+          first = current.samples === 0;
+          return {
+            samples: current.samples + 1,
+            bestMs: first ? rttMs : Math.min(current.bestMs, rttMs),
+            worstMs: first ? rttMs : Math.max(current.worstMs, rttMs),
+            lastMs: rttMs,
+            upgradeMs: upgradeMs ?? current.upgradeMs,
+          };
+        });
+        /*
+         * `first` is written by the updater above, which React may run twice in
+         * development — so this reads it after, where a double invocation has
+         * settled on the same answer, rather than recording from inside it
+         * where it would write the line twice.
+         */
+        if (first || rttMs >= RELAY_SPIKE_MS) {
+          record(
+            'relay',
+            `browser to the relay and back in ${rttMs}ms` +
+              (upgradeMs === undefined ? '' : `; the relay reached Google in ${upgradeMs}ms`) +
+              (first ? ' — the first sample of this call' : ' — slower than usual'),
+          );
+        }
+      },
       // Every report, unexamined, straight to the one place allowed to
       // examine it. See `acceptProgress`.
       onQuestionDone: acceptProgress,
@@ -1358,6 +1486,7 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
     usage,
     connectedAt,
     notedAt,
+    relay,
     lastCallMs,
     answered,
     events,

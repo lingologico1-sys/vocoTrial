@@ -91,6 +91,36 @@ export interface SessionHandlers {
    */
   onAudioGap?: (gap: AudioGap) => void;
   /**
+   * The first audio of a tutor turn has arrived, with the cushion ahead of it.
+   *
+   * WHAT IT IS FOR IS A SUBTRACTION NOBODY COULD DO BEFORE. The transcript
+   * stamps the tutor at the moment the words became audible — the right clock
+   * for reading a conversation, and useless for reading a silence, because a
+   * ten-second hole looks the same whether the sound was ten seconds late
+   * arriving or arrived at once and sat in a queue. This fires on arrival, and
+   * `leadSeconds` is how long the queue will hold it. Arrival plus lead is the
+   * audible stamp; so the two together say which half of the wait was ours.
+   *
+   * Once per turn, not once per chunk: a turn's first frame is the one that
+   * answers the question, and the rest are the pipe keeping up.
+   */
+  onTurnAudio?: (leadSeconds: number) => void;
+  /**
+   * The relay answered a ping, and how long the round trip took.
+   *
+   * THE ONE MEASUREMENT OF THE DETOUR ITSELF. Audio does not go browser to
+   * Google here; it goes browser to Cloudflare to Google, and until this
+   * existed there was no number anywhere for what those extra hops cost. That
+   * mattered the first time a call took nine seconds to say hello: the relay
+   * was the obvious suspect and there was nothing to convict or clear it with.
+   *
+   * `rttMs` is the browser-to-Worker leg, measured against this browser's own
+   * clock at both ends. `upgradeMs` is the Worker's own reach to Google, taken
+   * once at the handshake and repeated on every pong because the Worker has
+   * nowhere else to volunteer it. Their sum bounds the whole detour.
+   */
+  onRelay?: (sample: { rttMs: number; upgradeMs?: number }) => void;
+  /**
    * Running totals for the call so far, pushed every time Google reports usage
    * rather than once at the end. A call that dies mid-flight never sends a
    * final figure, so the last push is the only record we get to keep.
