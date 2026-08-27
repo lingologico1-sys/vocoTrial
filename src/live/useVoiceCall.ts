@@ -8,7 +8,14 @@ import {
   withoutSystemNote,
   wroteASystemNote,
 } from '../realtime/tutorPrompt';
-import type { AudioGap, AudioTap, SessionStatus, TranscriptDelta, VoiceSession } from '../realtime/types';
+import type {
+  AudioGap,
+  AudioTap,
+  MicSpan,
+  SessionStatus,
+  TranscriptDelta,
+  VoiceSession,
+} from '../realtime/types';
 import { RevealQueue, type StampedText } from './reveal';
 import type { TiltCue } from './headMotion';
 
@@ -170,6 +177,20 @@ const SPLIT_MS = 250;
  * breath or a chair.
  */
 const MIC_FLICKER_MS = 750;
+
+/**
+ * How much of a microphone open must reach the socket before the line stops
+ * calling it a shortfall, as a fraction of the open.
+ *
+ * NOT A TUNED NUMBER, A GENEROUS ONE. A healthy span sends essentially all of
+ * what it heard — the only structural loss is the one chunk each edge
+ * misattributes, which is 128ms against opens measured in seconds. So a span
+ * that put less than three quarters of itself on the wire is not a rounding
+ * difference, it is frames going missing, and the clause it earns says the
+ * fault is at this end. Set well below any plausible honest ratio, because a
+ * false accusation here would send the next investigation at the wrong leg.
+ */
+const SENT_SHORTFALL = 0.75;
 
 export interface Turn {
   role: 'user' | 'agent';
@@ -1505,7 +1526,7 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
        * learner talking steadily to a tutor that had stopped answering could
        * have the call hung up underneath them.
        */
-      onVoice: (active: boolean) => {
+      onVoice: (active: boolean, span?: MicSpan) => {
         /*
          * BOTH EDGES, WHICH IS THE WHOLE SPAN AND NOT JUST ITS START. This
          * read `if (active)`, and the fix above it — counting the learner at
@@ -1557,13 +1578,42 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
             micAnswers.current += 1;
             setUnheard(true);
           }
+          /*
+           * How much of that open reached the socket, and whether it accounts
+           * for the open.
+           *
+           * THE TWO NUMBERS ARE THE INSTRUMENT, not either one alone. The
+           * duration is the local detector on the local audio and is true
+           * whether or not a byte was sent; the seconds are what this browser
+           * actually put on the wire. Read together they say which side of the
+           * socket a lost answer went missing on — and on 2026-08-27 that was
+           * unanswerable, because only the first number existed.
+           *
+           * A SHORTFALL IS THE ONLY THING WORTH A CLAUSE. The ordinary span
+           * sends what it heard and the two match to within the chunk the
+           * edges misattribute, so the line says the figure and stops. Below
+           * SENT_SHORTFALL of the open, it says so in words: that is this
+           * browser failing to send a learner who was plainly talking, which
+           * is a fault at this end and reads nothing like Google ignoring
+           * them. See MicSpan for what it still cannot say.
+           */
+          const sent = span === undefined ? '' : `, ${span.seconds.toFixed(1)}s of it sent`;
+          const short =
+            span !== undefined &&
+            open !== null &&
+            open >= MIC_FLICKER_MS &&
+            span.seconds * 1000 < open * SENT_SHORTFALL;
           record(
             'floor',
             open === null
-              ? 'the microphone closed'
-              : `the microphone closed after ${(open / 1000).toFixed(1)}s` +
+              ? `the microphone closed${sent}`
+              : `the microphone closed after ${(open / 1000).toFixed(1)}s${sent}` +
                   (open < MIC_FLICKER_MS
                     ? ' — too short to be an answer, and it reset the silence clock all the same'
+                    : '') +
+                  (short
+                    ? ' — FAR LESS WENT UP THAN WAS HEARD, so this browser did not put the ' +
+                      'learner on the wire and nothing downstream ever had it'
                     : ''),
           );
         }

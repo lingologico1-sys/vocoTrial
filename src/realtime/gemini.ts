@@ -1,4 +1,10 @@
-import { MicCapture, PcmPlayer, decodeBase64, encodeBase64 } from './audio';
+import {
+  INPUT_BYTES_PER_SECOND,
+  MicCapture,
+  PcmPlayer,
+  decodeBase64,
+  encodeBase64,
+} from './audio';
 import { addUsage, emptyUsage, totalTokens, type UsageTotals } from './cost';
 import { UnauthorizedError, checkSession, reportExpired } from './auth';
 import type { SessionConfig, SessionHandlers, VoiceSession } from './types';
@@ -768,9 +774,23 @@ export async function startGeminiSession(
   }
 
   try {
+    /**
+     * PCM bytes sent since the microphone last opened. See MicSpan.
+     *
+     * Counted after the send rather than before it, so a socket that is not
+     * open counts nothing — which is the whole point: an open microphone whose
+     * span reports no audio is this browser failing to put the learner on the
+     * wire, and that is a different fault from Google ignoring them.
+     */
+    let spanBytes = 0;
+
     await mic.start(
       (pcm) => {
         if (socket.readyState !== WebSocket.OPEN) return;
+        // Read before the send: encodeBase64 copies rather than detaching, but
+        // the length is free here and this way the count cannot depend on that
+        // staying true. Same care MicCapture takes handing the buffer over.
+        const bytes = pcm.byteLength;
         socket.send(
           JSON.stringify({
             realtimeInput: {
@@ -778,11 +798,30 @@ export async function startGeminiSession(
             },
           }),
         );
+        spanBytes += bytes;
       },
-      // Passed straight through. Nothing on this side has an opinion about what
-      // the user starting to talk means — the socket does not need to know, and
-      // the gesture it feeds is the face's business.
-      (active) => handlers.onVoice?.(active),
+      /*
+       * The edge, and on the falling one what went up during it.
+       *
+       * Nothing here has an opinion about what the user starting to talk means
+       * — the gesture it feeds is the face's business. The accounting is this
+       * file's, because this file owns the socket the audio is counted against.
+       *
+       * MicCapture calls this from `listen`, which runs *before* `onChunk` for
+       * the same chunk, so the closing chunk lands in the next span rather than
+       * this one. That is one chunk — 128ms — misattributed at each edge, and
+       * far below anything the line it feeds is read for.
+       */
+      (active) => {
+        if (active) {
+          spanBytes = 0;
+          handlers.onVoice?.(true);
+          return;
+        }
+        const bytes = spanBytes;
+        spanBytes = 0;
+        handlers.onVoice?.(false, { bytes, seconds: bytes / INPUT_BYTES_PER_SECOND });
+      },
     );
   } catch {
     cleanup();

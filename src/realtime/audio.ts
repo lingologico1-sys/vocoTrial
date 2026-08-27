@@ -12,6 +12,17 @@ export const INPUT_SAMPLE_RATE = 16_000;
 /** Live API output rate — different from the input, and not negotiable. */
 export const OUTPUT_SAMPLE_RATE = 24_000;
 
+/**
+ * Bytes of microphone audio that carry one second of speech.
+ *
+ * The worklet emits mono int16 at INPUT_SAMPLE_RATE — two bytes a sample, one
+ * channel — so this is the exact divisor that turns a byte count back into
+ * seconds. Exported for the sent-audio accounting in gemini.ts, which is the
+ * only honest way to compare "how long the microphone was open" against "how
+ * much of it actually left this browser". See pcm-capture.js for the int16.
+ */
+export const INPUT_BYTES_PER_SECOND = INPUT_SAMPLE_RATE * 2;
+
 export function encodeBase64(bytes: ArrayBuffer): string {
   const view = new Uint8Array(bytes);
   let binary = '';

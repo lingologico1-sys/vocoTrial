@@ -46,6 +46,35 @@ export interface TranscriptDelta {
   at?: number;
 }
 
+/**
+ * How much of one microphone open actually left this browser.
+ *
+ * THE LEG NOTHING WATCHED, AND THE CHEAP PLACE TO WATCH IT. The `floor` lines
+ * say the microphone was open for 15.7s, and that is the local detector on the
+ * local audio — it is true whether or not a single frame reached the wire. On
+ * 2026-08-27 a learner's 15.7-second answer produced no transcription at all,
+ * and nothing anywhere could say whether the audio had been sent and ignored
+ * or never sent. This is the half of that question the browser can answer
+ * about itself, for the cost of one addition per chunk.
+ *
+ * IT IS COUNTED AT THE SEND, past the readyState check, so a socket that is
+ * not open contributes nothing and the discrepancy shows. `seconds` is exact
+ * rather than estimated — see INPUT_BYTES_PER_SECOND.
+ *
+ * WHAT IT CANNOT SAY is whether Google received any of it. `send()` hands a
+ * frame to the runtime and returns; it is not a delivery receipt. A full count
+ * here clears this browser and moves the question downstream, which is all it
+ * claims to do. The relay's own byte counter is the next instrument if this
+ * one ever reads clean across a lost answer — deliberately not built yet,
+ * because it costs Worker CPU on every frame and this does not.
+ */
+export interface MicSpan {
+  /** Raw PCM bytes handed to the socket while this open lasted. */
+  bytes: number;
+  /** Those bytes as seconds of speech. */
+  seconds: number;
+}
+
 export interface SessionHandlers {
   onStatus: (status: SessionStatus, detail?: string) => void;
   onTranscript: (delta: TranscriptDelta) => void;
@@ -62,8 +91,11 @@ export interface SessionHandlers {
    *
    * Debounced at the source — see VOICE_RELEASE_MS — so this is "somebody is
    * talking" and not "there is energy in this chunk".
+   *
+   * `span` rides the falling edge only, and says how much of that open reached
+   * the socket. See MicSpan.
    */
-  onVoice?: (active: boolean) => void;
+  onVoice?: (active: boolean, span?: MicSpan) => void;
   /**
    * The user talked over the agent, and every unplayed sound was dropped.
    *
