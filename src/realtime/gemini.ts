@@ -245,8 +245,9 @@ export async function startGeminiSession(
    * When the turn now being answered began, and when generation finished.
    *
    * FOR THE ONE TURN WORTH REPORTING, which is a turn that completes having
-   * produced no sound at all. On this surface a tool response is answered
-   * `SILENT` — see the tool handling below — so a turn spent entirely on
+   * produced no sound at all. On AI Studio — which is where the tutor actually
+   * runs, since 3.1 Flash Live has no Vertex build — a tool response is
+   * answered `SILENT`, see the tool handling below. So a turn spent entirely on
    * bookkeeping schedules no generation and ends the tutor mute until something
    * asks it to carry on. The stall watchdog in useVoiceCall waits ten seconds
    * and then guesses at exactly that.
@@ -256,10 +257,13 @@ export async function startGeminiSession(
    * case is the open question, and it is open because nothing has ever written
    * it down. So this measures it and reports it, and nothing acts on it yet.
    *
-   * THE SIGNAL DOES NOT MEAN THE SAME THING ON BOTH SURFACES. AI Studio honours
-   * `scheduling` and an empty completed turn is final; Vertex ignores it, the
-   * tool response restarts the model, and the same frame is a pause. Anything
-   * built on this has to read `silentResponses` too.
+   * A SECOND READING EXISTS ON THE OTHER SURFACE, and it is a footnote rather
+   * than the case to design for: the house model is AI Studio's, which honours
+   * `scheduling`, so an empty completed turn there is final. The Vertex native
+   * audio model is also publishable and ignores `scheduling` — its tool response
+   * restarts the model, and the same frame is only a pause. Anything built on
+   * this reads `silentResponses` too, but it is the AI Studio behaviour that
+   * decides whether it is worth building.
    */
   let turnBeganAt = 0;
   let generatedAt = 0;

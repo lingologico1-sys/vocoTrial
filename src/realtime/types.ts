@@ -132,8 +132,9 @@ export interface SessionHandlers {
    * REPORTED, NOT ACTED ON, and deliberately. Nothing has ever recorded whether
    * `turnComplete` is even sent for a turn like that, and a watchdog rebuilt on
    * a frame that turns out not to arrive is a tutor that goes quiet for good.
-   * One lesson's account with these lines in it settles it. It also means
-   * different things per surface — see `turnBeganAt` in gemini.ts.
+   * One lesson's account with these lines in it settles it — an AI Studio one,
+   * which is what the tutor runs on. See `turnBeganAt` in gemini.ts for the
+   * footnote about the other surface.
    *
    * `tookMs` runs from the first evidence the model was answering; `generatedMs`
    * is where `generationComplete` fell inside that, when it came at all.
