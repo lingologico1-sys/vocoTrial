@@ -663,6 +663,14 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
    * handler that wrote it, where a render behind would be a render wrong.
    */
   const micOpenedAt = useRef<number | null>(null);
+
+  /**
+   * Whether the tutor was making a sound when it was last reported on.
+   *
+   * The edge, so one stop is written down once. See the `floor` line in
+   * `onSpeaking` for why the level is not enough.
+   */
+  const wasSpeaking = useRef(false);
   /**
    * See `transcribing` on VoiceCall. The timer beside it is the giving up.
    *
@@ -1321,6 +1329,9 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
           session.current = null;
           setTap(null);
           setSpeaking(false);
+          // The call is over, so the next one starts from a tutor that was not
+          // talking — without this the first stop of the next call is swallowed.
+          wasSpeaking.current = false;
           setHeard(false);
           stopWaiting();
           setTranscribing(false);
@@ -1359,7 +1370,18 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
          * line is a nudge that was measuring something else. See the `floor`
          * kind above.
          */
-        if (!next) record('floor', 'the tutor stopped speaking — the room is quiet from here');
+        /*
+         * ONLY THE EDGE, BECAUSE THE PLAYER REPORTS THE LEVEL. Every enqueued
+         * chunk registers its own drain callback, so a turn ends with as many
+         * `false`s as it had trailing chunks — the 2026-08-27 account has three
+         * "the tutor stopped speaking" lines inside a second, describing one
+         * stop. `cue` upstream has a lockout of its own for this; the log had
+         * none and printed all of them.
+         */
+        if (!next && wasSpeaking.current) {
+          record('floor', 'the tutor stopped speaking — the room is quiet from here');
+        }
+        wasSpeaking.current = next;
       },
       /**
        * The user's voice, straight through to the face.
@@ -1623,8 +1645,16 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
         if (googleMaxGapMs !== undefined && googleMaxGapMs >= GOOGLE_QUIET_MS) {
           record(
             'relay',
+            /*
+             * NOT "in the last ten", WHICH IS WHAT THIS SAID AND WAS WRONG.
+             * The reading is the longest quiet the Worker has seen, and a
+             * silence still running when the pong goes out is measured to that
+             * moment — so it can be longer than the ping interval and routinely
+             * is. The 2026-08-27 accounts carry 11s and 12s readings that the
+             * old wording made look impossible.
+             */
             `the relay's own socket to Google went quiet for ` +
-              `${(googleMaxGapMs / 1000).toFixed(1)}s in the last ten — nothing arrived from ` +
+              `${(googleMaxGapMs / 1000).toFixed(1)}s in one stretch — nothing arrived from ` +
               `Google in that time. Between turns that is the learner talking; inside one it ` +
               `is the leg no other number here watches`,
           );

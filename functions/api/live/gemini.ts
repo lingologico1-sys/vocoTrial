@@ -67,7 +67,24 @@ const CONFIG_GRACE_MS = 3_000;
  * and would be within its rights to close on one.
  */
 function readPingFrame(data: unknown): number | null {
-  if (typeof data !== 'string' || !data.includes('"ping"')) return null;
+  if (typeof data !== 'string') return null;
+  /*
+   * THE LENGTH TEST IS NOT AN OPTIMISATION, IT IS THE POINT. Every microphone
+   * frame the browser sends is a string too — `{"realtimeInput":{"audio":{…
+   * base64 …}}}` — and without this, `includes` scans the whole of one, dozens
+   * of times a second, for the entire length of a call. That is this Worker's
+   * steady-state CPU, spent proving that an audio frame is not a ping.
+   *
+   * It matters because a Worker has a CPU budget and the runtime takes the
+   * isolate away when it is spent, leaving both sockets open and nothing
+   * running behind them — which is exactly what a call looks like from the
+   * browser when it goes deaf with no close frame. See RELAY_DEAD_PINGS.
+   *
+   * A ping is `{"ping":1756304400000}` and nothing else, so anything longer
+   * than this is something else. Generous by a factor of three, because being
+   * wrong here means never answering a ping again.
+   */
+  if (data.length > 64 || !data.includes('"ping"')) return null;
 
   try {
     const parsed = JSON.parse(data) as Record<string, unknown> | null;
@@ -195,17 +212,46 @@ export async function onRequest(
    */
   const forwarder = (target: WebSocket) => {
     let chain: Promise<void> = Promise.resolve();
+    /**
+     * How many frames are waiting on the chain.
+     *
+     * THE FAST PATH BELOW IS ONLY SAFE WHILE THIS IS ZERO. A frame that needs
+     * no conversion can go straight out — but only if nothing is queued ahead
+     * of it, or it would overtake a Blob still converting and reorder the
+     * stream, which is the exact bug the chain was built to prevent.
+     */
+    let queued = 0;
     return (data: unknown) => {
+      const plain = typeof data === 'string' || data instanceof ArrayBuffer;
+      /*
+       * EVERY FRAME GOING UP IS A STRING, so before this the whole async
+       * machinery ran on the microphone: a promise allocated and a microtask
+       * scheduled dozens of times a second, all of it to hand a string to
+       * `send` unchanged. Only Google's frames arrive as Blobs and actually
+       * need converting. A Worker that spends its CPU budget is taken away
+       * mid-call with its sockets left open, so this is not tidiness.
+       */
+      if (plain && queued === 0) {
+        try {
+          target.send(data as string | ArrayBuffer);
+        } catch {
+          // The peer went away mid-flight; the close handlers tear the pair down.
+        }
+        return;
+      }
+      queued += 1;
       chain = chain
         .then(async () => {
-          const payload =
-            typeof data === 'string' || data instanceof ArrayBuffer
-              ? data
-              : await new Response(data as BodyInit).arrayBuffer();
+          const payload = plain
+            ? (data as string | ArrayBuffer)
+            : await new Response(data as BodyInit).arrayBuffer();
           target.send(payload);
         })
         .catch(() => {
           // The peer went away mid-flight; the close handlers tear the pair down.
+        })
+        .then(() => {
+          queued -= 1;
         });
     };
   };
