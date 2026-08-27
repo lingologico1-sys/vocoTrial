@@ -336,6 +336,17 @@ export async function startGeminiSession(
   };
 
   let stopped = false;
+  /**
+   * Whether the far end has accepted the setup frame.
+   *
+   * THE GATE ON THE MICROPHONE, now that it opens before this is true. Live
+   * refuses a `realtimeInput` frame that arrives ahead of the setup handshake,
+   * and the socket is OPEN well before Google has answered — so `readyState`
+   * alone stopped being enough the moment the two were unhitched. Audio caught
+   * in that window is dropped rather than queued: it is the half-second before
+   * the tutor has said hello, and nobody is answering a question yet.
+   */
+  let setupDone = false;
   const socket = new WebSocket(liveSocketUrl(modelKey, language));
   socket.binaryType = 'arraybuffer';
 
@@ -501,6 +512,10 @@ export async function startGeminiSession(
       if (message.usageMetadata) recordUsage(message.usageMetadata);
 
       if (message.setupComplete) {
+        // Before anything else in this branch: it is what lets the microphone,
+        // which has been open and discarding since the socket connected, start
+        // putting the learner on the wire.
+        setupDone = true;
         handlers.onStatus('live');
         /*
          * The pings start here rather than at `onopen`, so every sample is
@@ -856,27 +871,47 @@ export async function startGeminiSession(
     };
   });
 
-  try {
-    await ready;
-  } catch (error) {
-    cleanup();
-    throw error;
-  }
+  /**
+   * PCM bytes sent since the microphone last opened. See MicSpan.
+   *
+   * Counted after the send rather than before it, so a socket that is not
+   * open counts nothing — which is the whole point: an open microphone whose
+   * span reports no audio is this browser failing to put the learner on the
+   * wire, and that is a different fault from Google ignoring them.
+   */
+  let spanBytes = 0;
+  /** Set if the microphone never opened, for the throw below to prefer. */
+  let micError: string | null = null;
 
-  try {
-    /**
-     * PCM bytes sent since the microphone last opened. See MicSpan.
-     *
-     * Counted after the send rather than before it, so a socket that is not
-     * open counts nothing — which is the whole point: an open microphone whose
-     * span reports no audio is this browser failing to put the learner on the
-     * wire, and that is a different fault from Google ignoring them.
-     */
-    let spanBytes = 0;
-
-    await mic.start(
+  /*
+   * THE MICROPHONE OPENS ALONGSIDE THE SOCKET, NOT BEHIND IT.
+   *
+   * This used to be awaited after `ready`, which put `getUserMedia` and the
+   * worklet fetch inside the silence before the tutor's greeting: the page
+   * sends its opening note once `connect` resolves, and `connect` could not
+   * resolve until the microphone was live. On a warm browser that is invisible
+   * — two tenths of a second — but on the Chromebook in the 2026-08-27 set it
+   * was 2.9s of dead air on a call that had been connected the whole time,
+   * and a beginner meeting silence assumes the thing is broken or that they
+   * are. Cheap to fix and the hardware it costs most on is the hardware a
+   * class actually uses.
+   *
+   * NOT AWAITED AT ALL, which is the part that buys the time. Overlapping the
+   * two would only save the shorter of them; returning without the microphone
+   * means the greeting is asked for the instant the socket is ready. Nothing
+   * is lost by that: the tutor speaks for seconds before anyone answers, and
+   * `setupDone` above holds the audio until it would be accepted anyway.
+   *
+   * THE FAILURE PATH IS THE WHOLE COST OF IT. A denied permission used to be a
+   * throw out of this function with the call not yet returned. Now it can land
+   * either side of that line, so it does both: before setup it is remembered
+   * and thrown by the `ready` handler below, and after it there is no throw
+   * left to make and the status is the only channel back to the page.
+   */
+  void mic
+    .start(
       (pcm) => {
-        if (socket.readyState !== WebSocket.OPEN) return;
+        if (!setupDone || socket.readyState !== WebSocket.OPEN) return;
         // Read before the send: encodeBase64 copies rather than detaching, but
         // the length is free here and this way the count cannot depend on that
         // staying true. Same care MicCapture takes handing the buffer over.
@@ -912,10 +947,31 @@ export async function startGeminiSession(
         spanBytes = 0;
         handlers.onVoice?.(false, { bytes, seconds: bytes / INPUT_BYTES_PER_SECOND });
       },
-    );
-  } catch {
+    )
+    .then(() => {
+      // The call was torn down while permission was still being asked for, so
+      // the stream this just opened has nobody left to belong to. `cleanup`
+      // already ran its own `mic.stop()` against a capture that had not
+      // started yet, and that one did nothing.
+      if (stopped) mic.stop();
+    })
+    .catch(() => {
+      micError = 'Microphone permission denied';
+      // After setup there is no throw left to make — the session has been
+      // handed back and the page is showing a live call. Before it, the
+      // rejection below carries this instead, so it is not said twice.
+      if (setupDone) handlers.onStatus('error', micError);
+      cleanup();
+    });
+
+  try {
+    await ready;
+  } catch (error) {
     cleanup();
-    throw new Error('Microphone permission denied');
+    // A microphone that never opened closes the socket underneath the
+    // handshake, so the rejection that arrives says the socket closed before
+    // setup — true, and not the reason anybody needs.
+    throw micError ? new Error(micError) : error;
   }
 
   return {

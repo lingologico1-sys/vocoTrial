@@ -80,6 +80,21 @@ export const FR = {
    * broken. The one thing it must not do is look like the errors above it.
    */
   idleEnded: 'La conversation s’est arrêtée : personne ne parlait plus.',
+  /*
+   * The other way a call ends by itself, and it must not read like the line
+   * above it. That one is "nobody was here"; this one is "you were here and
+   * the tutor was not", which is a different thing to be told and the only one
+   * of the two that is nobody's fault but ours.
+   *
+   * IT SAYS THE ANSWERS ARE KEPT BECAUSE THEY ARE. The report is written from
+   * the transcript rather than from the count, and the gate on it is two
+   * minutes of conversation and not a finished list — so a learner cut off at
+   * question four still has everything they said and can still be marked on
+   * it. A student who thinks the lesson was lost will start again from the
+   * top, which is the one outcome worth writing a line to prevent.
+   */
+  tutorGone:
+    'Le tuteur ne répond plus. Ce n’est pas de ta faute — tes réponses sont bien enregistrées.',
 
   // --- No session published
   /*

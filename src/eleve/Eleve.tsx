@@ -209,6 +209,51 @@ const TUTOR_QUIET_MS = 30_000;
 const TUTOR_QUIET_SETTLE_MS = 3_000;
 
 /**
+ * How long between one stranded nudge and the next.
+ *
+ * PERSISTENCE IS THE DOCUMENTED CURE, which is why this repeats where the
+ * silence nudge does not. Developers hitting the same stall on this model
+ * report getting out of it by re-engaging the tutor over and over — the
+ * community workaround is literally saying "hello" again until it wakes up —
+ * so one prod and a shrug is the wrong shape for it. Twenty seconds gives the
+ * previous one time to be answered, since a nudged turn has taken over twenty
+ * to arrive when it arrives at all.
+ */
+const STRANDED_AGAIN_MS = 20_000;
+
+/**
+ * How many of those the page will send before it stops asking.
+ *
+ * Three, on its own budget rather than sharing MAX_NUDGES. The two counts
+ * answer different questions: the silence nudge is a tutor that stopped in an
+ * empty room, where a third prod is talking to nobody, and this one is a tutor
+ * that has stopped while somebody is still trying, where the evidence says
+ * asking again is what works. Sharing one budget let the first spend the
+ * second's chances.
+ */
+const MAX_STRANDED_NUDGES = 3;
+
+/**
+ * How long a tutor may make no sound at all before the page stops waiting and
+ * says so.
+ *
+ * NINETY SECONDS IS THE END OF THE LADDER, not a threshold of its own. The
+ * stranded nudges fall at roughly thirty, fifty and seventy seconds of tutor
+ * silence, so this leaves the last of them twenty seconds to work and then
+ * accepts the answer. Everything before it is an attempt at recovery; this is
+ * what happens when they have all been made and none landed.
+ *
+ * WHY END IT RATHER THAN LET IT RUN. The idle timer cannot: it counts anybody
+ * talking as activity, and the learner in this failure is talking constantly —
+ * that is what being stranded looks like. So without this the call runs until
+ * the student works out for themselves that nobody is there, which on the
+ * lesson that prompted it took them forty seconds of repeating an answer into
+ * silence. A beginner reads that as their own French failing. See FR.tutorGone,
+ * which is written to say otherwise.
+ */
+const TUTOR_GONE_MS = 90_000;
+
+/**
  * How many times the page will do that in one call.
  *
  * Two, because the third is not a nudge any more. A tutor that has been asked
@@ -763,6 +808,21 @@ export default function Eleve() {
    * TUTOR_QUIET_MS, which is the one reader.
    */
   const tutorSoundAt = useRef<number | null>(null);
+  /** Stranded nudges sent this call, and when the last one went. */
+  const strandedNudges = useRef(0);
+  const strandedAt = useRef(0);
+  /**
+   * Whether the learner has made a sound since the last stranded nudge.
+   *
+   * WHAT KEEPS A DEAD CALL FROM BEING KEPT ALIVE BY ITS OWN RESCUE. Every note
+   * counts as activity for the idle timer — deliberately, so a nudged turn is
+   * not hung up on while it arrives — so a stranded nudge repeating into an
+   * empty room would postpone the idle close by twenty seconds a time. This
+   * confines the repeats to the case they were written for: somebody is still
+   * there, still talking, still getting nothing back. A learner who has gone
+   * quiet is the idle timer's to deal with, and it will.
+   */
+  const heardSinceStranded = useRef(true);
   const capMs = session ? capMinutesOf(session) * 60_000 : 0;
 
   /**
@@ -797,6 +857,9 @@ export default function Eleve() {
       nudges.current = 0;
       heardSinceNudge.current = true;
       tutorSoundAt.current = null;
+      strandedNudges.current = 0;
+      strandedAt.current = 0;
+      heardSinceStranded.current = true;
       // Nothing to unmute here: `connect` clears it, so the next call opens
       // with a live microphone whatever this one ended as.
       setClosing(false);
@@ -807,7 +870,10 @@ export default function Eleve() {
     // Nobody is making a sound: not the tutor, and not the microphone. Held as
     // one clock because what `nudge` waits for is the room being silent, and
     // either of them talking is the reason not to.
-    if (call.heard) heardSinceNudge.current = true;
+    if (call.heard) {
+      heardSinceNudge.current = true;
+      heardSinceStranded.current = true;
+    }
     /*
      * The tutor's own clock. Started at the first live tick rather than left
      * null, so the wait for the opening greeting is measured from the call
@@ -908,32 +974,76 @@ export default function Eleve() {
        * thinking, they have been asked the question a second time.
        *
        * TWICE, AND ONLY INTO A FRESH SILENCE. The clock is reset on the nudge,
-       * so a second one costs another full fifteen seconds; after that the page
-       * has nothing useful left to say and the idle timer is the right answer.
+       * so a second one costs another full fifteen seconds; after that this
+       * clock has nothing useful left to say and the idle timer is the right
+       * answer to a room nobody is in.
+       *
+       * A ROOM SOMEBODY IS STILL IN IS THE OTHER LADDER'S, below: a learner who
+       * keeps talking resets this clock every time, so it can never mature and
+       * the idle timer never fires either. That case gets its own count, its
+       * own cadence and its own ending. See TUTOR_QUIET_MS.
        */
       const silent = silentSince.current === null ? 0 : Date.now() - silentSince.current;
       /*
-       * The second way a nudge falls due, for the silence the first cannot
-       * see: a tutor that has said nothing in half a minute while the learner
-       * filled the gap trying to be heard. Both tests end in the same note and
-       * spend the same budget — this only widens what counts as stalled. See
-       * TUTOR_QUIET_MS.
+       * The tutor's own clock, which two things below read: the second way a
+       * nudge falls due, and the point at which the page stops asking. Both
+       * exist for the silence the clock above cannot see — a tutor that has
+       * said nothing in half a minute while the learner filled the gap trying
+       * to be heard. See TUTOR_QUIET_MS and TUTOR_GONE_MS.
        */
       const tutorQuiet =
         tutorSoundAt.current === null ? 0 : Date.now() - tutorSoundAt.current;
+
+      /*
+       * The ladder has run out and the tutor never came back. Say so and stop.
+       *
+       * TESTED BEFORE THE NUDGES, so a call at the end of it closes rather
+       * than spending another prod it has already been told will not work. The
+       * microphone is the one thing waited on: cutting the learner off
+       * mid-sentence to tell them nobody is listening would prove the point in
+       * the rudest possible way. See TUTOR_GONE_MS.
+       */
+      if (tutorQuiet >= TUTOR_GONE_MS && !call.heard) {
+        closedAt.current = Date.now();
+        call.hangUp(
+          FR.tutorGone,
+          `the tutor made no sound for ${(tutorQuiet / 1000).toFixed(0)}s across ` +
+            `${strandedNudges.current} stranded nudge(s) and ${nudges.current} silence nudge(s); ` +
+            `${call.answered.length} of ${total} answered`,
+        );
+        return;
+      }
+
       const stranded =
         tutorQuiet >= TUTOR_QUIET_MS && !call.heard && silent >= TUTOR_QUIET_SETTLE_MS;
-      // The heardSinceNudge test only ever withholds a *repeat*: the first
-      // nudge of a call is always available. See the ref for the goodbye it
-      // stops being performed three times.
-      if (
-        (silent >= NUDGE_AFTER_MS || stranded) &&
-        nudges.current < MAX_NUDGES &&
-        heardSinceNudge.current
-      ) {
-        nudges.current += 1;
+      /*
+       * Two clocks, two budgets, and a nudge falls due on whichever is ready.
+       *
+       * The silence nudge is unchanged: fifteen seconds of nobody talking, at
+       * most twice, and never twice into the same silence. The stranded one
+       * has its own count and its own cadence because it is answering a
+       * different failure — see STRANDED_AGAIN_MS. Both refuse to repeat until
+       * the learner has made a sound, which is what stops either of them
+       * prodding a room that has emptied.
+       */
+      const strandedDue =
+        stranded &&
+        strandedNudges.current < MAX_STRANDED_NUDGES &&
+        heardSinceStranded.current &&
+        Date.now() - strandedAt.current >= STRANDED_AGAIN_MS;
+      const silenceDue =
+        silent >= NUDGE_AFTER_MS && nudges.current < MAX_NUDGES && heardSinceNudge.current;
+
+      if (silenceDue || strandedDue) {
+        if (strandedDue) {
+          strandedNudges.current += 1;
+          strandedAt.current = Date.now();
+          heardSinceStranded.current = false;
+        } else {
+          nudges.current += 1;
+          heardSinceNudge.current = false;
+        }
         silentSince.current = Date.now();
-        heardSinceNudge.current = false;
         /*
          * Which silence this is. The microphone having heard an answer that
          * never became a turn is the page knowing something the tutor cannot:
@@ -952,16 +1062,14 @@ export default function Eleve() {
            * the rest is what it waited from.
            */
           `${lost ? 'nudge (answer lost on the way up — asked for a repeat)' : 'nudge'} — ` +
-            (silent >= NUDGE_AFTER_MS
-              ? `${(silent / 1000).toFixed(0)}s of silence, measured from ${silentBecause.current}`
-              : // The other clock fired, so the other clock is what the line
+            (strandedDue
+              ? // The other clock fired, so the other clock is what the line
                 // has to quote. Saying "3s of silence" here would read as a
                 // nudge sent twelve seconds early. See TUTOR_QUIET_MS.
-                `the tutor has made no sound for ${(tutorQuiet / 1000).toFixed(
-                  0,
-                )}s and the learner has been filling the gap; ${(silent / 1000).toFixed(
-                  0,
-                )}s since they last stopped`) +
+                `stranded ${strandedNudges.current} of ${MAX_STRANDED_NUDGES}: the tutor has ` +
+                `made no sound for ${(tutorQuiet / 1000).toFixed(0)}s and the learner has been ` +
+                `filling the gap; ${(silent / 1000).toFixed(0)}s since they last stopped`
+              : `${(silent / 1000).toFixed(0)}s of silence, measured from ${silentBecause.current}`) +
             `, ${
               total ? `${call.answered.length} of ${total} answered` : 'and this lesson has no list'
             }`,
