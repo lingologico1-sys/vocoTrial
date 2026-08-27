@@ -378,12 +378,54 @@ export async function startGeminiSession(
   const RELAY_DEAD_PINGS = 3;
   let unanswered = 0;
 
+  /**
+   * The longest a tool response is held back waiting for the turn to finish.
+   *
+   * A BOUND ON A DEADLOCK THAT SHOULD NOT EXIST. `behavior: 'NON_BLOCKING'`
+   * means the model does not stop for the result, so the turn it is speaking
+   * completes whether or not this has gone out — and every call measured so
+   * far behaves that way. If it ever does not, the model is waiting for a
+   * frame this file is waiting to send it, and nothing else in the call breaks
+   * that circle. So the hold expires.
+   *
+   * Five seconds because `turnComplete` is a server signal paced by
+   * generation, not by playback: audio is produced faster than real time, so
+   * it lands within a second or two of a turn starting even when the tutor has
+   * five seconds of speech to get through. A hold that reaches five has not
+   * met the case it was written for, and sending then is exactly what this
+   * file did before — late, but never worse than the behaviour it replaced.
+   */
+  const RESPONSE_HOLD_MS = 5_000;
+  /** Tool responses waiting for the turn in flight to end. See the tool call. */
+  let heldResponses: unknown[] = [];
+  let responseHold: number | null = null;
+
+  const sendResponses = (responses: unknown[]) => {
+    if (!responses.length || socket.readyState !== WebSocket.OPEN) return;
+    socket.send(JSON.stringify({ toolResponse: { functionResponses: responses } }));
+  };
+
+  /** Lets go of anything held, whatever released it. */
+  const flushResponses = () => {
+    if (responseHold !== null) {
+      clearTimeout(responseHold);
+      responseHold = null;
+    }
+    const waiting = heldResponses;
+    heldResponses = [];
+    sendResponses(waiting);
+  };
+
   const cleanup = () => {
     if (stopped) return;
     stopped = true;
     if (pings !== null) {
       clearInterval(pings);
       pings = null;
+    }
+    if (responseHold !== null) {
+      clearTimeout(responseHold);
+      responseHold = null;
     }
     mic.stop();
     player.close();
@@ -547,23 +589,64 @@ export async function startGeminiSession(
         // what can make the model start talking.
         const spoken = answering;
 
-        if (socket.readyState === WebSocket.OPEN) {
-          socket.send(
-            JSON.stringify({
-              toolResponse: {
-                functionResponses: calls.map((call) => ({
-                  id: call.id,
-                  name: call.name,
-                  // Acknowledged, with nothing to say. The tutor is told in the
-                  // prompt that this produces no reply to read out; an object
-                  // with prose in it is prose a model will sometimes speak. The
-                  // scheduling rides inside the response object rather than
-                  // beside it, which is where the Live API reads it from.
-                  response: silentResponses ? { ok: true, scheduling: 'SILENT' } : { ok: true },
-                })),
-              },
-            }),
-          );
+        const responses = calls.map((call) => ({
+          id: call.id,
+          name: call.name,
+          // Acknowledged, with nothing to say. The tutor is told in the
+          // prompt that this produces no reply to read out; an object
+          // with prose in it is prose a model will sometimes speak. The
+          // scheduling rides inside the response object rather than
+          // beside it, which is where the Live API reads it from.
+          response: silentResponses ? { ok: true, scheduling: 'SILENT' } : { ok: true },
+        }));
+
+        /*
+         * A call that arrived mid-speech is answered after the speech, not into
+         * it.
+         *
+         * THE DOUBLED TURN CAME BACK, ON THE SURFACE THAT IMPLEMENTS SILENT. On
+         * 2026-08-27 the tutor spoke "Moi ça va super bien, merci ! Dis-moi,
+         * qui sont tes camarades de chambre cette année ?", called questionDone
+         * 1.5s into that turn, finished it, and then said the identical
+         * sentence again from a fresh set of audio frames. Both mitigations
+         * were on the wire: `behavior: 'NON_BLOCKING'` on the declaration and
+         * `scheduling: 'SILENT'` in the response, gated to AI Studio, which is
+         * where this ran. So the note in models.ts that calls this a Vertex
+         * problem is too strong — it happens here too, intermittently, and a
+         * call landing 1.3s into a turn on an earlier lesson did not double.
+         *
+         * WHAT IS DEFERRED IS THE DELIVERY, NOT THE SCHEDULING, and that
+         * distinction is the whole reason this is not the mistake recorded
+         * above. Predicting a *value* from `answering` failed because the flag
+         * does not separate a turn that will stay silent from one that has not
+         * started. This reads the other flag — `spoken`, which is whether the
+         * model had actually produced speech — and changes only when the same
+         * SILENT response goes out. Every response is still sent, unchanged.
+         *
+         * SO THE BOOKKEEPING-FIRST TURN IS UNTOUCHED. On this model the call
+         * usually arrives before a word of the turn, `spoken` is false, and it
+         * is answered immediately exactly as before — that pattern has never
+         * doubled. Only the mid-speech call waits, and it waits for the turn it
+         * would otherwise land inside.
+         *
+         * NOTHING THE PAGE COUNTS MOVES. The report is dispatched below on the
+         * frame that carried it, and `answerBegins` closes the learner's turn
+         * there too; both read the call arriving, not the answer leaving. This
+         * changes what Google is told and when, and nothing else.
+         *
+         * It is a hypothesis with two lessons behind it rather than a proof.
+         * If doubling survives this, the next suspect is SILENT itself.
+         */
+        if (silentResponses && spoken) {
+          heldResponses.push(...responses);
+          if (responseHold === null) {
+            responseHold = window.setTimeout(() => {
+              responseHold = null;
+              flushResponses();
+            }, RESPONSE_HOLD_MS);
+          }
+        } else {
+          sendResponses(responses);
         }
 
         // Reported before it is interpreted, and reported whatever the name is.
@@ -754,6 +837,13 @@ export async function startGeminiSession(
         generatedAt = 0;
         firstTextAt = 0;
         pendingText = '';
+        /*
+         * The turn a mid-speech tool response was waiting to be clear of is
+         * over, so it goes now. After `answering` is cleared rather than
+         * before: a response arriving on this frame must not be read as
+         * landing inside the turn it just closed.
+         */
+        flushResponses();
         // The queue is about to run dry because the agent has stopped talking,
         // not because anything failed to arrive. Saying so keeps the player's
         // underrun logging honest — see PcmPlayer.endTurn.

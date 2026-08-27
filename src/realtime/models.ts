@@ -90,7 +90,12 @@ export interface ModelChoice {
  *
  * The half-cascade model has an answer to each: non-blocking tools, so progress
  * can be reported per question without the doubling, and a real ASR stage that
- * takes `speechConfig.languageCode`. What it gives up is affective dialog and
+ * takes `speechConfig.languageCode`. The first of those is a strong preference
+ * and not a guarantee — on 2026-08-27 an AI Studio lesson doubled a turn with
+ * `NON_BLOCKING` and `SILENT` both on the wire, when the call landed mid-speech
+ * rather than ahead of the turn. See the tool handling in gemini.ts, which now
+ * holds such a response back until the turn it would have landed in is over.
+ * What it gives up is affective dialog and
  * proactivity, which settings.ts refuses it — see `isNativeAudio` there.
  *
  * Native audio stays second rather than being removed. Studio is where the two
