@@ -601,10 +601,12 @@ export const NEUTRALISE_BASE_PROMPT =
  *
  * The one thing held is identity, and the sentence saying so is doing real work
  * — a model given a free hand with a warm smile will happily return a warmer
- * *person*.
+ * *person*. "Change nothing else" turns out not to cover *adding*: asked for a
+ * friendly face, a model will hand back one wearing glasses it invented, so the
+ * accessories are refused by name as well.
  */
 export const SMILE_BASE_PROMPT =
-  'Give this person a broad, warm, genuine smile, as if greeting someone they are pleased to see: the mouth clearly smiling and the cheeks and eyes going with it. Change nothing else about the portrait — the same face, the same hair, the same clothes, the same drawing style, the same pose, the same background.';
+  'Give this person a broad, warm, genuine smile, as if greeting someone they are pleased to see: the mouth clearly smiling and the cheeks and eyes going with it. Change nothing else about the portrait — the same face, the same hair, the same clothes, the same drawing style, the same pose, the same background. Add nothing that is not already in the picture: if the person is not wearing glasses, do not draw glasses on them, and likewise add no sunglasses, hat, headband, earrings, jewellery, makeup or facial hair that is not there now. Anything of that kind already in the picture stays exactly as it is.';
 
 export function slot(id: SlotId): Slot {
   const found = SLOTS.find((entry) => entry.id === id);
