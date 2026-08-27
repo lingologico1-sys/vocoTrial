@@ -72,15 +72,24 @@ const IDLE_POLL_MS = 1_000;
  * is set well clear of the slowest start anybody has seen rather than snugly
  * above the average one, and the average one never reaches it.
  *
+ * TEN NOW, BECAUSE THE SLOWEST START GOT SLOWER. On 2026-08-27 the opening note
+ * went out four tenths of a second into the call and the greeting was audible
+ * at ten seconds — no tool call, no nudge, nothing racing it, just what this
+ * model costs to start a turn on a bad minute. Six was under that, so the
+ * watchdog was firing into turns that were still coming; the run that prompted
+ * this had one nudged at six seconds and speaking twenty-one seconds later.
+ * Ten is above the measurement rather than comfortably clear of it, which is
+ * the honest position: clear of it means never nudging at all.
+ *
  * IT REACHES THE LAST QUESTION TOO, and there is nothing left for it to race.
  * The page no longer says anything when the list completes — the tutor closes
  * that turn itself, see the closing effect in Eleve.tsx — so a report for the
  * last question with no speech behind it is the same stall as any other, and
  * the same nudge is the right answer: the turn it asks for is the goodbye. That
- * close waits twelve seconds on a tutor which has not spoken, which is this
- * with room after it, so the nudge always gets its chance first.
+ * close waits on a tutor which has not spoken for this plus the turn it asks
+ * for — see CLOSING_SILENT_MS — so the nudge always gets its chance first.
  */
-const STALL_NUDGE_MS = 6_000;
+const STALL_NUDGE_MS = 10_000;
 
 /**
  * How recently a note must have gone out for a barge-in to be laid at its door.
@@ -353,6 +362,16 @@ export interface VoiceCall {
   usage: UsageTotals;
   /** When the current call reached `live`, or null between calls. */
   connectedAt: number | null;
+  /**
+   * When this page last sent the tutor a note, or null if it has not this call.
+   *
+   * FOR A SILENCE CLOCK THAT IS NOT THIS FILE'S. A note asks for a turn, and
+   * the wait for that turn is not silence anybody should nudge into — see the
+   * comment on the state behind this, and NUDGE_AFTER_MS in Eleve.tsx for the
+   * twenty-seven seconds of dead air that came of two clocks not knowing about
+   * each other's notes.
+   */
+  notedAt: number | null;
   /** How long the call that just ended ran, in ms. Null before the first one. */
   lastCallMs: number | null;
   /**
@@ -494,6 +513,25 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
   const [lastCallMs, setLastCallMs] = useState<number | null>(null);
   const [answered, setAnswered] = useState<number[]>([]);
   const [events, setEvents] = useState<CallEvent[]>([]);
+  /**
+   * When this page last put a note on the wire, published rather than kept.
+   *
+   * THE PAGE ABOVE HAS ITS OWN SILENCE CLOCK AND CANNOT SEE THIS FILE'S NOTES.
+   * That cost twenty-seven seconds of dead air on 2026-08-27: the tool call
+   * landed with no speech behind it, the stall watchdog here nudged at six
+   * seconds, and /eleve — whose clock had been running since the same silence
+   * began and knew nothing about that nudge — sent a second note nine seconds
+   * later, straight into the turn the first one had asked for. The regeneration
+   * that followed put the tutor's reply twenty-one seconds after the nudge that
+   * was meant to rescue it.
+   *
+   * A note is not a sound, so it cannot be folded into `speaking` or `heard`.
+   * It is the other thing a silence clock has to know: that somebody has
+   * already asked, and the answer is still on its way. State rather than a ref,
+   * because a watcher that cannot see it change is the bug this fixes; notes
+   * are rare enough that the render costs nothing.
+   */
+  const [notedAt, setNotedAt] = useState<number | null>(null);
 
   /**
    * Writes one line of the account. See CallEvent.
@@ -1019,6 +1057,31 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
       // Before the send, so an interruption caused by this note can never look
       // older than the note that caused it.
       noteAt.current = Date.now();
+      setNotedAt(noteAt.current);
+      /*
+       * A note counts as activity, for the idle timer's purpose if not for the
+       * room's.
+       *
+       * The timer exists so a forgotten tab stops billing, and a page that has
+       * just asked the tutor a question is not a forgotten tab. /eleve gives it
+       * thirty seconds and nudges at fifteen, and a nudged turn has taken over
+       * twenty to arrive — so without this the hang-up lands squarely on the
+       * answer the page asked for, and the learner is told nobody was talking
+       * about a tutor that was mid-sentence. Bounded by MAX_NUDGES: the page
+       * only has so many notes to send, so a tutor that never answers still
+       * runs out of reprieves.
+       */
+      lastActivity.current = Date.now();
+      /*
+       * The watchdog has been overtaken, whoever sent this.
+       *
+       * Every note asks for the same thing the stall nudge asks for — a turn —
+       * so an armed watchdog behind one is a second note queued up against a
+       * turn already on its way. Disarming here is what stops the closing note,
+       * the cap note and a nudge of /eleve's own from each leaving the stall
+       * timer running underneath them.
+       */
+      clearStall();
       /*
        * A note with no call to land in is recorded as dropped rather than not
        * recorded at all. That is the single most useful line this log can
@@ -1029,7 +1092,7 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
       record('note', session.current ? said : `${said} — DROPPED, no call was running`);
       session.current?.say(text);
     },
-    [record],
+    [clearStall, record],
   );
 
   const connect = useCallback(async () => {
@@ -1038,6 +1101,7 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
     setDetail(null);
     setMuted(false);
     clearStall();
+    setNotedAt(null);
     stopWaiting();
     setTranscribing(false);
     queue.current.discard();
@@ -1293,6 +1357,7 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
     busy: status === 'connecting',
     usage,
     connectedAt,
+    notedAt,
     lastCallMs,
     answered,
     events,

@@ -118,15 +118,18 @@ const CLOSING_QUIET_MS = 6_000;
  * on silence is not that: the tutor reported the last question and said
  * nothing, or it was sent the cap's note and has not answered yet, and what the
  * page is waiting for is a turn that has not started. Six seconds is too short
- * for that. The stall watchdog in useVoiceCall takes six before it nudges, and
- * a nudged turn was measured at five seconds from note to audible speech.
+ * for that. The stall watchdog in useVoiceCall takes ten before it nudges, and
+ * a nudged turn has been measured anywhere from five seconds to twelve from
+ * note to audible speech.
  *
- * Twelve is those two with room, and it is a ceiling nobody reaches on a
+ * Twenty-four is those two with room, and it is a ceiling nobody reaches on a
  * healthy lesson: the tutor closes the last turn itself, which means it is
  * speaking when the count completes. This is what a lesson that has already
- * gone quiet costs, once.
+ * gone quiet costs, once — and cutting it shorter than the nudge plus its
+ * answer means hanging up on the goodbye while it is being generated, which is
+ * the one ending worse than a slow one.
  */
-const CLOSING_SILENT_MS = 12_000;
+const CLOSING_SILENT_MS = 24_000;
 
 /**
  * How long the room may be silent, with the list unfinished, before the page
@@ -141,11 +144,19 @@ const CLOSING_SILENT_MS = 12_000;
  * longer than a fluent one would.
  *
  * IT IS NOT THE STALL WATCHDOG. That one lives in useVoiceCall, arms on a
- * bookkeeping call with no speech behind it, and waits two and a half seconds —
- * it is about one turn going missing. This is about the conversation stopping,
- * which is a different silence with a different cause, most often a tutor that
- * decided the lesson was over ahead of the list. Both send KEEP_GOING_SIGNAL,
- * and a tutor that ignores the first gets the second ten seconds later.
+ * bookkeeping call with no speech behind it — it is about one turn going
+ * missing. This is about the conversation stopping, which is a different
+ * silence with a different cause, most often a tutor that decided the lesson
+ * was over ahead of the list. Both send KEEP_GOING_SIGNAL.
+ *
+ * THE TWO NO LONGER STACK, and they used to. Both clocks measured the same
+ * silence and neither could see the other's note, so a stalled turn was nudged
+ * by the watchdog and then nudged again from here while the answer to the first
+ * was still being generated — the second note interrupting it, and the tutor's
+ * reply landing twenty-seven seconds after the silence began. `call.notedAt`
+ * is what closes that: any note, from either side, restarts the clock below,
+ * so this waits its full fifteen seconds on the turn a nudge asked for before
+ * deciding that nudge went unanswered.
  */
 const NUDGE_AFTER_MS = 15_000;
 
@@ -711,7 +722,21 @@ export default function Eleve() {
     // one clock because what `nudge` waits for is the room being silent, and
     // either of them talking is the reason not to.
     if (call.speaking || call.heard) silentSince.current = null;
-    else if (silentSince.current === null) silentSince.current = Date.now();
+    else {
+      if (silentSince.current === null) silentSince.current = Date.now();
+      /*
+       * A note already sent is a silence already being worked on.
+       *
+       * Not a sound, so it cannot join the test above — but it is the other
+       * thing this clock has to know. A note asks for a turn and the turn takes
+       * as long as it takes; measuring the wait for it from before the asking
+       * is what put two notes into one silence. Only ever pushes the clock
+       * forward, and only inside a silence: a note sent while the tutor was
+       * talking is not a silence at all. See NUDGE_AFTER_MS.
+       */
+      if (call.notedAt !== null && call.notedAt > silentSince.current)
+        silentSince.current = call.notedAt;
+    }
 
     if (lessonDone && doneSince.current === null) {
       doneSince.current = Date.now();
@@ -858,6 +883,7 @@ export default function Eleve() {
     call.live,
     call.speaking,
     call.heard,
+    call.notedAt,
     closing,
     closingTurnDone,
     elapsedMs,
