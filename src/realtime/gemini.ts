@@ -94,6 +94,12 @@ interface LiveMessage {
    */
   pong?: number;
   upgradeMs?: number;
+  /**
+   * True on the pong that left the Worker immediately, false or absent on the
+   * one that queued behind Google's frames. Two arrive per ping and the gap
+   * between them is the whole diagnosis — see the relay Worker.
+   */
+  direct?: boolean;
   /** The upstream socket's longest quiet since the last pong. See onRelay. */
   googleMaxGapMs?: number;
 }
@@ -340,6 +346,32 @@ export async function startGeminiSession(
   const PING_EVERY_MS = 10_000;
   let pings: number | null = null;
 
+  /**
+   * How many pings have gone out since the relay last answered anything.
+   *
+   * WHAT IT IS FOR IS A LEARNER TALKING TO NOTHING. On 2026-08-27 the relay
+   * stopped forwarding at about fifteen seconds and the socket stayed OPEN
+   * throughout: no close frame, no error, so the page went on pumping
+   * microphone audio into it and showing a loader while a beginner said "allô"
+   * five times and eventually gave up and hung up. Seventy-five seconds, and
+   * nothing anywhere said the call was dead.
+   *
+   * A pong is answered by the Worker itself and never reaches Google, so it is
+   * the one frame whose absence means the relay and not the model. Missing one
+   * is a bad ten seconds; missing three in a row, with the socket still open,
+   * is not something a working relay does.
+   *
+   * THREE AND NOT TWO, because of what the two mistakes cost. Firing late
+   * leaves a learner in silence a further ten seconds, which is the failure
+   * already happening. Firing early hangs up a lesson that was fine. Two would
+   * be twenty seconds and defensible; three is thirty and chosen for the same
+   * reason STALL_NUDGE_MS is set clear of its measurement rather than snug
+   * against it. The line at two is on the timeline either way, so an account
+   * shows the onset even when the call recovers.
+   */
+  const RELAY_DEAD_PINGS = 3;
+  let unanswered = 0;
+
   const cleanup = () => {
     if (stopped) return;
     stopped = true;
@@ -403,8 +435,12 @@ export async function startGeminiSession(
        * has to know this frame exists.
        */
       if (typeof message.pong === 'number') {
+        // Either pong is proof the relay is running: the direct one because it
+        // left before the queue, the queued one because it got through it.
+        unanswered = 0;
         handlers.onRelay?.({
           rttMs: Date.now() - message.pong,
+          direct: message.direct === true,
           upgradeMs: typeof message.upgradeMs === 'number' ? message.upgradeMs : undefined,
           googleMaxGapMs:
             typeof message.googleMaxGapMs === 'number' ? message.googleMaxGapMs : undefined,
@@ -426,6 +462,24 @@ export async function startGeminiSession(
          */
         const ping = () => {
           if (socket.readyState !== WebSocket.OPEN) return;
+          unanswered += 1;
+          /*
+           * Reported before the send, so the count describes pings already gone
+           * unanswered rather than including the one now leaving.
+           */
+          if (unanswered === RELAY_DEAD_PINGS) {
+            handlers.onStatus(
+              'error',
+              `The relay stopped answering — ${RELAY_DEAD_PINGS - 1} pings went out with no ` +
+                `reply and the socket never closed. Nothing was reaching this page; whether ` +
+                `anything was still reaching Google, the pong cannot say.`,
+            );
+            cleanup();
+            return;
+          }
+          if (unanswered === RELAY_DEAD_PINGS - 1) {
+            handlers.onRelaySilent?.(unanswered - 1);
+          }
           socket.send(JSON.stringify({ ping: Date.now() }));
         };
         ping();

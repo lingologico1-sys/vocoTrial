@@ -333,9 +333,28 @@ function relayLine(relay: RelayHealth): string {
         `whether a turn was open across it, because between turns that is only the learner ` +
         `talking`;
 
+  /*
+   * The pair, and what the pair means, because the counts are useless apart.
+   * Every ping is answered twice — once past the queue and once through it —
+   * so equal counts is the healthy case and each way of them differing names a
+   * different failure. Spelled out rather than left to the reader: this line is
+   * read once, in an emergency, by somebody who did not write it.
+   */
+  const pongs =
+    relay.directPongs === 0 && relay.queuedPongs === 0
+      ? ''
+      : relay.directPongs === relay.queuedPongs
+        ? `. Both pongs came back ${relay.directPongs} times, which is the relay healthy`
+        : relay.directPongs > relay.queuedPongs
+          ? `. ${relay.directPongs} direct pongs against ${relay.queuedPongs} queued — the ` +
+            `Worker was running and its forwarder to this browser was wedged, so everything ` +
+            `from Google queued behind whatever stuck`
+          : `. ${relay.queuedPongs} queued pongs against ${relay.directPongs} direct, which ` +
+            `should not be possible and means this reading cannot be trusted`;
+
   return (
     `browser to the relay and back: ${relay.bestMs}ms at best, ${relay.worstMs}ms at worst ` +
-    `over ${relay.samples} ${relay.samples === 1 ? 'sample' : 'samples'}${reach}${quiet}`
+    `over ${relay.samples} ${relay.samples === 1 ? 'sample' : 'samples'}${reach}${quiet}${pongs}`
   );
 }
 

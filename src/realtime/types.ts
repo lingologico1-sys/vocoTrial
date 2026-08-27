@@ -143,8 +143,30 @@ export interface SessionHandlers {
    * A large gap *inside* a turn is the thing worth finding, and the turn
    * boundaries live in the browser — so this reports the raw quiet and lets the
    * account it lands in supply the context.
+   *
+   * `direct` SEPARATES THE TWO PONGS EVERY PING NOW GETS. One leaves the Worker
+   * immediately and one queues behind Google's frames, and which of them
+   * arrives is the diagnosis: both is a healthy relay, direct alone is a wedged
+   * forwarder chain, neither is a Worker that has stopped running. Only the
+   * queued one measures the path the audio actually takes, so it is the one the
+   * best/worst summary is built from.
    */
-  onRelay?: (sample: { rttMs: number; upgradeMs?: number; googleMaxGapMs?: number }) => void;
+  onRelay?: (sample: {
+    rttMs: number;
+    direct: boolean;
+    upgradeMs?: number;
+    googleMaxGapMs?: number;
+  }) => void;
+  /**
+   * Pings are going out and the relay has stopped answering, but not yet for
+   * long enough to hang up on.
+   *
+   * The onset of the failure, on the timeline, for the call that recovers and
+   * the call that does not alike. `missed` is how many have gone unanswered.
+   * The hang-up itself arrives as an `error` status with its own reason — see
+   * RELAY_DEAD_PINGS in gemini.ts.
+   */
+  onRelaySilent?: (missed: number) => void;
   /**
    * A model turn ended having produced no audio at all.
    *

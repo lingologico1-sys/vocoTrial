@@ -362,6 +362,19 @@ export interface RelayHealth {
    * which this was.
    */
   googleMaxGapMs: number | null;
+  /**
+   * How many of each pong came back, out of one ping each.
+   *
+   * THE PAIR IS THE DIAGNOSIS AND NEITHER NUMBER MEANS MUCH ALONE. Every ping
+   * gets two answers: one that leaves the Worker immediately and one that
+   * queues behind Google's frames. Equal counts is a healthy relay. `direct`
+   * ahead of `queued` is a forwarder chain that has wedged with the Worker
+   * still running. Both stalled while the socket stays open is a Worker that
+   * has stopped running at all — which is what 2026-08-27 looked like, when two
+   * of eleven pongs came back and there was no way to tell those apart.
+   */
+  directPongs: number;
+  queuedPongs: number;
 }
 
 /** A call that has not been measured yet. */
@@ -372,6 +385,8 @@ const noRelay = (): RelayHealth => ({
   lastMs: 0,
   upgradeMs: null,
   googleMaxGapMs: null,
+  directPongs: 0,
+  queuedPongs: 0,
 });
 
 /**
@@ -1560,28 +1575,63 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
        */
       onRelay: ({
         rttMs,
+        direct,
         upgradeMs,
         googleMaxGapMs,
       }: {
         rttMs: number;
+        direct: boolean;
         upgradeMs?: number;
         googleMaxGapMs?: number;
       }) => {
         let first = false;
         setRelay((current) => {
-          first = current.samples === 0;
+          /*
+           * The summary is built from the queued pong alone, because that is
+           * the one that travelled the path the audio travels. The direct pong
+           * skips the forwarder on purpose, so folding its round trip into
+           * best/worst would flatter exactly the call that was backed up.
+           */
+          first = !direct && current.queuedPongs === 0;
+          const counted = !direct;
           return {
-            samples: current.samples + 1,
-            bestMs: first ? rttMs : Math.min(current.bestMs, rttMs),
-            worstMs: first ? rttMs : Math.max(current.worstMs, rttMs),
-            lastMs: rttMs,
+            samples: counted ? current.samples + 1 : current.samples,
+            bestMs: first ? rttMs : counted ? Math.min(current.bestMs, rttMs) : current.bestMs,
+            worstMs: first ? rttMs : counted ? Math.max(current.worstMs, rttMs) : current.worstMs,
+            lastMs: counted ? rttMs : current.lastMs,
             upgradeMs: upgradeMs ?? current.upgradeMs,
             googleMaxGapMs:
               googleMaxGapMs === undefined
                 ? current.googleMaxGapMs
                 : Math.max(current.googleMaxGapMs ?? 0, googleMaxGapMs),
+            directPongs: current.directPongs + (direct ? 1 : 0),
+            queuedPongs: current.queuedPongs + (direct ? 0 : 1),
           };
         });
+        /*
+         * Above the `direct` return below, and it has to be: the upstream gap
+         * now rides the direct pong precisely so it survives a wedged forwarder,
+         * and returning before this would throw away the reading in the one
+         * failure it was moved there for.
+         *
+         * Its own line, on its own threshold, because it is a fact about a
+         * different leg than the round trip. Landing on the timeline rather than
+         * only in the summary is the whole point: a gap is meaningless until you
+         * can see whether a turn was in flight across it, and that is what the
+         * lines around it say. See GOOGLE_QUIET_MS.
+         */
+        if (googleMaxGapMs !== undefined && googleMaxGapMs >= GOOGLE_QUIET_MS) {
+          record(
+            'relay',
+            `the relay's own socket to Google went quiet for ` +
+              `${(googleMaxGapMs / 1000).toFixed(1)}s in the last ten — nothing arrived from ` +
+              `Google in that time. Between turns that is the learner talking; inside one it ` +
+              `is the leg no other number here watches`,
+          );
+        }
+        // Only the queued pong earns a round-trip line, for the same reason it
+        // is the only one in the summary.
+        if (direct) return;
         /*
          * `first` is written by the updater above, which React may run twice in
          * development — so this reads it after, where a double invocation has
@@ -1596,22 +1646,21 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
               (first ? ' — the first sample of this call' : ' — slower than usual'),
           );
         }
-        /*
-         * Its own line, on its own threshold, because it is a fact about a
-         * different leg than the one above. Landing on the timeline rather than
-         * only in the summary is the whole point: a gap is meaningless until you
-         * can see whether a turn was in flight across it, and that is what the
-         * lines around it say. See GOOGLE_QUIET_MS.
-         */
-        if (googleMaxGapMs !== undefined && googleMaxGapMs >= GOOGLE_QUIET_MS) {
-          record(
-            'relay',
-            `the relay's own socket to Google went quiet for ` +
-              `${(googleMaxGapMs / 1000).toFixed(1)}s in the last ten — nothing arrived from ` +
-              `Google in that time. Between turns that is the learner talking; inside one it ` +
-              `is the leg no other number here watches`,
-          );
-        }
+      },
+      /**
+       * The relay has gone quiet but not yet long enough to hang up on.
+       *
+       * The onset, written down for the call that recovers as much as for the
+       * one that dies — a lesson with this line and nothing after it is a
+       * different account from a lesson with this line and a recovery below it.
+       * See RELAY_DEAD_PINGS.
+       */
+      onRelaySilent: (missed: number) => {
+        record(
+          'relay',
+          `${missed} ping${missed === 1 ? '' : 's'} went out with no answer from the relay. ` +
+            `A pong never reaches Google, so this is the relay and not the model`,
+        );
       },
       /**
        * A turn that ended without a sound in it, on the timeline where the

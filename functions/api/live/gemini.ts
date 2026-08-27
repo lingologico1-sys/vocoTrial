@@ -304,28 +304,48 @@ export async function onRequest(
     const ping = readPingFrame(event.data);
     if (ping !== null) {
       /*
-       * Sent through the forwarder rather than straight down the socket, so it
-       * queues behind whatever Google frames are still converting. That is the
-       * point: a pong that jumped the queue would measure a path the audio
-       * never takes, and read fastest exactly when the relay was most backed
-       * up. See `forwarder` for why there is a queue at all.
-       */
-      /*
+       * TWO PONGS, AND THE DIFFERENCE BETWEEN THEM IS THE DIAGNOSIS.
+       *
+       * The queued one goes through the forwarder, so it sits behind whatever
+       * Google frames are still converting. That was always the point: a pong
+       * that jumped the queue would measure a path the audio never takes, and
+       * would read fastest exactly when the relay was most backed up.
+       *
+       * It also meant the instrument died with the thing it measured. On
+       * 2026-08-27 a call went deaf at about fifteen seconds and two of eleven
+       * pongs came back — which proved the failure was at or before this
+       * Worker, since a pong never touches Google, and could not say which of
+       * three things it was.
+       *
+       * So the direct one leaves immediately, past the queue, and carries
+       * everything a reader needs when nothing else survives. Direct arriving
+       * without the queued one is a wedged forwarder chain; neither arriving is
+       * this Worker not running at all. Nothing else tells those apart from the
+       * browser.
+       *
        * The gap is measured to *now* and not to the last frame, so a socket
        * that has been silent since well before this ping reports the silence it
        * is still in rather than the last one it finished. Reset after reading,
        * so the next sample describes the next window and nothing is counted
-       * twice.
+       * twice — and it rides the direct pong, because the one measurement of
+       * the upstream leg must not be lost in exactly the failure that makes it
+       * worth having.
        */
       const quiet = Date.now() - lastGoogleAt;
-      toClient(
-        JSON.stringify({
-          pong: ping,
-          upgradeMs,
-          googleMaxGapMs: Math.max(googleMaxGapMs, quiet),
-        }),
-      );
-      googleMaxGapMs = 0;
+      try {
+        fromWorker.send(
+          JSON.stringify({
+            pong: ping,
+            direct: true,
+            upgradeMs,
+            googleMaxGapMs: Math.max(googleMaxGapMs, quiet),
+          }),
+        );
+        googleMaxGapMs = 0;
+      } catch {
+        // The browser went away mid-flight; the close handlers tear the pair down.
+      }
+      toClient(JSON.stringify({ pong: ping }));
       return;
     }
 
