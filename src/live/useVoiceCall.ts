@@ -108,19 +108,31 @@ const STALL_NUDGE_MS = 10_000;
 const NOTE_BLAME_MS = 1_500;
 
 /**
- * How long the transcript of a finished utterance is waited for.
+ * The backstop on how long a finished utterance's transcript is waited for.
  *
  * The learner's own words arrive after they have stopped saying them, and the
  * pill shows a loader across that gap rather than the sentence before it — see
- * `transcribing`. This is the end of that patience: the microphone hears things
- * that are never transcribed at all, a cough or a door, and a loader armed by
- * one of those with no transcript coming would spin for the rest of the call.
+ * `transcribing`. This is the end of that patience, and it is no longer what
+ * usually ends it: the tutor beginning to answer is. A turn the model has
+ * started answering is one whose words are either already here or never coming,
+ * which is a fact about this conversation rather than a guess at a duration —
+ * see the agent branch of `onTranscript`, which is where that is read.
  *
- * Eight seconds is long enough to be wrong only when the provider is having a
- * bad minute, and short enough that a learner who coughed does not sit in front
- * of a page that appears to still be thinking about it.
+ * SO THIS CATCHES ONLY WHAT NO TURN FOLLOWS: a cough, a door, a chair, heard by
+ * the microphone and answered by nobody. A loader armed by one of those with
+ * nothing coming would otherwise spin for the rest of the call.
+ *
+ * EIGHT SECONDS WAS A GUESS AT THE PROVIDER, AND THE GUESS WAS LOW. On
+ * 2026-08-28 Gemini 3.1 Flash Live returned an answer's transcription 11.3s
+ * after the microphone closed: it sends the learner's words in the same breath
+ * as its own reply, so this wait is the model's whole thinking time and not a
+ * transcriber's. The clock ran out 3.3s short, the loader gave way, and the
+ * pill spent those seconds showing the answer to the *previous* question as
+ * though it were the one just given. Thirty seconds is past everything measured
+ * and past STALL_NUDGE_MS as well, which is the point: by the time this fires,
+ * every mechanism that could still have produced a turn has had its go.
  */
-const TRANSCRIPT_WAIT_MS = 8_000;
+const TRANSCRIPT_BACKSTOP_MS = 30_000;
 
 /**
  * A relay round trip worth a line of its own on the timeline, in ms.
@@ -538,10 +550,27 @@ export interface VoiceCall {
    * one just given. So this stays up over both halves — the speaking and the
    * waiting — and the pill spends it on a loader.
    *
-   * It gives up after TRANSCRIPT_WAIT_MS of silence with nothing transcribed,
-   * because not every sound a microphone hears becomes a sentence.
+   * It ends without words when the tutor begins its own turn — whatever has not
+   * arrived by then is not arriving — and, if even that never comes, after
+   * TRANSCRIPT_BACKSTOP_MS, because not every sound a microphone hears becomes
+   * a sentence. Both of those endings raise `wordless`.
    */
   transcribing: boolean;
+  /**
+   * Whether the learner's last utterance came back with nothing to show.
+   *
+   * THE OTHER HALF OF THE LOADER, and the half that was missing. `transcribing`
+   * only ever decided how long to wait; what the pill fell back to when the
+   * wait ended was the last completed turn — which is the sentence before this
+   * one, and on 2026-08-28 that put the answer to question one on screen under
+   * question two. The previous answer is never a true caption for the sound
+   * just made, so when a span ends with no words behind it this says so and the
+   * pill shows nothing at all. See `learnerText` in Eleve, which reads it.
+   *
+   * It clears the moment any transcript text arrives, including text that
+   * arrives after the wait was given up on.
+   */
+  wordless: boolean;
   /**
    * Whether the tutor has finished its opening turn and handed over the floor.
    *
@@ -754,12 +783,45 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
    * supposed to arrive in.
    */
   const [transcribing, setTranscribing] = useState(false);
+  const [wordless, setWordless] = useState(false);
   const waiting = useRef<number | null>(null);
+  /**
+   * The same span as `transcribing`, readable in the handler that ends it.
+   *
+   * The tutor's words and the learner's can land in one frame, and the seam
+   * that ends this on the tutor's arrival has to know whether the learner's
+   * close already did — a state variable a render behind cannot say.
+   */
+  const awaiting = useRef(false);
+  /**
+   * Whether any transcript text has come back for the utterance now waited on.
+   *
+   * Reset when a voice starts, so the words that answered the *last* question
+   * can never be mistaken for an answer to this one — which is the whole fault
+   * being fixed here.
+   */
+  const spoke = useRef(false);
   const stopWaiting = useCallback(() => {
     if (waiting.current === null) return;
     clearTimeout(waiting.current);
     waiting.current = null;
   }, []);
+  /**
+   * The end of the loader's span, however it ends.
+   *
+   * `words` is whether a completed turn came back for it. When nothing did, the
+   * pill is told to show nothing rather than to fall back on the sentence
+   * before — see `wordless`.
+   */
+  const settle = useCallback(
+    (words: boolean) => {
+      stopWaiting();
+      awaiting.current = false;
+      setTranscribing(false);
+      if (!words) setWordless(true);
+    },
+    [stopWaiting],
+  );
   /**
    * See `openingDone` on VoiceCall for what this means. The ref beside it is
    * the guard that keeps it honest: it flips on an *end* of tutor audio, and
@@ -1201,6 +1263,11 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
         if (delta.text) {
           micAnswers.current = 0;
           setUnheard(false);
+          // Words for this utterance, wherever the wait had got to. Late is
+          // still an answer: if the loader has already been given up on, this
+          // is what lets the sentence appear rather than stay suppressed.
+          spoke.current = true;
+          setWordless(false);
         }
         if (delta.done) {
           learnerTurns.current += 1;
@@ -1208,8 +1275,11 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
           // on the turn appearing in `turns`, because this is the same frame
           // and the pill would otherwise flicker back to the previous sentence
           // for a paint on its way to the new one.
-          stopWaiting();
-          setTranscribing(false);
+          //
+          // A close with no text behind it anywhere in the turn is the answer
+          // that was lost on the way up, and it settles as such: the pill shows
+          // nothing, which is exactly what came back.
+          settle(spoke.current);
           // The turn an early report was waiting on. Taken here rather than on a
           // timer because this is the moment it stops being a claim about the
           // future — and the closing note is two seconds behind the count, so a
@@ -1221,11 +1291,29 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
         return;
       }
 
+      /*
+       * The tutor answering ends the learner's wait, whatever came back for it.
+       *
+       * THE HONEST END OF THE SPAN, and the clock below it is only a backstop
+       * now. If the learner's words were coming they are already here — Google
+       * sends the input transcription ahead of the output in the same frame,
+       * and `answerBegins` closes their turn there — so a tutor speaking with
+       * the span still open means those words are lost, not late.
+       *
+       * WHICH IS THE ONE CASE THE PROVIDER NEVER TELLS US ABOUT. A turn the
+       * learner was never transcribed in produces no closing delta at all — see
+       * `heardLearner` in gemini.ts — so without this the only thing left to
+       * end the loader is the backstop, half a minute after the tutor has moved
+       * on. Reached only when nothing arrived, because the close in the branch
+       * above has already run in that same frame when something did.
+       */
+      if (awaiting.current) settle(false);
+
       // A delta with no stamp has no better information than "now", which is
       // what -Infinity means to the queue: due on the next frame.
       queue.current.push({ text: delta.text, done: delta.done, at: delta.at ?? -Infinity });
     },
-    [append, stopWaiting, takeHeld],
+    [append, settle, takeHeld],
   );
 
   /**
@@ -1537,7 +1625,12 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
     setNotedAt(null);
     setRelay(noRelay());
     stopWaiting();
+    // Not `settle`: nobody is waiting on anything yet, and a fresh call must
+    // not open holding the verdict that the last utterance came back empty.
+    awaiting.current = false;
+    spoke.current = false;
     setTranscribing(false);
+    setWordless(false);
     queue.current.discard();
     if (!resume) {
       setOpeningDone(false);
@@ -1586,6 +1679,7 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
           wasSpeaking.current = false;
           setHeard(false);
           stopWaiting();
+          awaiting.current = false;
           setTranscribing(false);
           /*
            * Everything below belongs to the conversation rather than to the
@@ -1756,16 +1850,23 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
         /*
          * The loader's span, which starts here and usually ends at a
          * transcript. A voice starting arms it; a voice stopping starts the
-         * clock on how long the words behind it are waited for. See
-         * `transcribing` and TRANSCRIPT_WAIT_MS.
+         * backstop, which is only reached when neither the words nor a tutor
+         * turn ever comes. See `transcribing` and TRANSCRIPT_BACKSTOP_MS.
          */
         stopWaiting();
-        if (active) setTranscribing(true);
-        else
+        if (active) {
+          // A new utterance, so nothing has come back for it yet — and what
+          // came back for the last one is not an answer to this one.
+          spoke.current = false;
+          awaiting.current = true;
+          setTranscribing(true);
+        } else
           waiting.current = window.setTimeout(() => {
             waiting.current = null;
-            setTranscribing(false);
-          }, TRANSCRIPT_WAIT_MS);
+            // Nothing closed this: no tutor turn, no transcript. Whatever the
+            // microphone heard, there is nothing to show for it.
+            settle(false);
+          }, TRANSCRIPT_BACKSTOP_MS);
       },
       /*
        * Every tool call, named, with what it carried and what became of it.
@@ -2103,7 +2204,7 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
        */
       resuming.current = false;
     }
-  }, [acceptProgress, append, clearStall, cue, onTranscript, record, reveal, say, stopWaiting]);
+  }, [acceptProgress, append, clearStall, cue, onTranscript, record, reveal, say, settle, stopWaiting]);
 
   /** A conversation from the top: a cleared transcript and a fresh count. */
   const connect = useCallback(() => dial(false), [dial]);
@@ -2148,6 +2249,7 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
     heard,
     unheard,
     transcribing,
+    wordless,
     openingDone,
     muted,
     tiltCue,

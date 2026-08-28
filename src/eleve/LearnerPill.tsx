@@ -22,6 +22,13 @@ import { useLongPress } from './useLongPress';
  * to be the words they are still in the middle of saying. `transcribing` is the
  * span; see VoiceCall, which owns both its ends.
  *
+ * AND THE SPAN ENDING IS NOT THE SAME AS WORDS ARRIVING. When it ends with
+ * nothing behind it — an answer lost on the way up, a cough — `text` arrives
+ * empty rather than holding the previous sentence, and the hint below takes the
+ * space back. Nothing here has to know which of the two happened: both are just
+ * a call with nothing transcribed in it yet. See `wordless` in useVoiceCall,
+ * and `learnerText` in Eleve, which is what empties the prop.
+ *
  * THE MICROPHONE IS THE ONLY CONTROL, and it is big because of it. Commencer,
  * Recommencer and Raccrocher were three words for one act — deciding whether to
  * be talking to the tutor — and they sat in a pill beside a microphone that did

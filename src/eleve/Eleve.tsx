@@ -673,13 +673,23 @@ export default function Eleve() {
     return '';
   }, [call.turns]);
 
+  /*
+   * AND NOTHING AT ALL WHEN THE LAST THING THEY SAID CAME BACK EMPTY. The
+   * search below walks backwards past a turn that produced no words, which
+   * makes it answer with the turn before — the sentence that answered the
+   * previous question. That is the right answer to "what was the last thing
+   * transcribed" and the wrong answer to the only question the pill asks, which
+   * is "what did they just say". So a wait that ended with nothing behind it
+   * shows nothing. See `wordless` in useVoiceCall.
+   */
   const learnerText = useMemo(() => {
+    if (call.wordless) return '';
     for (let index = call.turns.length - 1; index >= 0; index--) {
       const turn = call.turns[index];
       if (turn.role === 'user' && turn.done && turn.text.trim()) return turn.text;
     }
     return '';
-  }, [call.turns]);
+  }, [call.turns, call.wordless]);
 
   const askDictionary = useCallback((term: string, context: string) => {
     lookupSeq.current += 1;
