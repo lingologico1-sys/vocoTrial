@@ -183,7 +183,14 @@ export interface SpeakingTime {
  * Turns audio tokens back into seconds of speech.
  *
  * The agent's side is trustworthy: output audio is generated once and billed
- * once, so those tokens are exactly the speech the user heard.
+ * once, so those tokens are exactly the speech the user heard — provided what
+ * reaches here is every one of them. That proviso is not idle. It is true of
+ * the *sum* of the usage frames and false of any single one, and on 2026-08-28
+ * a lesson reported the tutor speaking for five seconds when it had spoken for
+ * thirty-two: what arrived was the last frame, which is the last turn. Nothing
+ * in this function can tell the difference, so the accounting that feeds it has
+ * to get it right — see `recordUsage` in gemini.ts, which decides cumulative
+ * against per-turn separately for each bucket for exactly this reason.
  *
  * The user's side is not. The API re-sends the conversation so far as input on
  * every turn, which means the same second of the user's speech is charged for

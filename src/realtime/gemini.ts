@@ -187,29 +187,77 @@ export async function startGeminiSession(
   }
 
   /**
-   * Cumulative or per-turn? Google's docs do not say.
+   * Cumulative or per-turn? Google's docs do not say, and the honest answer
+   * measured on the wire is: one of each, in the same frame.
    *
    * "The total number of consumed tokens" reads cumulative, and the field name
    * agrees, but nothing in the reference commits to it — and the two readings
    * differ by the whole length of the call. So both are accumulated and the
-   * stream itself decides: totals that only ever climb are a running total and
-   * the last frame wins; a total that drops proves the frames are per-turn, and
-   * from then on the sum is the answer.
+   * stream itself decides: a figure that only ever climbs is a running total
+   * and the last frame wins; a figure that drops proves those frames are
+   * per-turn, and from then on the sum is the answer.
+   *
+   * THE DECISION IS PER BUCKET, BECAUSE ONE FLAG CANNOT BE RIGHT FOR BOTH ENDS
+   * OF A LIVE CALL. The input side is re-read in full on every turn — nothing
+   * on this path caches, see `speakingTime` — so its counts climb whatever the
+   * frames mean, and the whole-frame total climbs with them. The output side
+   * is only ever the turn just generated. With a single flag driven by
+   * `totalTokenCount`, the flag could never flip, and the tutor's speech was
+   * reported as whatever it had just said rather than everything it had said
+   * all call.
+   *
+   * WHAT THAT LOOKED LIKE, on 2026-08-28: a lesson whose tutor spoke six turns
+   * totalling about thirty-two seconds was billed and reported at 172 output
+   * tokens — 5.4 seconds, which is exactly the length of the last turn alone.
+   * An earlier lesson that happened to end on a frame with no speech in it read
+   * "tutor 0s" for a call the tutor had talked all the way through. The money
+   * was wrong by the same factor as the seconds, and nothing said so.
+   *
+   * Per bucket the two settle correctly on their own: the output buckets drop
+   * as soon as one turn is shorter than the one before and start summing, while
+   * the re-read input buckets never drop and go on taking the latest frame,
+   * which is the whole conversation and the figure that was already right.
+   *
+   * A FALLING `totalTokenCount` STILL CONDEMNS EVERY BUCKET AT ONCE. That was
+   * the original signal and it is kept rather than replaced: it can see a drop
+   * in a field this file does not parse, and a stream that is per-turn overall
+   * is per-turn in each of its parts. The per-bucket test only ever finds more.
    */
-  let perTurn = false;
+  const USAGE_BUCKETS = [
+    'textInput',
+    'cachedTextInput',
+    'audioInput',
+    'cachedAudioInput',
+    'textOutput',
+    'audioOutput',
+  ] as const;
+
+  /** Buckets proven to arrive per-turn rather than as a running total. */
+  const bucketPerTurn = new Set<(typeof USAGE_BUCKETS)[number]>();
   let summed = emptyUsage();
   let latest = emptyUsage();
+  const bucketHigh = emptyUsage();
   let highWater = 0;
 
   const recordUsage = (meta: UsageMetadata) => {
     const frame = readUsage(meta);
     const total = meta.totalTokenCount ?? totalTokens(frame);
-    if (total < highWater) perTurn = true;
+    const allPerTurn = total < highWater;
     highWater = Math.max(highWater, total);
 
     summed = addUsage(summed, frame);
     latest = frame;
-    handlers.onUsage?.(perTurn ? summed : latest);
+
+    const reported = emptyUsage();
+    for (const bucket of USAGE_BUCKETS) {
+      // A running total never goes backwards, so a fall is proof. Zero counts
+      // as a fall: a turn that generated no speech reports none, and on a
+      // cumulative stream that could not happen once any had been generated.
+      if (allPerTurn || frame[bucket] < bucketHigh[bucket]) bucketPerTurn.add(bucket);
+      bucketHigh[bucket] = Math.max(bucketHigh[bucket], frame[bucket]);
+      reported[bucket] = bucketPerTurn.has(bucket) ? summed[bucket] : latest[bucket];
+    }
+    handlers.onUsage?.(reported);
   };
 
   /**
