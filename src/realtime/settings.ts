@@ -79,6 +79,39 @@ export interface SessionSettings {
    * student page spends that and the workshop does not.
    */
   activityHandling?: 'START_OF_ACTIVITY_INTERRUPTS' | 'NO_INTERRUPTION';
+  /**
+   * Whether the learner's microphone reaches the provider while the tutor is
+   * speaking. Unset reads as `open`, which is what every call did before this.
+   *
+   * THE ONE FIELD ON THIS PANEL THAT IS NEVER SENT ANYWHERE. Every other knob
+   * here is a line in a setup frame; this one is spent in the browser, by
+   * MicCapture, and the provider is never told it exists. It is in this table
+   * anyway because this table is what a teacher edits, what a lesson publishes
+   * and what the diagnostic prints — see `accent`, which is here for the same
+   * reason and spends itself on the prompt instead.
+   *
+   * WHAT IT IS FOR IS A STRAY WORD BECOMING THE ANSWER. `activityHandling`
+   * already stops noise made over a question *cancelling* that question, and
+   * that is all it stops: the audio is still sent, still detected, still
+   * transcribed, and still committed as the learner's turn. So a sibling's
+   * voice, a classroom two feet away, or the tutor's own speech coming back off
+   * a laptop speaker arrives as the thing the tutor answers next, in place of
+   * the answer the learner then gives. `NO_INTERRUPTION` removes the veto;
+   * this removes the audio.
+   *
+   * WHAT IT COSTS IS THE EAGER LEARNER, and it is a real loss rather than a
+   * theoretical one. Someone who starts answering over the tutor's last three
+   * words is, with the gate open, heard late and answered on the next turn.
+   * With it closed they are not heard at all and have to say it again. On a
+   * three-minute cap that is judged the cheaper of the two — the same trade
+   * `NO_INTERRUPTION` already made, one step further — but it is a judgement
+   * about the room, so it is a knob and not a constant.
+   *
+   * IT IS NOT THE WHOLE OF THE PROBLEM EITHER. A stray word during the silence
+   * while the learner is thinking is untouched by this: the gate is only ever
+   * shut while there is a tutor voice to be confused with.
+   */
+  micWhileTutorSpeaks?: 'open' | 'closed';
 
   // --- OpenAI only.
   /**
@@ -170,6 +203,7 @@ const HOUSE_KEYS: Array<keyof HouseSettings> = [
   'startSensitivity',
   'endSensitivity',
   'activityHandling',
+  'micWhileTutorSpeaks',
   'vadMode',
   'vadThreshold',
   'vadEagerness',
@@ -477,9 +511,17 @@ export const PATIENCE: Array<{
  * is a judgement about the room, so it is a knob on the panel and not a
  * constant. See `activityHandling`.
  *
+ * AND THE MICROPHONE IS THE SIXTH FIELD, added on 2026-08-28 for the failure
+ * the five above leave standing. `NO_INTERRUPTION` keeps a stray word from
+ * cancelling a question; it does nothing to keep that word from being taken as
+ * the learner's answer to it. `micWhileTutorSpeaks: 'closed'` is the half that
+ * does, and it is defaulted rather than merely offered because the room this
+ * page is used in — a classroom, a kitchen, a laptop speaker — is the room the
+ * failure needs. See `micWhileTutorSpeaks` for what it gives up.
+ *
  * FOR THE STUDENT PAGE ONLY. The workshop pages keep sending nothing, because
  * comparing models includes comparing their defaults, and a bench that
- * silently pins five fields is a bench lying about what it measured.
+ * silently pins six fields is a bench lying about what it measured.
  */
 export const LEARNER_TURN_TAKING: Pick<
   SessionSettings,
@@ -488,12 +530,14 @@ export const LEARNER_TURN_TAKING: Pick<
   | 'silenceDurationMs'
   | 'prefixPaddingMs'
   | 'activityHandling'
+  | 'micWhileTutorSpeaks'
 > = {
   startSensitivity: 'START_SENSITIVITY_LOW',
   endSensitivity: 'END_SENSITIVITY_LOW',
   silenceDurationMs: 1000,
   prefixPaddingMs: 300,
   activityHandling: 'NO_INTERRUPTION',
+  micWhileTutorSpeaks: 'closed',
 };
 
 /**
@@ -812,6 +856,19 @@ export const SETTING_FIELDS: SettingField[] = [
     options: [
       { value: 'START_OF_ACTIVITY_INTERRUPTS', label: 'Speech interrupts the tutor' },
       { value: 'NO_INTERRUPTION', label: 'Let the tutor finish' },
+    ],
+  },
+  {
+    key: 'micWhileTutorSpeaks',
+    label: 'Microphone while the tutor speaks',
+    hint: 'Closed stops a stray word being taken as the answer. Costs talking over the tutor.',
+    kind: 'select',
+    // Both providers, because the gate is the browser's and not the model's —
+    // see `micWhileTutorSpeaks` on SessionSettings for what that means.
+    applies: () => true,
+    options: [
+      { value: 'closed', label: 'Closed until the tutor finishes' },
+      { value: 'open', label: 'Open throughout' },
     ],
   },
   {

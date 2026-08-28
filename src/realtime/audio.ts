@@ -141,6 +141,31 @@ export class MicCapture {
   private stream: MediaStream | null = null;
   private node: AudioWorkletNode | null = null;
   private muted = false;
+  /**
+   * Whether the uplink is shut because the tutor is the one talking.
+   *
+   * NOT `muted`, AND THE DIFFERENCE IS THE WHOLE REASON THERE ARE TWO. A mute
+   * is a statement about the microphone: the track is disabled, the browser's
+   * own indicator goes out, and `listen` below never runs, so the voice gate
+   * reports silence for as long as it lasts. That is right for the end of a
+   * lesson, which is the only thing that mutes.
+   *
+   * This is a statement about the *socket*. The capture keeps running and keeps
+   * being measured — `call.heard` is load-bearing while a call is live, and the
+   * quiet check that closes a finished lesson waits on it — and the only thing
+   * withheld is the frame that would have gone to the provider. What the
+   * learner said over the tutor is therefore still visible to this page and
+   * still invisible to the model, which is exactly the asymmetry wanted: the
+   * stray word cannot become their answer, and the face still knows they spoke.
+   *
+   * WHY NOT DISABLE THE TRACK. Two reasons, and the second is the one that
+   * would have hurt. The mic indicator flickering on and off through every
+   * question reads as a bug; and the browser's echo canceller loses its
+   * reference signal when the track goes, so the first frames after each
+   * question would arrive uncancelled — which is the failure this gate is
+   * being built to prevent, reintroduced at the one moment it matters most.
+   */
+  private gated = false;
   private onVoice: ((active: boolean) => void) | null = null;
   /** Whether the last thing reported was a voice. */
   private voice = false;
@@ -175,6 +200,9 @@ export class MicCapture {
       // downstream detaches it — encodeBase64 copies. If that ever stops being
       // true this has to move ahead of the send rather than merely before it.
       this.listen(pcm);
+      // Above the gate on purpose: a gated chunk is still heard by this page,
+      // and only the provider is spared it. See `gated`.
+      if (this.gated) return;
       onChunk(pcm);
     };
 
@@ -183,6 +211,17 @@ export class MicCapture {
     // graph in every engine, so terminate it at the destination to be sure it
     // runs. It contributes no sound.
     this.node.connect(this.context.destination);
+  }
+
+  /**
+   * Shuts or opens the uplink, leaving the capture itself alone.
+   *
+   * Idempotent, and called that way — the close arrives once per audio chunk
+   * off the socket and the open once per turn, and neither caller tracks which
+   * of those it has already said.
+   */
+  setGated(gated: boolean): void {
+    this.gated = gated;
   }
 
   setMuted(muted: boolean): void {

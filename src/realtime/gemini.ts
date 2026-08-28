@@ -166,6 +166,60 @@ export async function startGeminiSession(
   // is keeping the account of the call — the one fault in here the learner
   // hears and no log the developer can reach ever records.
   const player = new PcmPlayer((gap) => handlers.onAudioGap?.(gap));
+
+  /**
+   * Whether this call withholds the microphone while the tutor is speaking.
+   *
+   * ABSENT READS AS OPEN, which is what every call did before the setting
+   * existed and is what the workshop pages still get — they pin nothing, and a
+   * bench must not be quietly half-duplex. See `micWhileTutorSpeaks`.
+   */
+  const gateMic = config.settings?.micWhileTutorSpeaks === 'closed';
+
+  /**
+   * Shuts the uplink, and the clock it shuts on is the arrival of the audio
+   * rather than the sound of it.
+   *
+   * EARLY BY THE CUSHION, ON PURPOSE. A chunk is enqueued up to a second before
+   * it is heard, so this closes the microphone slightly before the tutor's
+   * voice actually starts. That window is not silence being thrown away: the
+   * model only generates once it has committed the learner's turn, so anything
+   * said in it is a fragment arriving after their answer was closed — which is
+   * the very thing this gate exists to keep out. Closing on the audio clock
+   * instead would let exactly that fragment through, a second at a time.
+   */
+  const tutorSpeaking = () => {
+    if (gateMic) mic.setGated(true);
+  };
+
+  /**
+   * Opens it again, and this is the edge that had to be exact.
+   *
+   * ON THE AUDIO CLOCK, NOT THE SOCKET'S. `turnComplete` arrives while seconds
+   * of that turn are still queued and unheard; opening there would open the
+   * microphone in the middle of the question. This is PcmPlayer's drain
+   * callback — the `onended` of the last scheduled source — so it fires when
+   * the final sample has played, not when the last frame arrived. A learner
+   * answering the instant the tutor stops is heard.
+   *
+   * NO TAIL DELAY, DELIBERATELY. A hundred milliseconds of grace after the last
+   * sample would cover the speaker's decay and the output latency the context
+   * clock does not know about, and it would cost the first syllable of anyone
+   * who answers immediately — which on this page is the confident learner, the
+   * one with least to spare and most to lose by being asked twice. The decay is
+   * already the browser's echo canceller's job, and `echoArmed` below is the
+   * backstop for what gets past it. Being a syllable early is recoverable; the
+   * gate opening late is the failure this whole change was asked for.
+   *
+   * ALSO FIRES ON A BARGE-IN AND ON AN UNDERRUN, and both are right. A cleared
+   * queue drains by definition, and a queue that has run dry mid-question is
+   * silence in the room whatever the socket thinks — either way there is no
+   * tutor voice left to be confused with.
+   */
+  const tutorStopped = () => {
+    mic.setGated(false);
+    handlers.onSpeaking?.(false);
+  };
   // Creating the output context inside the click that started the session is
   // what keeps autoplay policy from suspending it later. Nothing may be awaited
   // before this line, or the resume lands in a later task than the click.
@@ -950,7 +1004,9 @@ export async function startGeminiSession(
       // for seconds after being interrupted.
       if (content.interrupted) {
         player.clear();
-        handlers.onSpeaking?.(false);
+        // Said here as well as on the drain the clear provokes, because the
+        // drain is an event and this is the fact. Both are idempotent.
+        tutorStopped();
         handlers.onInterrupted?.();
         // The turn was cut off rather than completed, so no turnComplete is
         // coming to reset these. Whatever the model says next is a new answer,
@@ -1106,7 +1162,8 @@ export async function startGeminiSession(
           flushPendingText(at);
         }
         handlers.onSpeaking?.(true);
-        player.enqueue(decodeBase64(data), () => handlers.onSpeaking?.(false));
+        tutorSpeaking();
+        player.enqueue(decodeBase64(data), tutorStopped);
       }
 
       // Nothing but a stamp. The turn is not over — seconds of audio may still

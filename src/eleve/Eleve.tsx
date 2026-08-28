@@ -476,6 +476,9 @@ export default function Eleve() {
         ...(session.startSensitivity ? { startSensitivity: session.startSensitivity } : {}),
         ...(session.endSensitivity ? { endSensitivity: session.endSensitivity } : {}),
         ...(session.activityHandling ? { activityHandling: session.activityHandling } : {}),
+        ...(session.micWhileTutorSpeaks
+          ? { micWhileTutorSpeaks: session.micWhileTutorSpeaks }
+          : {}),
         ...(session.affectiveDialog !== undefined
           ? { affectiveDialog: session.affectiveDialog }
           : {}),

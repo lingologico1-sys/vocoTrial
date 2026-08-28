@@ -151,6 +151,32 @@ export async function startOpenAiSession(
 
   const mic = new MicCapture(OPENAI_INPUT_RATE);
   const player = new PcmPlayer((gap) => handlers.onAudioGap?.(gap));
+
+  /**
+   * Whether this call withholds the microphone while the tutor is speaking.
+   *
+   * THE SAME GATE AS GEMINI'S AND NOT A TRANSLATION OF IT, which is the one
+   * thing worth saying here. Every other turn-taking decision in this file is
+   * an OpenAI spelling of a judgement reached separately — `semantic_vad`
+   * against four Gemini thresholds. This is not: the gate is the browser's, it
+   * is spent on MicCapture, and neither provider is told it exists. So the
+   * field, the default and the reasoning are shared verbatim, and the whole of
+   * the per-provider work is knowing where this surface starts and stops
+   * speaking. See `micWhileTutorSpeaks` in settings.ts, and startGeminiSession
+   * for why the two edges use two different clocks.
+   */
+  const gateMic = config.settings?.micWhileTutorSpeaks === 'closed';
+
+  /** Shuts the uplink, on the arrival of the audio rather than the sound. */
+  const tutorSpeaking = () => {
+    if (gateMic) mic.setGated(true);
+  };
+
+  /** Opens it on the drain, which is the last sample played and not the last frame received. */
+  const tutorStopped = () => {
+    mic.setGated(false);
+    handlers.onSpeaking?.(false);
+  };
   // Creating the output context inside the click that started the session is
   // what keeps autoplay policy from suspending it later. Nothing may be awaited
   // before this line, or the resume lands in a later task than the click.
@@ -272,7 +298,9 @@ export async function startOpenAiSession(
     const itemId = speakingItemId;
     const heard = player.heardMs();
     player.clear();
-    handlers.onSpeaking?.(false);
+    // Said here as well as on the drain the clear provokes, because the drain
+    // is an event and this is the fact. Both are idempotent.
+    tutorStopped();
     handlers.onInterrupted?.();
     if (itemId) {
       send({
@@ -526,7 +554,8 @@ export async function startOpenAiSession(
             flushPendingText(at);
           }
           handlers.onSpeaking?.(true);
-          player.enqueue(decodeBase64(data), () => handlers.onSpeaking?.(false));
+          tutorSpeaking();
+          player.enqueue(decodeBase64(data), tutorStopped);
           return;
         }
 
