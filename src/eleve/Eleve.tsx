@@ -1597,6 +1597,7 @@ export default function Eleve() {
               speaking={call.speaking}
               heard={call.heard}
               transcribing={call.transcribing}
+              pondering={call.pondering}
               live={call.live}
               openingDone={call.openingDone}
               busy={call.busy}

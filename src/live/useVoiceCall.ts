@@ -135,6 +135,25 @@ const NOTE_BLAME_MS = 1_500;
 const TRANSCRIPT_BACKSTOP_MS = 30_000;
 
 /**
+ * How long the tutor may owe a turn before the learner is told it is coming.
+ *
+ * THE OTHER END OF THE SAME SILENCE. The loader above covers the learner's own
+ * words arriving; this covers what happens next, which on a bad turn is a great
+ * deal of nothing: on 2026-08-28 an answer's transcript appeared at 37.3s and
+ * the tutor's first sound at 50.2s, and later 24s separated the two. The page
+ * showed a finished sentence and a still face across the whole of it, which is
+ * indistinguishable from a lesson that has broken.
+ *
+ * NOT ZERO, BECAUSE MOST TURNS DO NOT NEED TELLING. The good turn in that same
+ * call had eight tenths of a second between the transcript and the voice — a
+ * badge for that is a flicker once a question, which teaches a learner to
+ * ignore the one place the page has to say something. Nine tenths sits just
+ * above the good turn and far below the bad one, and everything it lets through
+ * uncommented is a wait nobody would have called a wait.
+ */
+const PONDER_SHOW_MS = 900;
+
+/**
  * A relay round trip worth a line of its own on the timeline, in ms.
  *
  * Every sample goes into the summary — see `relay` — and putting every one on
@@ -572,6 +591,22 @@ export interface VoiceCall {
    */
   wordless: boolean;
   /**
+   * Whether the tutor owes a turn and has been owing it long enough to say so.
+   *
+   * TRUE FROM THE CLOSE OF THE LEARNER'S TURN TO THE TUTOR'S FIRST SOUND, less
+   * the grace in PONDER_SHOW_MS, and false everywhere else — while the tutor is
+   * speaking, while the learner is, and before either has. It is the one span
+   * in a call where nothing at all is happening on screen and something very
+   * much is happening upstream, and the face carries a mark for it: see
+   * TutorStage.
+   *
+   * IT IS NOT A HEALTH CLAIM. A wait this covers is usually just the model
+   * thinking, and the page has other machinery for the kind that has gone wrong
+   * — the stall nudge, the idle clock. This says only that the turn has not
+   * arrived yet, which is what the learner cannot otherwise see.
+   */
+  pondering: boolean;
+  /**
    * Whether the tutor has finished its opening turn and handed over the floor.
    *
    * FALSE FOR THE WHOLE OF A CALL'S FIRST STRETCH — the dialling, and then the
@@ -822,6 +857,34 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
     },
     [stopWaiting],
   );
+
+  /**
+   * See `pondering` on VoiceCall. The timer beside it is the grace before it
+   * shows; the two are always cleared together, because a wait that has ended
+   * must not be announced a moment later by a timer nobody stopped.
+   */
+  const [pondering, setPondering] = useState(false);
+  const ponder = useRef<number | null>(null);
+  const stopPondering = useCallback(() => {
+    if (ponder.current !== null) {
+      clearTimeout(ponder.current);
+      ponder.current = null;
+    }
+    setPondering(false);
+  }, []);
+  /**
+   * The learner's turn has closed and the tutor's has not begun.
+   *
+   * Armed rather than raised: PONDER_SHOW_MS of it belongs to an ordinary turn
+   * and is never drawn.
+   */
+  const startPondering = useCallback(() => {
+    stopPondering();
+    ponder.current = window.setTimeout(() => {
+      ponder.current = null;
+      setPondering(true);
+    }, PONDER_SHOW_MS);
+  }, [stopPondering]);
   /**
    * See `openingDone` on VoiceCall for what this means. The ref beside it is
    * the guard that keeps it honest: it flips on an *end* of tutor audio, and
@@ -1280,6 +1343,16 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
           // that was lost on the way up, and it settles as such: the pill shows
           // nothing, which is exactly what came back.
           settle(spoke.current);
+          /*
+           * And the wait that starts where that one ends.
+           *
+           * THE LEARNER'S TURN CLOSING IS THE TUTOR'S TURN BEING OWED. On this
+           * provider the close is the model beginning to answer — see
+           * `answerBegins` — so this is armed at the earliest moment the debt
+           * exists, and the sound that discharges it can be a quarter of a
+           * minute behind. Nothing else on the page moves in between.
+           */
+          startPondering();
           // The turn an early report was waiting on. Taken here rather than on a
           // timer because this is the moment it stops being a claim about the
           // future — and the closing note is two seconds behind the count, so a
@@ -1313,7 +1386,7 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
       // what -Infinity means to the queue: due on the next frame.
       queue.current.push({ text: delta.text, done: delta.done, at: delta.at ?? -Infinity });
     },
-    [append, settle, takeHeld],
+    [append, settle, startPondering, takeHeld],
   );
 
   /**
@@ -1631,6 +1704,7 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
     spoke.current = false;
     setTranscribing(false);
     setWordless(false);
+    stopPondering();
     queue.current.discard();
     if (!resume) {
       setOpeningDone(false);
@@ -1681,6 +1755,8 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
           stopWaiting();
           awaiting.current = false;
           setTranscribing(false);
+          // Nothing is owed by a call that is over.
+          stopPondering();
           /*
            * Everything below belongs to the conversation rather than to the
            * socket, so a redial keeps all of it.
@@ -1708,6 +1784,11 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
         lastActivity.current = Date.now();
         // The turn arrived after all, which is the ordinary end of a wait.
         if (next) clearStall();
+        // Sound, and not words: the words are held back to meet the audio — see
+        // the reveal queue — so a mark that cleared on them would go out while
+        // the room was still silent. This is the moment the learner can hear
+        // that the tutor is back. See `pondering`.
+        if (next) stopPondering();
         setSpeaking(next);
         if (next) tutorHasSpoken.current = true;
         // The end of the tutor's first stretch of audio, which is the moment
@@ -1775,6 +1856,17 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
         // A silence the learner has filled themselves. Nudging into it would
         // put a note on the wire in the middle of their sentence.
         if (active) clearStall();
+        /*
+         * And a learner who is talking is not a learner waiting to be answered.
+         *
+         * They have taken the floor back — often because the wait went on long
+         * enough that they said something into it — and the pill's own loader
+         * is the mark for that half of the call. Two loaders on one screen
+         * saying different things about the same silence is worse than either.
+         * The debt is not forgotten: the tutor's turn, when it comes, is what
+         * closes theirs, and that arms this again.
+         */
+        if (active) stopPondering();
         // A learner talking is proof the floor is theirs, whatever the audio
         // channel did or failed to report. Belt and braces for the one failure
         // that would matter — a greeting whose end never arrives, leaving the
@@ -2204,7 +2296,7 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
        */
       resuming.current = false;
     }
-  }, [acceptProgress, append, clearStall, cue, onTranscript, record, reveal, say, settle, stopWaiting]);
+  }, [acceptProgress, append, clearStall, cue, onTranscript, record, reveal, say, settle, stopPondering, stopWaiting]);
 
   /** A conversation from the top: a cleared transcript and a fresh count. */
   const connect = useCallback(() => dial(false), [dial]);
@@ -2250,6 +2342,7 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
     unheard,
     transcribing,
     wordless,
+    pondering,
     openingDone,
     muted,
     tiltCue,

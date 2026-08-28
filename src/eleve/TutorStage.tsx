@@ -34,6 +34,13 @@ interface TutorStageProps {
   /** Whether the learner's last words are still being transcribed. The pill
    *  spends that span on a loader — see LearnerPill. */
   transcribing: boolean;
+  /**
+   * Whether the tutor's turn is still coming. The face carries the mark for it,
+   * because the face is what the learner is looking at when nothing is
+   * happening — see `pondering` in useVoiceCall for the span, and the overlay
+   * below for why it goes on the portrait rather than in the balloon.
+   */
+  pondering: boolean;
   live: boolean;
   /** Whether the tutor's opening turn is over. The pill's glyph turns on it. */
   openingDone: boolean;
@@ -67,6 +74,7 @@ export default function TutorStage({
   speaking,
   heard,
   transcribing,
+  pondering,
   live,
   openingDone,
   busy,
@@ -178,6 +186,50 @@ export default function TutorStage({
             bleed
           />
         </div>
+
+        {/*
+          THE WAIT FOR A TURN, DRAWN ON THE ONE THING THE LEARNER IS WATCHING.
+
+          Between their answer being transcribed and the tutor's first sound
+          there is a stretch — thirteen seconds on 2026-08-28, and twenty-four
+          later in the same lesson — in which the page holds a finished sentence
+          and a still portrait, and reads exactly like a lesson that has
+          stopped. The pill cannot say it: it is holding their own words, which
+          are the one thing there that is not in doubt. So the mark goes here,
+          where the answer is expected to come from.
+
+          INSIDE THE RING AND OVER THE CHIN, translucent so the face stays
+          legible under it. Anywhere outside would move the layout every time
+          the tutor took a moment — this column is laid out to fit exactly once
+          — and a badge that reflows a page is a badge that makes a slow turn
+          look like a broken one. `pointer-events-none` because it is not a
+          control and must not steal the long-press that looks a word up.
+
+          Cream on the frosted rim rather than the accent: this is not an alarm
+          and not the microphone. It is the same quiet the pill's own loader
+          keeps, said about the other end of the conversation.
+        */}
+        {pondering && (
+          <div
+            role="status"
+            aria-label={FR.tutorPondering}
+            className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-center pb-4"
+          >
+            <span className="flex items-center gap-1.5 rounded-full bg-lingo-cream/80 px-3 py-1.5 shadow-lingo-pop-sm backdrop-blur-[2px]">
+              {[0, 1, 2].map((dot) => (
+                <span
+                  key={dot}
+                  aria-hidden="true"
+                  className="block h-1.5 w-1.5 animate-lingo-ponder rounded-full bg-lingo-accent"
+                  /* An eighth of the cycle apart, so the last dot peaks a
+                     third of a second behind the first: enough that three dots
+                     read as a wave travelling rather than as one blink. */
+                  style={{ animationDelay: `${dot * 0.16}s` }}
+                />
+              ))}
+            </span>
+          </div>
+        )}
       </div>
 
       <SpeechBubble

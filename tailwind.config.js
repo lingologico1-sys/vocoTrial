@@ -93,7 +93,8 @@ export default {
         'lingo-pop-sm': '0 2px 8px -1px rgba(0,0,0,0.12), 0 1px 3px -1px rgba(0,0,0,0.08)',
       },
       /*
-       * Two small motions the student page needs and Tailwind's own do not give.
+       * Three small motions the student page needs and Tailwind's own do not
+       * give.
        *
        * `halo` is a ping that stays inside its parent. Tailwind's `animate-ping`
        * scales to 2x, which on a 64px microphone throws a red wash 32px past
@@ -104,6 +105,15 @@ export default {
        * `nudge` is for the arrow pointing at that button before the first call.
        * Three pixels, once every couple of seconds: enough to be caught by the
        * eye that is not looking at it, small enough not to nag the eye that is.
+       *
+       * `ponder` is the mark on the face while the tutor's turn is still coming.
+       * Drawn rather than reached for the loader gif the pill uses, because this
+       * one sits over the artwork and that file has no transparency: a white
+       * band across the chin is a hole in the portrait, not a mark on it. Two
+       * pixels of rise and a floor of a third opacity, so the dots read as
+       * breathing rather than blinking — this is the calmest thing on the page
+       * and it appears at the moment a learner is most likely to think something
+       * has broken.
        */
       keyframes: {
         'lingo-halo': {
@@ -114,10 +124,15 @@ export default {
           '0%, 70%, 100%': { transform: 'translateX(0)' },
           '85%': { transform: 'translateX(-3px)' },
         },
+        'lingo-ponder': {
+          '0%, 80%, 100%': { opacity: '0.35', transform: 'translateY(0)' },
+          '40%': { opacity: '1', transform: 'translateY(-2px)' },
+        },
       },
       animation: {
         'lingo-halo': 'lingo-halo 1.5s cubic-bezier(0, 0, 0.2, 1) infinite',
         'lingo-nudge': 'lingo-nudge 2.4s ease-in-out infinite',
+        'lingo-ponder': 'lingo-ponder 1.2s ease-in-out infinite',
       },
     },
   },

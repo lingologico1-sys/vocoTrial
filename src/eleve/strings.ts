@@ -72,6 +72,13 @@ export const FR = {
   pillOpening: 'Le tuteur commence…',
   pillListening: 'Je t’écoute…',
   pillWaiting: 'À toi de parler.',
+  /*
+   * Never read aloud and never drawn: the mark on the face is three dots, and
+   * this is what a screen reader is given instead of them. It says the tutor is
+   * thinking rather than that the page is loading, because those are different
+   * promises and only the first one is true.
+   */
+  tutorPondering: 'Le tuteur réfléchit…',
   bubbleIdle: 'Ton tuteur te parlera ici.',
   /*
    * Said in the first person plural on purpose. The call was not dropped and
