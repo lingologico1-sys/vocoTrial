@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { LANGUAGES, defaultLanguageCode, findLanguage } from '../realtime/languages';
-import { VOICES } from '../realtime/settings';
+import { DEFAULT_OPENAI_VOICE, OPENAI_VOICES, VOICES } from '../realtime/settings';
 import type { FaceKit as Kit } from './kit';
 import {
   MAX_BIO_CHARS,
@@ -77,7 +77,7 @@ export default function PersonaPanel({
     setError(null);
     try {
       const { text, usd, cached } = await draftPersona(kit.base, wording);
-      const written = parseDraft(text, persona?.voice);
+      const written = parseDraft(text, persona?.voice, persona?.openAiVoice);
       setLast({ usd, cached });
       // Spent whether or not the words are kept, exactly as a generated patch
       // is counted whether or not it is chosen: a total that only counted the
@@ -140,6 +140,36 @@ export default function PersonaPanel({
             Adopted by studio when you switch to this face, and overridable there. Worth setting
             if the background states an age or a gender: the voice is the half of the character
             this page cannot show you.
+          </span>
+        </label>
+
+        {/*
+          A second voice rather than a translation of the first. The two
+          catalogues share no name, so there is nothing to derive from — see
+          `openAiVoice` on Persona for why a timbre map was rejected. A face
+          left on "no opinion" here still sounds like somebody; it just sounds
+          like whoever OpenAI's default is rather than whoever this page
+          decided, which is the one thing putting the voice on the face is
+          meant to prevent.
+        */}
+        <label className="space-y-1 text-xs text-slate-500">
+          <span>Voice on GPT Realtime</span>
+          <select
+            value={persona?.openAiVoice ?? ''}
+            onChange={(event) => change({ openAiVoice: event.target.value || undefined })}
+            className="w-full rounded-lg border border-slate-800 bg-slate-900 px-2 py-1.5 text-sm text-slate-200"
+          >
+            <option value="">No opinion &mdash; {DEFAULT_OPENAI_VOICE}</option>
+            {OPENAI_VOICES.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+          <span className="block text-slate-600">
+            The same character on the other provider. The two voice sets share no names and
+            nothing maps between them, so this is asked rather than guessed. A lesson published
+            on a GPT model uses this one; left unset it gets {DEFAULT_OPENAI_VOICE}.
           </span>
         </label>
       </div>

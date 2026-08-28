@@ -1,17 +1,18 @@
 /**
- * Turns the neutral settings in src/realtime/settings.ts into Gemini Live's own
- * `setup` payload shape.
+ * Turns the neutral settings in src/realtime/settings.ts into each provider's
+ * own session payload.
  *
- * This lives server-side, beside the relay that sends it, for the same reason
+ * This lives server-side, beside the relays that send it, for the same reason
  * _resolve.ts does: the browser sends what it wants, and the Worker decides
- * what that means to Google. Keeping the translation here also means the API's
+ * what that means upstream. Keeping the translation here also means each API's
  * spelling — nesting, casing, which knob exists at all — is confined to one
  * file instead of leaking into the UI.
  *
- * It used to translate for two providers and was called _providerConfig.ts.
- * OpenAI Realtime is gone, so the only shape left is this one; if a second
- * provider ever returns, this is the file that grows a sibling function rather
- * than the panel growing a branch.
+ * IT PREDICTED ITS OWN FUTURE AND THE PREDICTION HELD. This was
+ * _providerConfig.ts, translating for two providers; the note left behind when
+ * OpenAI Realtime went said that if a second provider ever returned, this is
+ * the file that would grow a sibling function rather than the panel growing a
+ * branch. That is exactly what `openAiSession` below is.
  *
  * Every branch is conditional. An absent setting produces an absent field, not
  * a field set to a value we believe is the default: see the note on
@@ -20,12 +21,14 @@
 
 import {
   acceptsLanguageCode,
+  reasoningEffortFor,
   thinkingLevelFor,
   type SessionSettings,
 } from '../../../src/realtime/settings';
 import type { LanguageChoice } from '../../../src/realtime/languages';
-import type { ModelChoice } from '../../../src/realtime/models';
+import type { GoogleModel, OpenAiModel } from '../../../src/realtime/models';
 import { PROGRESS_TOOL } from '../../../src/realtime/tutorPrompt';
+import { MAX_KEYWORDS } from '../../../src/realtime/vocoSessions';
 
 /**
  * The one tool a tutor has, and the only structured channel into a live call.
@@ -68,22 +71,66 @@ import { PROGRESS_TOOL } from '../../../src/realtime/tutorPrompt';
  * the one that would lie about it, and the student page runs on the former.
  * See models.ts, where the surface travels with the model.
  */
-function progressDeclaration(model: ModelChoice) {
+const PROGRESS_DESCRIPTION =
+  "Record that one question from the system instructions is finished: the learner has just answered it, in at least a full sentence. Call it at the top of the turn you are taking in response to that answer — not after you have replied, and not in a later turn, which for the last question on the list never comes. Pass that question's number in the list, counting from 1, once per question as you go. Bookkeeping only: it is never spoken about and produces no reply to read out.";
+
+const PROGRESS_ARGUMENT =
+  'Which question in the list has been answered, counting from 1.';
+
+function progressDeclaration(model: GoogleModel) {
   return {
     name: PROGRESS_TOOL,
-    description:
-      "Record that one question from the system instructions is finished: the learner has just answered it, in at least a full sentence. Call it at the top of the turn you are taking in response to that answer — not after you have replied, and not in a later turn, which for the last question on the list never comes. Pass that question's number in the list, counting from 1, once per question as you go. Bookkeeping only: it is never spoken about and produces no reply to read out.",
+    description: PROGRESS_DESCRIPTION,
     parameters: {
       type: 'OBJECT',
       properties: {
         number: {
           type: 'INTEGER',
-          description: 'Which question in the list has been answered, counting from 1.',
+          description: PROGRESS_ARGUMENT,
         },
       },
       required: ['number'],
     },
     ...(model.surface === 'aistudio' ? { behavior: 'NON_BLOCKING' } : {}),
+  };
+}
+
+/**
+ * The same tool for OpenAI, which is the same tool and a different spelling.
+ *
+ * THE DESCRIPTION IS SHARED VERBATIM AND THAT IS DELIBERATE. Everything the
+ * long note above argues about where the standard lives and whose behaviour it
+ * describes is a fact about how a model reads a tool at the moment it decides
+ * to call one. None of it is Google's.
+ *
+ * WHAT DOES NOT CARRY OVER IS `behavior: 'NON_BLOCKING'`, because there is
+ * nothing here for it to unblock. On this API a function call is an item in a
+ * response the model has already finished; returning its output never restarts
+ * generation on its own. The doubled turn that flag exists to prevent cannot
+ * happen, so the flag has no counterpart rather than a renamed one. See the
+ * tool handling in src/realtime/openai.ts, which decides whether to ask for a
+ * further turn instead of trying to suppress one.
+ *
+ * Lowercase JSON Schema types, against Gemini's uppercase enum. The one
+ * genuinely cosmetic difference between the two, and the one most likely to be
+ * copied wrong.
+ */
+function openAiProgressTool() {
+  return {
+    type: 'function',
+    name: PROGRESS_TOOL,
+    description: PROGRESS_DESCRIPTION,
+    parameters: {
+      type: 'object',
+      properties: {
+        number: {
+          type: 'integer',
+          description: PROGRESS_ARGUMENT,
+        },
+      },
+      required: ['number'],
+      additionalProperties: false,
+    },
   };
 }
 
@@ -115,7 +162,7 @@ function present(object: Record<string, unknown>): boolean {
  * Both are facts about the model, so both are read from it.
  */
 export function geminiSetup(
-  model: ModelChoice,
+  model: GoogleModel,
   modelPath: string,
   language: LanguageChoice,
   instructions: string,
@@ -178,6 +225,154 @@ export function geminiSetup(
       proactivity: settings.proactiveAudio === undefined
         ? undefined
         : { proactiveAudio: settings.proactiveAudio },
+    }),
+  };
+}
+
+/**
+ * The rate OpenAI's realtime API accepts raw PCM at, and the only one.
+ *
+ * Not negotiable and not a preference: `audio/pcm` is documented at 24000 Hz
+ * alone, with G.711 at 8000 as the only alternative and no 16000 anywhere. So
+ * the microphone runs at a different rate on this provider than on Gemini,
+ * which is why MicCapture takes a rate rather than reading a module constant.
+ * See INPUT_SAMPLE_RATE in src/realtime/audio.ts.
+ */
+export const OPENAI_INPUT_RATE = 24_000;
+
+
+/**
+ * Builds the `session.update` payload for OpenAI's realtime API.
+ *
+ * SENT AFTER THE SOCKET OPENS RATHER THAN WITH IT, which is the one structural
+ * difference from Gemini's `setup`. Google takes its configuration as the first
+ * frame and refuses everything until it has one; OpenAI opens a session on the
+ * model named in the query string and then accepts updates to it. The relay
+ * sends this once, immediately, and the effect is the same — see
+ * functions/api/live/openai.ts, which also says why the browser may not send
+ * one itself.
+ *
+ * `keywords` carries the words the transcriber should expect. They are separate
+ * from `instructions` on purpose: the composed prompt is thousands of
+ * characters of style and rules, and keywords drawn from it would be mostly
+ * noise. See `keywords` on SessionConfig.
+ */
+export function openAiSession(
+  model: OpenAiModel,
+  language: LanguageChoice,
+  instructions: string,
+  settings: SessionSettings,
+  keywords: string[] = [],
+): Record<string, unknown> {
+  /*
+   * The hint is on unless it was explicitly turned off. `language` stops the
+   * transcriber hedging between languages, which is the failure that costs a
+   * learner the most: a hesitant French sentence decoded as English comes back
+   * as plausible nonsense rather than as a mistake they can see. `prompt` is a
+   * style hint conditioned on as though it were the transcript leading up to
+   * the audio — see `sample` in languages.ts, which was kept through the last
+   * removal for exactly this field.
+   *
+   * PLAIN ISO-639-1, AND THAT IS THE WHOLE OF THE SPELLING PROBLEM HERE. The
+   * Gemini side needs BCP-47 with a region and carries a `liveCode` filled in
+   * only where Google publishes one, because a guessed region fails at connect.
+   * This takes the code every LanguageChoice already has.
+   */
+  const hinted = settings.transcriptionHint !== false;
+
+  const transcription = compact({
+    /*
+     * whisper-1 unless asked otherwise, and it is a pin rather than a default
+     * left upstream — the exception this file otherwise does not make.
+     *
+     * Input transcription has to be configured at all or the API returns audio
+     * with no record of what the learner said, and the transcript pane, the
+     * vocabulary list and the end-of-lesson report all read that record. Since
+     * something must be named, the batch model is named: it transcribes the
+     * whole utterance, so the end of a sentence can disambiguate its start,
+     * which is precisely where a learner is hardest to read. The streaming
+     * models show words sooner and commit to each guess before hearing what
+     * follows. TranscriptDelta carries an `id` for exactly this reason — a
+     * transcript arriving after the tutor has already answered still lands in
+     * the turn it belongs to.
+     */
+    model: settings.transcriptionModel ?? 'whisper-1',
+    language: hinted ? language.code : undefined,
+    prompt: hinted ? language.sample : undefined,
+    keywords: keywords.length ? keywords.slice(0, MAX_KEYWORDS) : undefined,
+  });
+
+  /*
+   * One detector or the other, never fields from both.
+   *
+   * Semantic VAD takes no threshold and no clocks — it decides on whether the
+   * turn sounds finished — so sending them alongside it would be describing a
+   * mechanism that is not running. The panel already hides them (see `requires`
+   * in settings.ts); this is the half that matters, because a published lesson
+   * can carry values pinned before the mode was switched.
+   */
+  const turnDetection =
+    settings.vadMode === 'semantic_vad'
+      ? compact({ type: 'semantic_vad', eagerness: settings.vadEagerness })
+      : compact({
+          type: 'server_vad',
+          threshold: settings.vadThreshold,
+          prefix_padding_ms: settings.prefixPaddingMs,
+          silence_duration_ms: settings.silenceDurationMs,
+        });
+
+  /*
+   * A bare `{ type: 'server_vad' }` carries no information the default does not
+   * already, so it is only worth sending once something else is set with it.
+   * `standard` patience sends nothing at all, and this is what keeps that true.
+   */
+  const sendTurnDetection =
+    settings.vadMode !== undefined ||
+    settings.vadEagerness !== undefined ||
+    settings.vadThreshold !== undefined ||
+    settings.prefixPaddingMs !== undefined ||
+    settings.silenceDurationMs !== undefined;
+
+  const input = compact({
+    format: { type: 'audio/pcm', rate: OPENAI_INPUT_RATE },
+    transcription: present(transcription) ? transcription : undefined,
+    noise_reduction: settings.noiseReduction ? { type: settings.noiseReduction } : undefined,
+    turn_detection: sendTurnDetection ? turnDetection : undefined,
+  });
+
+  const output = compact({
+    format: { type: 'audio/pcm' },
+    voice: settings.voice,
+    /*
+     * The lesson's pace, as a rate rather than as a request. PACE in
+     * tutorPrompt.ts composes prose asking the tutor to slow down, and its own
+     * note states the limitation plainly: an instruction is followed rather
+     * than obeyed, and you cannot read a payload back to check it took. This
+     * can be read back. Both go out — the prose shortens sentences and
+     * simplifies words, which a playback rate cannot — and the publish route is
+     * what turns one teacher control into the two of them.
+     */
+    speed: settings.speed,
+  });
+
+  const effort = reasoningEffortFor(model);
+
+  return {
+    type: 'realtime',
+    model: model.id,
+    instructions,
+    // Audio only, matching Gemini's responseModalities. The API refuses both at
+    // once, and a text turn is a turn the learner cannot hear.
+    output_modalities: ['audio'],
+    audio: compact({
+      input: present(input) ? input : undefined,
+      output: present(output) ? output : undefined,
+    }),
+    tools: [openAiProgressTool()],
+    tool_choice: 'auto',
+    ...compact({
+      reasoning: effort ? { effort } : undefined,
+      max_output_tokens: settings.maxOutputTokens,
     }),
   };
 }

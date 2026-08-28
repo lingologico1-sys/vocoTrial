@@ -1,12 +1,14 @@
 import {
+  boundsFor,
   optionsFor,
   type SessionSettings,
   type SettingField,
 } from './realtime/settings';
+import { type ModelChoice } from './realtime/models';
 import { SELECT_CLASS } from './controls';
 
 /**
- * The Gemini knobs, rendered from the schema rather than written out by hand.
+ * The provider's knobs, rendered from the schema rather than written by hand.
  *
  * A field added to SETTING_FIELDS appears here, is validated in the Worker and
  * reaches Google without three separate edits. Which fields appear is the
@@ -26,15 +28,22 @@ const UNSET = '';
 
 function Field({
   field,
+  model,
   value,
   disabled,
   onChange,
 }: {
   field: SettingField;
+  model: ModelChoice;
   value: SessionSettings[keyof SessionSettings];
   disabled: boolean;
   onChange: (next: SessionSettings[keyof SessionSettings]) => void;
 }) {
+  // Both of these are resolved against the model rather than read off the
+  // field: the voice vocabularies differ by provider and so does the output
+  // token ceiling. See optionsFor and boundsFor.
+  const bounds = field.kind === 'number' ? boundsFor(field, model) : null;
+
   const control =
     field.kind === 'number' ? (
       <input
@@ -44,8 +53,8 @@ function Field({
         // parking the handle at the midpoint to stand for one would be a lie.
         value={value === undefined ? '' : String(value)}
         placeholder="default"
-        min={field.min}
-        max={field.max}
+        min={bounds?.min}
+        max={bounds?.max}
         step={field.step}
         disabled={disabled}
         onChange={(event) => {
@@ -65,14 +74,17 @@ function Field({
         }}
         className={SELECT_CLASS}
       >
-        <option value={UNSET}>Google default</option>
+        {/* Not "Google default" any more: whose default it is depends on the
+            model, and naming the wrong provider is exactly the sort of small
+            lie that sends somebody looking in the wrong documentation. */}
+        <option value={UNSET}>Model default</option>
         {field.kind === 'toggle' ? (
           <>
             <option value="true">On</option>
             <option value="false">Off</option>
           </>
         ) : (
-          optionsFor(field).map((option) => (
+          optionsFor(field, model).map((option) => (
             <option key={option.value} value={option.value}>
               {option.label}
             </option>
@@ -99,11 +111,13 @@ function Field({
 
 export default function SettingsFields({
   fields,
+  model,
   settings,
   onSettings,
   disabled,
 }: {
   fields: SettingField[];
+  model: ModelChoice;
   settings: SessionSettings;
   onSettings: (next: SessionSettings) => void;
   disabled: boolean;
@@ -123,6 +137,7 @@ export default function SettingsFields({
         <Field
           key={field.key}
           field={field}
+          model={model}
           value={settings[field.key]}
           disabled={disabled}
           onChange={(next) => set(field.key, next)}

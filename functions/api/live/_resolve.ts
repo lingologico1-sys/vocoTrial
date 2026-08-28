@@ -74,3 +74,27 @@ export function resolveInstructions(body: unknown, language: LanguageChoice): Re
 export function resolveSettings(body: unknown, model: ModelChoice): SessionSettings {
   return sanitizeSettings((body as { settings?: unknown } | null)?.settings, model);
 }
+
+/**
+ * Reduces the caller's transcription keywords to a list worth sending.
+ *
+ * Never fails, for the reason `resolveSettings` never fails: a bad keyword list
+ * is not worth refusing a lesson over. Non-strings are dropped, everything is
+ * trimmed, blanks and duplicates go, and the result is capped — the cap being
+ * the point, since this arrives over a socket from a page that could send a
+ * megabyte of them.
+ *
+ * The four-character floor and the hundred-word ceiling are argued where they
+ * are applied — see `lessonKeywords` in _setup.ts. This is the same shape
+ * enforced a second time on the far side of the network, because that function
+ * runs in the browser's page and this one does not.
+ */
+export function resolveKeywords(body: unknown): string[] {
+  const raw = (body as { keywords?: unknown } | null)?.keywords;
+  if (!Array.isArray(raw)) return [];
+  const words = raw
+    .filter((word): word is string => typeof word === 'string')
+    .map((word) => word.trim())
+    .filter((word) => word.length >= 4 && word.length <= 64);
+  return [...new Set(words)].slice(0, 100);
+}

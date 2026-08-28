@@ -297,6 +297,8 @@ export interface PublishedSetup extends PerformanceProfile {
    * whole reason they are stored structurally as well as composed.
    */
   brief?: string;
+  /** The lesson's own word list, for the transcriber. See VocoSession. */
+  vocabulary?: string;
   /** Asked in this order. Also inside `instructions`. */
   questions?: string[];
   /**

@@ -1848,12 +1848,15 @@ export default function Studio() {
             <p className="mt-4 border-t border-slate-800 pt-3 text-[11px] uppercase tracking-wide text-slate-500">
               How the call is conducted
             </p>
-            <SettingsFields
-              fields={model ? houseFieldsFor(model) : []}
-              settings={settings}
-              onSettings={setSettings}
-              disabled={live || busy}
-            />
+            {model && (
+              <SettingsFields
+                fields={houseFieldsFor(model, settings)}
+                model={model}
+                settings={settings}
+                onSettings={setSettings}
+                disabled={live || busy}
+              />
+            )}
             <p className="mt-2 text-[11px] leading-relaxed text-slate-500">
               Live on this page&rsquo;s own calls, and published with the tuning below. The voice
               is not among them — it belongs to the face a teacher picks, not to the house.

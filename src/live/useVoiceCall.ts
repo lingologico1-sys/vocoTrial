@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { startGeminiSession } from '../realtime/gemini';
+import { startSession } from '../realtime/start';
 import { emptyUsage, type UsageTotals } from '../realtime/cost';
 import type { SessionSettings } from '../realtime/settings';
 import {
@@ -151,7 +151,7 @@ const RELAY_SPIKE_MS = 500;
  * one that matters. The reader has the timeline around it, which is the whole
  * reason this goes there rather than only into the summary.
  */
-const GOOGLE_QUIET_MS = 3_000;
+const UPSTREAM_QUIET_MS = 3_000;
 
 /**
  * How far a turn's words may arrive ahead of its sound before the line says so.
@@ -382,7 +382,7 @@ export interface RelayHealth {
    * quiet *inside* a turn that means something, and only the timeline knows
    * which this was.
    */
-  googleMaxGapMs: number | null;
+  upstreamMaxGapMs: number | null;
   /**
    * How many of each pong came back, out of one ping each.
    *
@@ -405,7 +405,7 @@ const noRelay = (): RelayHealth => ({
   worstMs: 0,
   lastMs: 0,
   upgradeMs: null,
-  googleMaxGapMs: null,
+  upstreamMaxGapMs: null,
   directPongs: 0,
   queuedPongs: 0,
 });
@@ -471,6 +471,14 @@ export interface VoiceCallOptions {
   instructions: string;
   /** Voice and turn-taking. Absent fields are not sent — see settings.ts. */
   settings?: SessionSettings;
+  /**
+   * Words the transcriber should expect. OpenAI only; ignored elsewhere.
+   *
+   * Built by the page that has the lesson, because this hook does not — it is
+   * given a composed prompt and a question count, not the questions. See
+   * `keywords` on SessionConfig for why it is not derived from the prompt.
+   */
+  keywords?: string[];
   /**
    * How many questions this lesson has, if it is a lesson at all.
    *
@@ -1274,7 +1282,7 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
     let frame = 0;
 
     const step = () => {
-      // The session reports `live` from inside startGeminiSession and only hands
+      // The session reports `live` from inside the provider client and only hands
       // back its tap when that call returns, so for a moment there is a live
       // call and no clock. Wait it out rather than falling back to the wall
       // clock, which would dump the greeting on screen before it was spoken.
@@ -1794,12 +1802,12 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
         rttMs,
         direct,
         upgradeMs,
-        googleMaxGapMs,
+        upstreamMaxGapMs,
       }: {
         rttMs: number;
         direct: boolean;
         upgradeMs?: number;
-        googleMaxGapMs?: number;
+        upstreamMaxGapMs?: number;
       }) => {
         let first = false;
         setRelay((current) => {
@@ -1817,10 +1825,10 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
             worstMs: first ? rttMs : counted ? Math.max(current.worstMs, rttMs) : current.worstMs,
             lastMs: counted ? rttMs : current.lastMs,
             upgradeMs: upgradeMs ?? current.upgradeMs,
-            googleMaxGapMs:
-              googleMaxGapMs === undefined
-                ? current.googleMaxGapMs
-                : Math.max(current.googleMaxGapMs ?? 0, googleMaxGapMs),
+            upstreamMaxGapMs:
+              upstreamMaxGapMs === undefined
+                ? current.upstreamMaxGapMs
+                : Math.max(current.upstreamMaxGapMs ?? 0, upstreamMaxGapMs),
             directPongs: current.directPongs + (direct ? 1 : 0),
             queuedPongs: current.queuedPongs + (direct ? 0 : 1),
           };
@@ -1835,9 +1843,9 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
          * different leg than the round trip. Landing on the timeline rather than
          * only in the summary is the whole point: a gap is meaningless until you
          * can see whether a turn was in flight across it, and that is what the
-         * lines around it say. See GOOGLE_QUIET_MS.
+         * lines around it say. See UPSTREAM_QUIET_MS.
          */
-        if (googleMaxGapMs !== undefined && googleMaxGapMs >= GOOGLE_QUIET_MS) {
+        if (upstreamMaxGapMs !== undefined && upstreamMaxGapMs >= UPSTREAM_QUIET_MS) {
           record(
             'relay',
             /*
@@ -1849,7 +1857,7 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
              * old wording made look impossible.
              */
             `the relay's own socket to Google went quiet for ` +
-              `${(googleMaxGapMs / 1000).toFixed(1)}s in one stretch — nothing arrived from ` +
+              `${(upstreamMaxGapMs / 1000).toFixed(1)}s in one stretch — nothing arrived from ` +
               `Google in that time. Between turns that is the learner talking; inside one it ` +
               `is the leg no other number here watches`,
           );
@@ -1941,10 +1949,11 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
       learnerTurns.current = 0;
       micAnswers.current = 0;
       setUnheard(false);
-      const { modelKey, language: code, instructions, settings } = latest.current;
-      const started = await startGeminiSession(handlers, modelKey, code, {
+      const { modelKey, language: code, instructions, settings, keywords } = latest.current;
+      const started = await startSession(handlers, modelKey, code, {
         instructions,
         settings: settings ?? {},
+        ...(keywords?.length ? { keywords } : {}),
       });
       session.current = started;
       setTap(started.tap ?? null);

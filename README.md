@@ -1,18 +1,22 @@
 # vocoTrial
 
 A live voice agent — you talk, the model talks back — running on Cloudflare
-Pages, on **Gemini Live** over a relayed WebSocket.
+Pages, on **Gemini Live** or **OpenAI realtime**, over a relayed WebSocket
+either way.
 
-> **OpenAI Realtime was removed.** It rode WebRTC straight from the browser
-> against an ephemeral `ek_…` secret, and it worked; the app is Gemini-only for
-> now by choice, not because that path broke. What went with it: the provider
-> picker, `/api/session/*`, and seven settings that were OpenAI's alone —
-> speaking rate, the two VAD detectors and their sub-fields, the input
-> transcription model and its language hint, and noise reduction. `git log` is
-> the reference if it comes back. **`OPENAI_API_KEY` is now read by nothing.**
-> Face-kit image generation was its last consumer and has since gone Gemini-only
-> too — see the foot of [src/facekit/imageModels.ts](src/facekit/imageModels.ts)
-> — so the secret can be deleted from the dashboard whenever convenient.
+> **OpenAI came back, and not by the door it left through.** The removed path
+> rode WebRTC straight from the browser against an ephemeral `ek_…` secret. That
+> is not what returned: WebRTC hands the page an `<audio>` element, and every
+> instrument built since — the viseme mouth, the audio-synced transcript reveal,
+> the underrun detector, the sent-bytes accounting — reads raw PCM. So
+> `gpt-realtime-2.1` runs over the same relayed PCM socket Gemini does, pays the
+> same latency leg, and reuses the same `SessionHandlers` contract. Nothing
+> above the socket was touched. See
+> [src/realtime/openai.ts](src/realtime/openai.ts), which is 250 lines shorter
+> than its Gemini sibling because none of the tool-scheduling machinery that
+> file needs has any counterpart here. **`OPENAI_API_KEY` is read again** — by
+> the relay, and by nothing else; face-kit image generation is still
+> Gemini-only.
 
 ## Three tiers, three kinds of page
 
@@ -1098,9 +1102,18 @@ Since nothing browser-safe can be handed out, the socket is relayed through
 stays server-side and the Worker — not the page — sends the setup message, so a
 visitor still cannot redefine the agent. The cost is that Gemini audio hops
 through Cloudflare, adding a leg of latency and billing Worker time for the
-length of a call. There is no second path to fall back to: OpenAI Realtime kept
-a direct browser-to-provider WebRTC line because its ephemeral secrets work, and
-that was removed along with the provider.
+length of a call.
+
+The OpenAI route beside it,
+[functions/api/live/openai.ts](functions/api/live/openai.ts), pays that cost by
+choice rather than by necessity. OpenAI's ephemeral secrets *do* work from a
+browser — over WebRTC, which is the part that disqualifies them here: WebRTC
+does the media work behind an `<audio>` element and leaves no PCM to measure, so
+taking the direct line would silently delete the face, the reveal timing, the
+gap detector and the microphone accounting. The shared half of both relays lives
+in [functions/api/live/_relay.ts](functions/api/live/_relay.ts) — the forwarder
+and its reordering guard, the two-pong protocol, the upstream-quiet
+accumulator.
 
 The move to Vertex does not change any of that on its own — the relay is still
 carrying the audio, and an express-mode API key is no more browser-safe than an

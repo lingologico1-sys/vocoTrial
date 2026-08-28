@@ -1,5 +1,5 @@
 import {
-  INPUT_BYTES_PER_SECOND,
+  GEMINI_INPUT_RATE,
   MicCapture,
   PcmPlayer,
   decodeBase64,
@@ -8,7 +8,7 @@ import {
 import { addUsage, emptyUsage, totalTokens, type UsageTotals } from './cost';
 import { UnauthorizedError, checkSession, reportExpired } from './auth';
 import type { SessionConfig, SessionHandlers, VoiceSession } from './types';
-import { findModel } from './models';
+import { findModel, isGoogle } from './models';
 import { PROGRESS_TOOL } from './tutorPrompt';
 
 /**
@@ -107,7 +107,7 @@ interface LiveMessage {
    */
   direct?: boolean;
   /** The upstream socket's longest quiet since the last pong. See onRelay. */
-  googleMaxGapMs?: number;
+  upstreamMaxGapMs?: number;
 }
 
 /**
@@ -149,10 +149,18 @@ export async function startGeminiSession(
    * Whether this model's surface implements `scheduling` on a tool response.
    * See the tool-call handling below. Unknown keys resolve to false, which is
    * the reading that sends nothing rather than the one that hopes.
+   *
+   * THE PROVIDER IS CHECKED FIRST, and not for tidiness. This used to read
+   * `findModel(modelKey)?.surface === 'aistudio'`, which on an OpenAI entry
+   * would compare `undefined` and come out false — the right answer, reached
+   * without ever asking the question, and only right until somebody wrote an
+   * OpenAI surface. Nothing should reach this file with an OpenAI key at all;
+   * `isGoogle` is what says so out loud.
    */
-  const silentResponses = findModel(modelKey)?.surface === 'aistudio';
+  const chosen = findModel(modelKey);
+  const silentResponses = !!chosen && isGoogle(chosen) && chosen.surface === 'aistudio';
 
-  const mic = new MicCapture();
+  const mic = new MicCapture(GEMINI_INPUT_RATE);
   // The player reports its own queue running out, straight through to whoever
   // is keeping the account of the call — the one fault in here the learner
   // hears and no log the developer can reach ever records.
@@ -501,8 +509,8 @@ export async function startGeminiSession(
           rttMs: Date.now() - message.pong,
           direct: message.direct === true,
           upgradeMs: typeof message.upgradeMs === 'number' ? message.upgradeMs : undefined,
-          googleMaxGapMs:
-            typeof message.googleMaxGapMs === 'number' ? message.googleMaxGapMs : undefined,
+          upstreamMaxGapMs:
+            typeof message.upstreamMaxGapMs === 'number' ? message.upstreamMaxGapMs : undefined,
         });
         return;
       }
@@ -919,7 +927,10 @@ export async function startGeminiSession(
         socket.send(
           JSON.stringify({
             realtimeInput: {
-              audio: { mimeType: 'audio/pcm;rate=16000', data: encodeBase64(pcm) },
+              audio: {
+                mimeType: `audio/pcm;rate=${GEMINI_INPUT_RATE}`,
+                data: encodeBase64(pcm),
+              },
             },
           }),
         );
@@ -945,7 +956,7 @@ export async function startGeminiSession(
         }
         const bytes = spanBytes;
         spanBytes = 0;
-        handlers.onVoice?.(false, { bytes, seconds: bytes / INPUT_BYTES_PER_SECOND });
+        handlers.onVoice?.(false, { bytes, seconds: bytes / mic.bytesPerSecond });
       },
     )
     .then(() => {

@@ -36,7 +36,10 @@ export default function SettingsPanel({
   settings,
   onSettings,
 }: Props) {
-  const fields = fieldsFor(model);
+  // `settings` is passed so a field whose `requires` is unmet drops out of the
+  // panel — the OpenAI VAD sub-fields, which belong to one detector or the
+  // other and never to both.
+  const fields = fieldsFor(model, settings);
 
   const changed = Object.values(settings).filter((value) => value !== undefined).length;
   const preset = library.presets.find((option) => option.key === library.presetKey);
@@ -73,6 +76,7 @@ export default function SettingsPanel({
 
         <SettingsFields
           fields={fields}
+          model={model}
           settings={settings}
           onSettings={onSettings}
           disabled={disabled}

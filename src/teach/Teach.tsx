@@ -26,6 +26,7 @@ import {
   DEFAULT_CAP_MINUTES,
   DEFAULT_QUESTION_ROWS,
   MAX_BRIEF,
+  MAX_VOCABULARY,
   MAX_CAP_MINUTES,
   MAX_QUESTIONS,
   MAX_VOCO_SESSION_NAME,
@@ -130,6 +131,7 @@ function empty(): VocoSession {
     name: '',
     note: '',
     brief: '',
+    vocabulary: '',
     questions: [],
     language: defaultLanguageCode(),
     // A new lesson has no behaviour to preserve, so it gets the setting a class
@@ -183,6 +185,7 @@ export default function Teach() {
   const [name, setName] = useState('');
   const [note, setNote] = useState('');
   const [brief, setBrief] = useState('');
+  const [vocabulary, setVocabulary] = useState('');
   /**
    * One string per row, blanks included.
    *
@@ -282,6 +285,7 @@ export default function Teach() {
     setName(source.name);
     setNote(source.note);
     setBrief(source.brief);
+    setVocabulary(source.vocabulary ?? '');
     // Padded up to the default so a short lesson still opens with somewhere to
     // type, and never truncated: a saved lesson shows every question it has.
     setRows(
@@ -430,6 +434,7 @@ export default function Teach() {
     name: name.trim() || 'Untitled session',
     note: note.trim(),
     brief: brief.trim(),
+    vocabulary: vocabulary.trim() || undefined,
     questions,
     capMinutes,
     patience,
@@ -985,6 +990,41 @@ export default function Teach() {
                   disabled={busy}
                   className={`${field} resize-y leading-relaxed`}
                 />
+              </div>
+
+              {/*
+                Optional, and last, because most lessons need nothing here. The
+                questions are already handed to the transcriber as keywords, so
+                this is for the words a unit is *about* that the questions may
+                never say out loud. Nobody sees it: not the student, not the
+                tutor. See `vocabulary` on VocoSession.
+              */}
+              <div className="flex flex-col gap-1.5">
+                <div className="flex items-baseline justify-between">
+                  <label className={label} htmlFor="voco-vocabulary">
+                    Words to listen for <span className="text-lingo-muted">(optional)</span>
+                  </label>
+                  <span className="text-[11px] text-lingo-muted">
+                    {vocabulary.length}/{MAX_VOCABULARY} · nobody sees this
+                  </span>
+                </div>
+                <textarea
+                  id="voco-vocabulary"
+                  value={vocabulary}
+                  onChange={(event) =>
+                    setVocabulary(event.target.value.slice(0, MAX_VOCABULARY))
+                  }
+                  rows={2}
+                  placeholder="la grêle, le verglas, une averse…"
+                  disabled={busy}
+                  className={`${field} resize-y leading-relaxed`}
+                />
+                <p className="text-[11px] leading-relaxed text-lingo-muted">
+                  Helps the tutor hear these words correctly when a learner says them, so the
+                  report marks what they actually said. The questions are used this way
+                  already — this is for vocabulary the questions do not contain. Used on GPT
+                  Realtime only; the Gemini models have no equivalent and ignore it.
+                </p>
               </div>
             </div>
           </section>

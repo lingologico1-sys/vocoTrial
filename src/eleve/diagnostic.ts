@@ -326,10 +326,10 @@ function relayLine(relay: RelayHealth): string {
    * plainly rather than printing a number that invites reading a fault into it.
    */
   const quiet =
-    relay.googleMaxGapMs === null
+    relay.upstreamMaxGapMs === null
       ? '. This relay build does not report what its own socket to Google was doing'
       : `. The relay's socket to Google went quiet for at most ` +
-        `${(relay.googleMaxGapMs / 1000).toFixed(1)}s in one stretch — check the timeline for ` +
+        `${(relay.upstreamMaxGapMs / 1000).toFixed(1)}s in one stretch — check the timeline for ` +
         `whether a turn was open across it, because between turns that is only the learner ` +
         `talking`;
 

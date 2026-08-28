@@ -37,11 +37,12 @@
 import { readFileSync } from 'node:fs';
 
 import { aiStudioModel, AISTUDIO_LIVE_URL } from '../functions/api/_aistudio';
-import { geminiSetup } from '../functions/api/live/_setup';
+import { geminiSetup, openAiSession } from '../functions/api/live/_setup';
 import { defaultInstructions } from '../src/realtime/instructions';
 import { LANGUAGES, findLanguage } from '../src/realtime/languages';
 import { findModel } from '../src/realtime/models';
-import { patienceSettings } from '../src/realtime/settings';
+import { lessonKeywords } from '../src/realtime/vocoSessions';
+import { DEFAULT_OPENAI_VOICE, patienceSettings } from '../src/realtime/settings';
 import {
   PROGRESS_TOOL,
   TIME_UP_SIGNAL,
@@ -50,7 +51,18 @@ import {
 } from '../src/realtime/tutorPrompt';
 
 /** The model the student page dials. Not a parameter: that is the point. */
-const MODEL_KEY = 'gemini-flash-31';
+/**
+ * Which model this run drives, and therefore which protocol.
+ *
+ * `npm run probe` runs the default Gemini model, as it always has.
+ * `npm run probe -- --openai` runs the same scripted lesson against
+ * gpt-realtime-2.1. Everything between those two — the lesson, the persona,
+ * the learner's replies, the checks at the end — is identical, which is the
+ * point: the two runs differ in the provider and in nothing else, so a
+ * difference in the findings is a difference in the model.
+ */
+const OPENAI_MODE = process.argv.slice(2).includes('--openai');
+const MODEL_KEY = OPENAI_MODE ? 'gpt-realtime-21' : 'gemini-flash-31';
 
 /**
  * The lesson under test, which is the one that failed.
@@ -74,6 +86,10 @@ const PERSONA = {
   fullName: 'Théo Dubois',
   bio: "My name is Théo Dubois, and I'm 24 years old. I grew up and still live in Lyon, which I absolutely adore. I work at a community center here, helping to organize local cultural events and workshops.",
   voice: 'Orus',
+  // The same character on the other provider, picked the way a face's is —
+  // asked rather than mapped. Orus reads as a man in his twenties and cedar is
+  // the nearest thing OpenAI publishes; nothing derives one from the other.
+  openAiVoice: 'cedar',
 };
 
 /**
@@ -265,9 +281,10 @@ function buildPrompt(): string {
 
 function buildSetup(prompt: string): Record<string, unknown> {
   const model = findModel(MODEL_KEY)!;
+  if (model.provider !== 'google') throw new Error('buildSetup is the Gemini path');
   const setup = geminiSetup(model, aiStudioModel(model.id), findLanguage('fr')!, prompt, {
     voice: PERSONA.voice,
-    ...patienceSettings('patient'),
+    ...patienceSettings('patient', model),
   });
 
   /*
@@ -630,6 +647,244 @@ async function connect(setup: Record<string, unknown>, events: Event[]) {
   return { say, close: () => socket.close() };
 }
 
+// --- The other provider's socket. Same lesson, same checks, other protocol.
+
+/**
+ * The OpenAI key, read the same way the Gemini one is.
+ */
+function openAiKey(): string {
+  const found = (() => {
+    if (process.env.OPENAI_API_KEY) return process.env.OPENAI_API_KEY;
+    try {
+      return readFileSync('.dev.vars', 'utf8').match(/^OPENAI_API_KEY=(.+)$/m)?.[1]?.trim() ?? '';
+    } catch {
+      return '';
+    }
+  })();
+
+  if (found.length >= KEY_LOOKS_REAL) return found;
+
+  console.error(
+    'No usable OPENAI_API_KEY. Put one in .dev.vars or the environment — the ' +
+      'same secret functions/api/live/openai.ts spends, and the same one the ' +
+      'Pages dashboard needs for /eleve to dial a GPT model.',
+  );
+  process.exit(2);
+}
+
+function buildOpenAiSession(prompt: string): Record<string, unknown> {
+  const model = findModel(MODEL_KEY)!;
+  if (model.provider !== 'openai') throw new Error('buildOpenAiSession is the OpenAI path');
+  return openAiSession(
+    model,
+    findLanguage('fr')!,
+    prompt,
+    {
+      voice: PERSONA.openAiVoice ?? DEFAULT_OPENAI_VOICE,
+      ...patienceSettings('patient', model),
+    },
+    lessonKeywords(LESSON.questions),
+  );
+}
+
+/** Whatever OpenAI sends. Only the fields this probe reads are named. */
+interface OpenAiFrame {
+  type?: string;
+  delta?: string;
+  error?: { message?: string };
+  response?: {
+    output?: Array<{ type?: string; name?: string; call_id?: string; arguments?: string }>;
+  };
+}
+
+async function connectOpenAi(session: Record<string, unknown>, events: Event[]) {
+  /*
+   * The key rides as a subprotocol rather than a header.
+   *
+   * OpenAI names that subprotocol `openai-insecure-api-key`, and the name is
+   * accurate about the case it is warning against: a browser bundle, where
+   * anything the page holds is public. This is a local script reading the key
+   * off .dev.vars, so the key is already on this disk and putting it in a
+   * handshake tells nobody anything new. The relay the app actually uses sends
+   * a real Authorization header, precisely because a browser cannot — see
+   * functions/api/live/openai.ts.
+   */
+  const socket = new WebSocket(`wss://api.openai.com/v1/realtime?model=${findModel(MODEL_KEY)!.id}`, [
+    'realtime',
+    `openai-insecure-api-key.${openAiKey()}`,
+  ]);
+  const started = Date.now();
+
+  let onFrame: ((frame: OpenAiFrame) => void) | null = null;
+  let waiting: ((error: Error) => void) | null = null;
+
+  socket.onmessage = async (message) => {
+    let frame: OpenAiFrame;
+    try {
+      frame = JSON.parse(await frameText(message.data)) as OpenAiFrame;
+    } catch {
+      return;
+    }
+    onFrame?.(frame);
+  };
+  socket.onclose = (event) => {
+    const why = `socket closed ${event.code} ${String(event.reason || '').slice(0, 200)}`.trim();
+    waiting?.(new Error(why));
+  };
+
+  const waitFor = <T,>(test: (frame: OpenAiFrame) => T | undefined, what: string): Promise<T> =>
+    new Promise((resolve, reject) => {
+      const seen: string[] = [];
+      const timer = setTimeout(
+        () =>
+          reject(
+            new Error(
+              `timed out waiting for ${what}. Frames that did arrive: ${
+                seen.length ? [...new Set(seen)].join(', ') : 'none at all'
+              }`,
+            ),
+          ),
+        TURN_TIMEOUT_MS,
+      );
+      const settle = (finish: () => void) => {
+        clearTimeout(timer);
+        onFrame = null;
+        waiting = null;
+        finish();
+      };
+      waiting = (error) => settle(() => reject(error));
+      onFrame = (frame) => {
+        seen.push(frame.type ?? '(untyped)');
+        const hit = test(frame);
+        if (hit !== undefined) settle(() => resolve(hit));
+      };
+    });
+
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('the socket never opened')), 15_000);
+    socket.onopen = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    socket.onerror = () => {
+      clearTimeout(timer);
+      reject(new Error('could not open the socket'));
+    };
+  });
+
+  socket.send(JSON.stringify({ type: 'session.update', session }));
+  await waitFor(
+    (frame) =>
+      frame.type === 'session.updated'
+        ? true
+        : frame.type === 'error'
+          ? (() => {
+              throw new Error(frame.error?.message ?? 'session.update refused');
+            })()
+          : undefined,
+    'session.updated',
+  );
+  console.log(`+   0.0s  SETUP   accepted — ${MODEL_KEY} is live on OpenAI\n`);
+
+  /**
+   * Says something and collects everything the tutor says back.
+   *
+   * THE SHAPE IS THE GEMINI ONE'S AND THE INSIDE IS NOT. There, a turn ends at
+   * `turnComplete` and the sound goes on streaming past it, so the probe has to
+   * drain and then sit through the remaining audio or it barges in on its own
+   * tutor. Here `response.done` is the end of the response and there is nothing
+   * to drain — but the playout wait stays, for the same reason it exists there:
+   * answering the instant the socket goes quiet is answering before the room
+   * has heard the sentence.
+   *
+   * THE LOOP IS THE ONE THING THIS PROVIDER ADDS. A response can be nothing but
+   * a tool call, and the app then asks for a further turn — see the
+   * `response.done` handling in src/realtime/openai.ts. The probe has to do the
+   * same or it waits for speech that was never scheduled, so a turn here may be
+   * two responses, and the tutor's words are whichever one spoke.
+   */
+  const say = async (text: string, kind: Event['kind']): Promise<string> => {
+    note(events, Date.now() - started, kind, text);
+    socket.send(
+      JSON.stringify({
+        type: 'conversation.item.create',
+        item: { type: 'message', role: 'user', content: [{ type: 'input_text', text }] },
+      }),
+    );
+    socket.send(JSON.stringify({ type: 'response.create' }));
+
+    let spoken = '';
+    let audioMs = 0;
+    let firstAudioAt: number | null = null;
+    let endedAt = Date.now();
+
+    // Bounded, because "answer the tool, get a silent turn, answer it again" is
+    // exactly the shape a livelock would take, and a probe that hangs teaches
+    // nothing. Two is one more than any correct run needs.
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const done = await waitFor((frame) => {
+        if (frame.type === 'response.output_audio_transcript.delta') {
+          spoken += frame.delta ?? '';
+          return undefined;
+        }
+        if (frame.type === 'response.output_audio.delta') {
+          const data = frame.delta;
+          if (data) {
+            if (firstAudioAt === null) firstAudioAt = Date.now();
+            // Base64 without decoding it: four characters carry three bytes,
+            // less whatever the padding claims.
+            const padding = data.endsWith('==') ? 2 : data.endsWith('=') ? 1 : 0;
+            audioMs += ((data.length / 4) * 3 - padding) / AUDIO_BYTES_PER_MS;
+          }
+          return undefined;
+        }
+        if (frame.type === 'error') {
+          note(events, Date.now() - started, 'tool', `error: ${frame.error?.message ?? '(none)'}`);
+          return undefined;
+        }
+        return frame.type === 'response.done' ? frame : undefined;
+      }, 'response.done');
+
+      endedAt = Date.now();
+      const items = done.response?.output ?? [];
+      const calls = items.filter((item) => item.type === 'function_call');
+      const spoke = items.some((item) => item.type === 'message' || item.type === 'audio');
+
+      for (const call of calls) {
+        const args = call.arguments ? ` ${call.arguments}` : ' (no arguments)';
+        note(events, Date.now() - started, 'tool', `${call.name}${args}`);
+        socket.send(
+          JSON.stringify({
+            type: 'conversation.item.create',
+            item: {
+              type: 'function_call_output',
+              call_id: call.call_id,
+              output: JSON.stringify({ ok: true }),
+            },
+          }),
+        );
+      }
+
+      // The bookkeeping-only turn: answered, and asked to carry on. Anything
+      // that spoke is finished with, tool call or not.
+      if (calls.length && !spoke) {
+        socket.send(JSON.stringify({ type: 'response.create' }));
+        continue;
+      }
+      break;
+    }
+
+    note(events, endedAt - started, 'tutor', spoken.trim() || '(said nothing)');
+
+    const streamed = firstAudioAt === null ? 0 : Date.now() - firstAudioAt;
+    const remaining = Math.min(audioMs - streamed, MAX_PLAYOUT_MS);
+    if (remaining > 0) await new Promise((resume) => setTimeout(resume, remaining));
+    return spoken.trim();
+  };
+
+  return { say, close: () => socket.close() };
+}
+
 // --- What the run is checked against.
 
 interface Finding {
@@ -797,7 +1052,9 @@ function check(events: Event[]): Finding[] {
 async function runLesson(): Promise<number> {
   const prompt = buildPrompt();
   const events: Event[] = [];
-  const call = await connect(buildSetup(prompt), events);
+  const call = OPENAI_MODE
+    ? await connectOpenAi(buildOpenAiSession(prompt), events)
+    : await connect(buildSetup(prompt), events);
 
   /**
    * What the learner says next, given what the tutor just said.
@@ -893,10 +1150,12 @@ async function runLesson(): Promise<number> {
 
 function runDry(): number {
   const prompt = buildPrompt();
-  const setup = buildSetup(prompt);
+  const setup = OPENAI_MODE ? buildOpenAiSession(prompt) : buildSetup(prompt);
   console.log(`--- THE PROMPT (${prompt.length} characters) ---\n`);
   console.log(prompt);
-  console.log('\n--- THE SETUP FRAME ---\n');
+  console.log(`
+--- THE ${OPENAI_MODE ? 'SESSION.UPDATE' : 'SETUP'} FRAME ---
+`);
   console.log(JSON.stringify(setup, null, 2));
   return 0;
 }

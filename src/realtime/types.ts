@@ -15,6 +15,22 @@ export type { AudioGap, AudioTap };
 export interface SessionConfig {
   instructions?: string;
   settings?: SessionSettings;
+  /**
+   * Words the transcriber should expect to hear. OpenAI only.
+   *
+   * A THIRD FIELD RATHER THAN SOMETHING DERIVED FROM THE FIRST, because the
+   * first is the wrong source. `instructions` is a composed prompt — thousands
+   * of characters of manner, rules and protocol — and keywords drawn from it
+   * would be overwhelmingly words about how to teach rather than words the
+   * lesson is about. The page that has the questions is the page that builds
+   * this; see `lessonKeywords` in functions/api/live/_setup.ts for what is
+   * kept, and `vocabulary` on VocoSession for the half a teacher may add.
+   *
+   * Ignored on Gemini, which has no counterpart. Sent anyway rather than gated
+   * in the browser: the Worker knows which model this is and the browser is not
+   * the place to decide what a provider accepts.
+   */
+  keywords?: string[];
 }
 
 export type SessionStatus = 'idle' | 'connecting' | 'live' | 'closed' | 'error';
@@ -59,7 +75,10 @@ export interface TranscriptDelta {
  *
  * IT IS COUNTED AT THE SEND, past the readyState check, so a socket that is
  * not open contributes nothing and the discrepancy shows. `seconds` is exact
- * rather than estimated — see INPUT_BYTES_PER_SECOND.
+ * rather than estimated, and exact at the rate the microphone is *actually*
+ * running at rather than the one it was asked for — see `bytesPerSecond` on
+ * MicCapture, which matters because the two providers ask for different rates
+ * and a browser may honour neither.
  *
  * WHAT IT CANNOT SAY is whether Google received any of it. `send()` hands a
  * frame to the runtime and returns; it is not a delivery receipt. A full count
@@ -161,14 +180,17 @@ export interface SessionHandlers {
    * nowhere else to volunteer it. Their sum bounds the whole detour.
    *
    * NEITHER OF THEM WATCHES THE SOCKET THE CALL IS ACTUALLY ON, which is the
-   * hole `googleMaxGapMs` fills. `rttMs` measures browser to Worker and back;
-   * `upgradeMs` is the cost of opening a *fresh* connection to Google, not the
-   * health of the live one carrying this lesson. So a stall between the Worker
-   * and Google was invisible to both, and on 2026-08-27 a call whose worst
-   * relay sample was 23ms still had six seconds where Google sent nothing
-   * mid-turn. This is the longest run of quiet on that upstream socket since
-   * the last pong, measured at the Worker, which is the only place that can see
-   * it.
+   * hole `upstreamMaxGapMs` fills. `rttMs` measures browser to Worker and back;
+   * `upgradeMs` is the cost of opening a *fresh* connection to the provider,
+   * not the health of the live one carrying this lesson. So a stall on the far
+   * leg was invisible to both, and on 2026-08-27 a call whose worst relay
+   * sample was 23ms still had six seconds where Google sent nothing mid-turn.
+   * This is the longest run of quiet on that upstream socket since the last
+   * pong, measured at the Worker, which is the only place that can see it.
+   *
+   * NAMED FOR THE LEG AND NOT FOR THE COMPANY. It was `googleMaxGapMs` while
+   * there was one upstream; the measurement was never about whose server it
+   * was, and there are two now.
    *
    * IT IS NOT A FAULT ON ITS OWN. Google legitimately sends nothing while the
    * learner is talking, so a large gap between turns is the protocol working.
@@ -187,7 +209,7 @@ export interface SessionHandlers {
     rttMs: number;
     direct: boolean;
     upgradeMs?: number;
-    googleMaxGapMs?: number;
+    upstreamMaxGapMs?: number;
   }) => void;
   /**
    * Pings are going out and the relay has stopped answering, but not yet for
@@ -291,10 +313,14 @@ export interface SessionHandlers {
 /**
  * The handle a page holds on a running call.
  *
- * There is one implementation — startGeminiSession. It stayed an interface
- * after OpenAI Realtime was removed because two pages consume it and neither
- * should have to know how the socket works, not because a second transport is
- * expected back.
+ * IT KEPT ITS SHAPE THROUGH THE YEARS IT HAD ONE IMPLEMENTATION, and now has
+ * two again — startGeminiSession and startOpenAiSession, picked between by
+ * startSession in start.ts. The note that stood here said it stayed an
+ * interface because two pages consume it and neither should have to know how
+ * the socket works, "not because a second transport is expected back". The
+ * second transport came back anyway, and the discipline is why porting it cost
+ * two files instead of the whole call stack: nothing above this line was
+ * touched.
  */
 export interface VoiceSession {
   setMuted: (muted: boolean) => void;

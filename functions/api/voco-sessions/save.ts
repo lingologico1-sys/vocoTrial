@@ -1,6 +1,7 @@
 import { json } from '../_middleware';
 import {
   MAX_BRIEF,
+  MAX_VOCABULARY,
   MAX_QUESTIONS,
   MAX_VOCO_SESSION,
   capMinutesOf,
@@ -86,6 +87,18 @@ export async function onRequestPost(
     return json({ error: `A consigne takes ${MAX_BRIEF} characters`, code: 'brief_too_long' }, 400);
   }
 
+  /*
+   * Clamped rather than refused, unlike the consigne above it. A consigne over
+   * the limit is text a teacher wrote and would want back; a word list over the
+   * limit is a paste accident, and the tail of it was never going to reach the
+   * transcriber anyway — see MAX_KEYWORDS, which cuts at a hundred words well
+   * inside this.
+   */
+  const vocabulary =
+    typeof incoming.vocabulary === 'string'
+      ? incoming.vocabulary.trim().slice(0, MAX_VOCABULARY)
+      : '';
+
   const isText = (value: unknown) => typeof value === 'string';
   /*
    * Checked against the table rather than merely carried, unlike the ids above
@@ -109,6 +122,9 @@ export async function onRequestPost(
     name: incoming.name.trim() || 'Untitled session',
     note: typeof incoming.note === 'string' ? incoming.note.trim() : '',
     brief,
+    // Undefined rather than '' when nobody wrote one, so an untouched box
+    // stores nothing instead of storing a blank.
+    vocabulary: vocabulary || undefined,
     questions,
     language: carried<string>(incoming.language, isText),
     styleId: carried<string>(incoming.styleId, isText),

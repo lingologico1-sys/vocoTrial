@@ -12,7 +12,7 @@ import type { MarkingCost } from '../realtime/cost';
 import AdvancedPanel from './AdvancedPanel';
 import { LESSON_CODE_LENGTH, normaliseLessonCode } from '../realtime/lessonCodes';
 import { hasLesson, type PublishedSetup } from '../realtime/session';
-import { capMinutesOf } from '../realtime/vocoSessions';
+import { capMinutesOf, lessonKeywords } from '../realtime/vocoSessions';
 import {
   KEEP_GOING_SIGNAL,
   NOT_HEARD_SIGNAL,
@@ -23,7 +23,7 @@ import {
 import { defaultInstructions } from '../realtime/instructions';
 import { findLanguage, defaultLanguageCode } from '../realtime/languages';
 import { codeFromUrl, fetchSetup } from '../realtime/sessionStore';
-import { defaultModelKey, findModel } from '../realtime/models';
+import { MODELS, defaultModelKey, findModel, type ModelChoice } from '../realtime/models';
 import { withLearnerTurnTaking, type SessionSettings } from '../realtime/settings';
 import { useVoiceCall, type Turn } from '../live/useVoiceCall';
 import ConsignePanel from './ConsignePanel';
@@ -311,8 +311,11 @@ const L1_KEY = 'vocotrial.eleve.l1';
  * the correct behaviour for "the model we run by default" and worth knowing
  * before reordering.
  */
-function lessonModelKey(setup: PublishedSetup | null): string {
-  return findModel(setup?.modelKey ?? '')?.key ?? defaultModelKey();
+function lessonModel(setup: PublishedSetup | null): ModelChoice {
+  // The fallback is a key from MODELS, so the second lookup cannot miss — but
+  // it is written as a lookup rather than asserted, because the alternative is
+  // a non-null assertion standing over the one table that decides the spend.
+  return findModel(setup?.modelKey ?? '') ?? findModel(defaultModelKey()) ?? MODELS[0];
 }
 
 type Tab = 'evaluation' | 'dictionary' | 'vocab';
@@ -405,6 +408,7 @@ export default function Eleve() {
    */
   const settings = useMemo<SessionSettings>(() => {
     if (!session) return {};
+    const model = lessonModel(session);
     // Absent rather than empty throughout — see settings.ts on why "leave it
     // upstream" and "pin today's default" have to stay distinguishable. The
     // turn-taking fields are the exception, filled underneath whatever the
@@ -412,25 +416,41 @@ export default function Eleve() {
     // provider's own detection has been measured losing their answers. See
     // LEARNER_TURN_TAKING for the runs. Because this memo is also what the
     // diagnostic reports, those fields now truthfully read as sent.
-    return withLearnerTurnTaking({
-      ...(session.voice ? { voice: session.voice } : {}),
-      ...(session.silenceDurationMs !== undefined
-        ? { silenceDurationMs: session.silenceDurationMs }
-        : {}),
-      ...(session.prefixPaddingMs !== undefined
-        ? { prefixPaddingMs: session.prefixPaddingMs }
-        : {}),
-      ...(session.startSensitivity ? { startSensitivity: session.startSensitivity } : {}),
-      ...(session.endSensitivity ? { endSensitivity: session.endSensitivity } : {}),
-      ...(session.affectiveDialog !== undefined
-        ? { affectiveDialog: session.affectiveDialog }
-        : {}),
-      ...(session.proactiveAudio !== undefined ? { proactiveAudio: session.proactiveAudio } : {}),
-      ...(session.temperature !== undefined ? { temperature: session.temperature } : {}),
-      ...(session.maxOutputTokens !== undefined
-        ? { maxOutputTokens: session.maxOutputTokens }
-        : {}),
-    });
+    return withLearnerTurnTaking(
+      {
+        ...(session.voice ? { voice: session.voice } : {}),
+        ...(session.silenceDurationMs !== undefined
+          ? { silenceDurationMs: session.silenceDurationMs }
+          : {}),
+        ...(session.prefixPaddingMs !== undefined
+          ? { prefixPaddingMs: session.prefixPaddingMs }
+          : {}),
+        ...(session.startSensitivity ? { startSensitivity: session.startSensitivity } : {}),
+        ...(session.endSensitivity ? { endSensitivity: session.endSensitivity } : {}),
+        ...(session.affectiveDialog !== undefined
+          ? { affectiveDialog: session.affectiveDialog }
+          : {}),
+        ...(session.proactiveAudio !== undefined
+          ? { proactiveAudio: session.proactiveAudio }
+          : {}),
+        ...(session.temperature !== undefined ? { temperature: session.temperature } : {}),
+        ...(session.maxOutputTokens !== undefined
+          ? { maxOutputTokens: session.maxOutputTokens }
+          : {}),
+        ...(session.vadMode ? { vadMode: session.vadMode } : {}),
+        ...(session.vadEagerness ? { vadEagerness: session.vadEagerness } : {}),
+        ...(session.vadThreshold !== undefined ? { vadThreshold: session.vadThreshold } : {}),
+        ...(session.speed !== undefined ? { speed: session.speed } : {}),
+        ...(session.noiseReduction ? { noiseReduction: session.noiseReduction } : {}),
+        ...(session.transcriptionModel
+          ? { transcriptionModel: session.transcriptionModel }
+          : {}),
+        ...(session.transcriptionHint !== undefined
+          ? { transcriptionHint: session.transcriptionHint }
+          : {}),
+      },
+      model,
+    );
   }, [session]);
 
   /**
@@ -479,12 +499,27 @@ export default function Eleve() {
    * the diagnostic that reports what was dialled. A diagnostic naming a
    * different model from the one in use is worse than one naming none.
    */
-  const modelKey = lessonModelKey(session);
+  const model = lessonModel(session);
+  const modelKey = model.key;
+
+  /**
+   * The words this lesson expects to hear, for the transcriber to lean towards.
+   *
+   * Built here because this is the page that has the questions — the hook is
+   * handed a composed prompt and a question count, not the lesson. Sent on
+   * every call and used by the provider that has a field for it; see `keywords`
+   * on SessionConfig for why it is not derived from the prompt.
+   */
+  const keywords = useMemo(
+    () => lessonKeywords(session?.questions ?? [], session?.vocabulary),
+    [session],
+  );
 
   const call = useVoiceCall({
     modelKey,
     language: session?.language ?? 'fr',
     instructions,
+    keywords,
     /*
      * The list this call is counted against. Absent means no lesson, and every
      * progress report a tutor makes on such a call is refused — see

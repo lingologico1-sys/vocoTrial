@@ -17,10 +17,18 @@ pages_build_output_dir = "dist"
 #
 # Locally, put the keys in .dev.vars (gitignored) and run `npm run dev:api`.
 #
-# The keys stay server-side by construction: the Live socket is relayed with the
-# key attached in the Worker (functions/api/live/gemini.ts) and image requests
-# are made from the Worker too. No key is ever readable from the client, so a
-# leaked page cannot spend the account.
+# OPENAI_API_KEY is spent again, by the realtime relay for the GPT models
+# (functions/api/live/openai.ts). It had been left in the dashboard unread after
+# OpenAI Realtime and then the GPT Image models were removed; nothing had to be
+# re-created.
+#
+# The keys stay server-side by construction: both live sockets are relayed with
+# the credential attached in the Worker (functions/api/live/gemini.ts and
+# openai.ts) and image requests are made from the Worker too. No key is ever
+# readable from the client, so a leaked page cannot spend the account. That is
+# also why the OpenAI path is a relay rather than the browser-direct WebRTC that
+# provider recommends — see the header of that file for the other half of the
+# reason, which is about the audio.
 #
 # There is nothing under [vars] today. The table stays because this file's
 # existence is what makes Pages read plain-text vars from here and take only

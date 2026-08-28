@@ -5,11 +5,14 @@ import {
   defaultInstructions,
   findInstructionPreset,
 } from '../../../src/realtime/instructions';
-import { PACE, composeTutorPrompt } from '../../../src/realtime/tutorPrompt';
-import { patienceSettings } from '../../../src/realtime/settings';
+import { PACE, composeTutorPrompt, paceSpeed } from '../../../src/realtime/tutorPrompt';
+import {
+  DEFAULT_OPENAI_VOICE,
+  patienceSettings,
+} from '../../../src/realtime/settings';
 import { FALLBACK_PERFORMANCE } from '../../../src/realtime/house';
 import { newLessonCode } from '../../../src/realtime/lessonCodes';
-import { defaultModelKey, findModel } from '../../../src/realtime/models';
+import { defaultModelKey, findModel, isOpenAi } from '../../../src/realtime/models';
 import {
   MAX_SESSION,
   MAX_SESSION_LABEL,
@@ -19,6 +22,7 @@ import {
   MAX_QUESTIONS,
   capMinutesOf,
   type VocoSession,
+  MAX_VOCABULARY,
 } from '../../../src/realtime/vocoSessions';
 import { kitKey } from '../../../src/facekit/published';
 import type { Persona } from '../../../src/facekit/persona';
@@ -304,18 +308,6 @@ export async function onRequestPost(
         : undefined;
 
   /*
-   * The lesson's patience, over the house profile's turn-taking.
-   *
-   * Spread after `performance` and so it wins, which is the whole point: a
-   * house profile is tuned once by an administrator for every lesson this
-   * deployment runs, and how long to wait for a learner assembling a sentence
-   * is the one turn-taking decision that belongs to the class in front of you.
-   * A lesson on 'standard' sends nothing and leaves the house profile's own
-   * fields — including the absence that means "let Google decide" — untouched.
-   */
-  const patience = patienceSettings(incoming.patience);
-
-  /*
    * The model this lesson runs on, resolved here rather than carried.
    *
    * Resolved for the reason every id on this route is resolved: what a student
@@ -325,8 +317,29 @@ export async function onRequestPost(
    * rather than a 400, which is the same call `patienceSettings` makes on an
    * unknown word. A published code that opens onto the default model is a
    * lesson; one that opens onto nothing is a class standing about.
+   *
+   * IT MOVED ABOVE THE THREE THINGS THAT NOW READ IT. Patience, the voice and
+   * the pace all mean different things on different providers — a silence
+   * duration against a semantic detector, two voice vocabularies that share no
+   * name, prose against a synthesis rate — so all three are resolved knowing
+   * which model this lesson will actually dial.
    */
-  const modelKey = findModel(incoming.modelKey ?? '')?.key ?? defaultModelKey();
+  const model = findModel(incoming.modelKey ?? '') ?? findModel(defaultModelKey());
+  const modelKey = model?.key ?? defaultModelKey();
+
+  /*
+   * The lesson's patience, over the house profile's turn-taking.
+   *
+   * Spread after `performance` and so it wins, which is the whole point: a
+   * house profile is tuned once by an administrator for every lesson this
+   * deployment runs, and how long to wait for a learner assembling a sentence
+   * is the one turn-taking decision that belongs to the class in front of you.
+   * A lesson on 'standard' sends nothing and leaves the house profile's own
+   * fields — including the absence that means "let the provider decide" —
+   * untouched.
+   */
+  const patience = model ? patienceSettings(incoming.patience, model) : {};
+
 
   const setup: PublishedSetup = {
     ...performance,
@@ -351,17 +364,51 @@ export async function onRequestPost(
     // only one of them needs a field. The same bargain `lessonRules` takes on
     // the line above.
     pace: pace === 'natural' ? undefined : pace,
+    /*
+     * The same pace again, as a rate this time, where the model takes one.
+     *
+     * The line above stores the teacher's word so the prompt can be composed
+     * from it when the student dials; this stores the number that word means to
+     * this provider. Both, not either — see PACE in tutorPrompt.ts. Absent on
+     * Gemini, which has no such field, and absent on 'natural', which asks for
+     * nothing on any provider.
+     */
+    speed: model && isOpenAi(model) ? paceSpeed(pace) : undefined,
     persona,
-    // Off the face, never off the request — see the header. An incoming `voice`
-    // is a field /teach no longer sends, and honouring one would leave the door
-    // open for a hand-written POST to put Fenrir behind Marta's biography.
-    voice: persona?.voice ?? '',
+    /*
+     * Off the face, never off the request — see the header. An incoming `voice`
+     * is a field /teach no longer sends, and honouring one would leave the door
+     * open for a hand-written POST to put Fenrir behind Marta's biography.
+     *
+     * WHICH OF THE FACE'S TWO VOICES IS A FACT ABOUT THE MODEL, and it is
+     * settled here rather than at dial time because the setup carries one
+     * `voice` field and always has. The consequence is worth stating: changing
+     * a lesson's model changes its voice, and the lesson has to be republished
+     * for that to take. That is the right way round — a code already handed out
+     * to a class should not change how the tutor sounds because somebody edited
+     * a draft — and it is the same bargain every other field on this object
+     * takes. See session.ts.
+     *
+     * A face with no OpenAI voice falls back rather than sending nothing: an
+     * absent voice is a provider default nobody chose, and the whole point of
+     * putting the voice on the face is that somebody did.
+     */
+    voice:
+      (model && isOpenAi(model)
+        ? (persona?.openAiVoice ?? DEFAULT_OPENAI_VOICE)
+        : persona?.voice) ?? '',
     faceId,
     evaluatorId: typeof incoming.evaluatorId === 'string' ? incoming.evaluatorId : '',
     // The lesson, copied rather than referenced — see session.ts. It is stored
     // once now rather than twice: it used to be here structurally *and* inside
     // a composed prompt, and the prompt is composed when the student dials.
     brief: typeof incoming.brief === 'string' ? incoming.brief : '',
+    // Undefined rather than '' when nobody wrote one, on the same terms as
+    // `lessonRules` above: an unfilled box stores nothing, not a blank.
+    vocabulary:
+      typeof incoming.vocabulary === 'string' && incoming.vocabulary.trim()
+        ? incoming.vocabulary.trim().slice(0, MAX_VOCABULARY)
+        : undefined,
     questions,
     capMinutes,
     vocoSessionId: typeof incoming.id === 'string' ? incoming.id : undefined,

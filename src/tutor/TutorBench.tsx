@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Mic, MicOff, PhoneOff, Radio } from 'lucide-react';
-import { startGeminiSession } from '../realtime/gemini';
+import { startSession } from '../realtime/start';
 import { defaultModelKey, findModel, visibleModels } from '../realtime/models';
 import { LANGUAGES, defaultLanguageCode, findLanguage } from '../realtime/languages';
 import { MAX_INSTRUCTIONS } from '../realtime/instructions';
@@ -297,7 +297,7 @@ export default function TutorBench() {
       // Set before awaiting: the clock starts at the moment of connecting, so a
       // call nobody ever speaks into still times out.
       lastActivity.current = Date.now();
-      session.current = await startGeminiSession(handlers, modelKey, language, config);
+      session.current = await startSession(handlers, modelKey, language, config);
     } catch (error) {
       session.current = null;
       setStatus('error');

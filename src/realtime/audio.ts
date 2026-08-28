@@ -1,27 +1,38 @@
 /**
- * The raw-PCM plumbing the Gemini Live socket needs in both directions.
+ * The raw-PCM plumbing both live sockets need in both directions.
  *
  * A WebRTC transport would do all of this inside the browser for free — which
- * is the trade the relay makes, and why this file exists at all.
+ * is the trade both relays make, and why this file exists at all. See
+ * functions/api/live/openai.ts, which had the WebRTC option and declined it
+ * because every instrument in here reads the samples.
  */
 
 import { Fft } from './fft';
 
-/** Live API input rate. */
-export const INPUT_SAMPLE_RATE = 16_000;
-/** Live API output rate — different from the input, and not negotiable. */
+/**
+ * Gemini Live's input rate.
+ *
+ * IT USED TO BE THE INPUT RATE, FULL STOP, and the rename is the whole of what
+ * changed here. Gemini takes `audio/pcm;rate=16000`; OpenAI documents
+ * `audio/pcm` at 24000 alone, with G.711 at 8000 as the only alternative and no
+ * 16000 anywhere. So the rate is a property of the session rather than of this
+ * module, and MicCapture is told which one it is running at.
+ */
+export const GEMINI_INPUT_RATE = 16_000;
+
+/** Both providers emit 24 kHz. Different from Gemini's input, and not negotiable. */
 export const OUTPUT_SAMPLE_RATE = 24_000;
 
 /**
- * Bytes of microphone audio that carry one second of speech.
+ * Bytes of microphone audio that carry one second of speech, at a given rate.
  *
- * The worklet emits mono int16 at INPUT_SAMPLE_RATE — two bytes a sample, one
- * channel — so this is the exact divisor that turns a byte count back into
- * seconds. Exported for the sent-audio accounting in gemini.ts, which is the
- * only honest way to compare "how long the microphone was open" against "how
- * much of it actually left this browser". See pcm-capture.js for the int16.
+ * The worklet emits mono int16 — two bytes a sample, one channel — so this is
+ * the exact divisor that turns a byte count back into seconds. Used for the
+ * sent-audio accounting, which is the only honest way to compare "how long the
+ * microphone was open" against "how much of it actually left this browser".
+ * See pcm-capture.js for the int16, and MicSpan for what it is compared with.
  */
-export const INPUT_BYTES_PER_SECOND = INPUT_SAMPLE_RATE * 2;
+export const bytesPerSecondAt = (rate: number): number => rate * 2;
 
 export function encodeBase64(bytes: ArrayBuffer): string {
   const view = new Uint8Array(bytes);
@@ -80,12 +91,15 @@ const VOICE_RMS = 0.02;
 const VOICE_RELEASE_MS = 600;
 
 /**
- * Captures the microphone as 16 kHz int16 chunks, and says when it hears a voice.
+ * Captures the microphone as int16 chunks at the rate it is told, and says when
+ * it hears a voice.
  *
- * Asking the AudioContext for a 16 kHz sample rate makes the browser resample
- * the mic for us. Not every browser honours the request, so the real rate is
- * read back and reported — a mismatch is the first thing to check if the agent
- * hears chipmunks.
+ * Asking the AudioContext for a sample rate makes the browser resample the mic
+ * for us. Not every browser honours the request, so the real rate is read back
+ * and reported — a mismatch is the first thing to check if the agent hears
+ * chipmunks. Worth knowing that the two rates are not equally likely to be
+ * honoured: 24 kHz is far closer to what hardware actually runs at than 16 kHz,
+ * so the OpenAI path asks for less than the Gemini one does.
  *
  * The voice detection is a second job bolted to the first, and it is here
  * because this is the only place in the app that touches the input signal at
@@ -102,6 +116,27 @@ const VOICE_RELEASE_MS = 600;
  * goes to some trouble not to re-render while it has nothing to do.
  */
 export class MicCapture {
+  /**
+   * The rate this capture was asked for, which is not necessarily the one it
+   * got — see `bytesPerSecond`, which prefers the rate the context actually
+   * runs at.
+   */
+  constructor(private readonly rate: number) {}
+
+  /**
+   * The divisor that turns this capture's byte count into seconds of speech.
+   *
+   * OFF THE CONTEXT'S REAL RATE WHEREVER THERE IS ONE, for the reason `listen`
+   * below reads it: a browser that declined the constructor's request is
+   * producing samples at a rate this module did not choose, and a byte count
+   * divided by the rate we asked for would be wrong by exactly the ratio the
+   * warning is about. The requested rate is the fallback for the window before
+   * the context exists, where no bytes have been counted anyway.
+   */
+  get bytesPerSecond(): number {
+    return bytesPerSecondAt(this.context?.sampleRate ?? this.rate);
+  }
+
   private context: AudioContext | null = null;
   private stream: MediaStream | null = null;
   private node: AudioWorkletNode | null = null;
@@ -121,11 +156,11 @@ export class MicCapture {
       audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
     });
 
-    this.context = new AudioContext({ sampleRate: INPUT_SAMPLE_RATE });
-    if (this.context.sampleRate !== INPUT_SAMPLE_RATE) {
+    this.context = new AudioContext({ sampleRate: this.rate });
+    if (this.context.sampleRate !== this.rate) {
       console.warn(
-        `Mic context runs at ${this.context.sampleRate} Hz, not ${INPUT_SAMPLE_RATE} Hz. ` +
-          'Audio sent to Gemini will be pitched wrong.',
+        `Mic context runs at ${this.context.sampleRate} Hz, not ${this.rate} Hz. ` +
+          'Audio sent to the model will be pitched wrong.',
       );
     }
 
@@ -183,11 +218,11 @@ export class MicCapture {
     for (const sample of samples) energy += sample * sample;
     const rms = Math.sqrt(energy / samples.length) / 0x8000;
 
-    // Off the context's real rate rather than off INPUT_SAMPLE_RATE, because
+    // Off the context's real rate rather than off the requested one, because
     // the two differ on any browser that declined the constructor's request —
     // the same mismatch start() warns about, which would otherwise quietly
     // rescale the release.
-    const chunkMs = (samples.length / (this.context?.sampleRate ?? INPUT_SAMPLE_RATE)) * 1000;
+    const chunkMs = (samples.length / (this.context?.sampleRate ?? this.rate)) * 1000;
 
     if (rms >= VOICE_RMS) {
       this.quietFor = 0;
@@ -476,6 +511,12 @@ export class PcmPlayer {
   private mix: GainNode | null = null;
   private analyser: AnalyserNode | null = null;
   private playhead = 0;
+  /**
+   * When the turn now being spoken was scheduled to *start*, on the context
+   * clock, and how much of it has been queued since. See `heardMs`.
+   */
+  private turnStartAt = 0;
+  private turnSeconds = 0;
   private sources = new Set<AudioBufferSourceNode>();
 
   /** Whether the next chunk to arrive opens a new turn. Diagnostics only. */
@@ -606,6 +647,36 @@ export class PcmPlayer {
    */
   endTurn(): void {
     this.awaitingTurn = true;
+  }
+
+  /**
+   * How much of the turn now being spoken has actually been heard, in ms.
+   *
+   * WHAT IT IS FOR IS TELLING THE MODEL WHAT IT ACTUALLY SAID. OpenAI's
+   * `conversation.item.truncate` takes the point in an assistant turn that the
+   * listener got to, and cuts its own record there. Without it the model's
+   * memory of the conversation contains every sentence it generated, including
+   * the two seconds still sitting in this queue when the learner talked over
+   * it — so a tutor asks "as I was saying about the weekend" about a clause
+   * nobody heard, and no amount of prompting fixes it because the transcript it
+   * is reasoning from is wrong.
+   *
+   * GEMINI HAS NO SUCH MESSAGE, which is why this did not exist until there was
+   * a second provider. Its `interrupted` frame is the server telling us it has
+   * already decided; there is no channel back. That is a real difference in how
+   * accurate a long lesson's context stays, and it is invisible until you look
+   * for it.
+   *
+   * CLAMPED AT BOTH ENDS, because both ends happen. Below zero while the
+   * cushion is still ahead of the clock — a barge-in during the prime means
+   * nothing was heard at all — and above the queued length if this is somehow
+   * called after the turn drained, where the honest answer is "all of it".
+   */
+  heardMs(): number {
+    const context = this.context;
+    if (!context || !this.turnStartAt) return 0;
+    const played = context.currentTime - this.turnStartAt;
+    return Math.round(Math.min(Math.max(played, 0), this.turnSeconds) * 1000);
   }
 
   /**
@@ -839,6 +910,15 @@ export class PcmPlayer {
     // order of these two lines is the adaptation: this chunk resumes on the
     // corrected prime rather than on the one that failed.
     const startAt = this.nextStart(context);
+    // The first chunk after a turn boundary anchors the turn's own clock; the
+    // rest only extend its length. `awaitingTurn` is read here before `watch`
+    // above has a chance to matter, and cleared by `watch` itself — so this
+    // reads it off the queue instead: an empty queue is a new turn.
+    if (this.sources.size === 0) {
+      this.turnStartAt = startAt;
+      this.turnSeconds = 0;
+    }
+    this.turnSeconds += buffer.duration;
     // Measured before it is scheduled, so the envelope is ready the moment the
     // audio is — a lookahead that arrived after the sound would be no lookahead.
     this.measure(channel, startAt);
@@ -862,6 +942,9 @@ export class PcmPlayer {
     }
     this.sources.clear();
     this.playhead = 0;
+    // Read before this by whoever is about to send a truncate — see heardMs.
+    this.turnStartAt = 0;
+    this.turnSeconds = 0;
     // A barge-in ends the turn as surely as finishing it does, and whatever the
     // model says next starts a new one from an empty queue on purpose.
     this.awaitingTurn = true;

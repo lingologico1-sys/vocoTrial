@@ -51,6 +51,23 @@ export interface Persona {
    * change face, and a deliberate pick afterwards still wins.
    */
   voice?: string;
+  /**
+   * The same face's voice on OpenAI. A name from OPENAI_VOICES.
+   *
+   * A SECOND FIELD RATHER THAN A TRANSLATION OF THE FIRST, and the alternative
+   * is worth naming because it is the obvious one: a table mapping Kore to
+   * marin, Puck to ash, and so on by timbre. That table would be a claim about
+   * how two voices sound that neither API will confirm, that nobody would write
+   * the same way twice, and that would be silently wrong for exactly the face
+   * somebody cared most about. The vocabularies do not overlap by a single
+   * name, so there is nothing to derive from and no cost to asking.
+   *
+   * ABSENT IS ORDINARY AND NOT AN ERROR. Every face drawn before this existed
+   * has none, and a lesson published on one falls back to DEFAULT_OPENAI_VOICE
+   * — see the publish route, and studio, which says so on the page rather than
+   * leaving a teacher to wonder which voice their character got.
+   */
+  openAiVoice?: string;
 }
 
 /**
@@ -237,7 +254,7 @@ export async function draftPersona(image: string, prompt: string): Promise<Draft
  * Trimmed to the same ceilings the editor enforces, so a long reply cannot
  * arrive in a state the text box would not have let you type.
  */
-export function parseDraft(text: string, voice?: string): Persona {
+export function parseDraft(text: string, voice?: string, openAiVoice?: string): Persona {
   const fenced = text.trim().replace(/^```(?:json)?\s*/i, '').replace(/```$/, '');
   const start = fenced.indexOf('{');
   const end = fenced.lastIndexOf('}');
@@ -251,7 +268,11 @@ export function parseDraft(text: string, voice?: string): Persona {
             .trim()
             .slice(0, MAX_NAME_CHARS),
           bio: parsed.bio.trim().slice(0, MAX_BIO_CHARS),
+          // Both voices are carried through rather than re-read from the draft:
+          // the model is writing a biography, not choosing how it sounds, and a
+          // regenerated paragraph must not silently un-pick either of them.
           voice,
+          openAiVoice,
         };
       }
     } catch {
@@ -259,5 +280,5 @@ export function parseDraft(text: string, voice?: string): Persona {
     }
   }
 
-  return { fullName: '', bio: fenced.trim().slice(0, MAX_BIO_CHARS), voice };
+  return { fullName: '', bio: fenced.trim().slice(0, MAX_BIO_CHARS), voice, openAiVoice };
 }

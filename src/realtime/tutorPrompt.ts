@@ -606,6 +606,19 @@ cannot see a clock: never mention the time, and never say how much is left.`;
  * is an instruction and not a setting, so it is followed rather than obeyed.
  * You cannot read a payload back to check it took, the way `silenceDurationMs`
  * can be read back. The only test is listening to a call.
+ *
+ * ON ONE PROVIDER THAT IS NO LONGER THE WHOLE STORY. OpenAI's realtime session
+ * takes `audio.output.speed`, which is a rate applied to the synthesis rather
+ * than a request made of the model — obeyed, and readable back off the payload.
+ * So each entry below now carries a `speed` as well as its prose, and the
+ * publish route spends both where the model has one. They are not alternatives:
+ * the prose shortens sentences and narrows the vocabulary, which no playback
+ * rate can do, and the rate slows delivery, which no instruction reliably does.
+ *
+ * THE NUMBERS ARE CONSERVATIVE AND SHOULD BE TUNED BY EAR, like PATIENCE's. The
+ * field's range is 0.25–1.5 and the bottom of it is unintelligible; these are
+ * two small steps down, on the reasoning that a tutor already speaking six-word
+ * sentences does not also need to sound slowed down on a tape.
  */
 export type Pace = 'natural' | 'measured' | 'slow';
 
@@ -615,6 +628,11 @@ export const PACE: Array<{
   hint: string;
   /** The block composed under HOW YOU SPEAK. Empty composes no section at all. */
   text: string;
+  /**
+   * The synthesis rate, where the model takes one. Absent sends no field, on
+   * the same terms as every other absent setting — see SessionSettings.
+   */
+  speed?: number;
 }> = [
   {
     key: 'natural',
@@ -629,6 +647,7 @@ export const PACE: Array<{
     text: `Keep each sentence to about ten words and put one idea in each. Finish a
 sentence before you start the next, and leave a beat between them. Prefer the
 everyday word to the exact one.`,
+    speed: 0.9,
   },
   {
     key: 'slow',
@@ -638,12 +657,23 @@ everyday word to the exact one.`,
 clear pause before the next sentence. Use the same small set of everyday words
 over and over rather than reaching for a new one. When a word matters, say it
 once on its own before you use it in a sentence.`,
+    speed: 0.8,
   },
 ];
 
 /** The block a lesson's pace asks for. Unknown reads as natural, like patience. */
 export function paceText(pace: string | undefined): string {
   return (PACE.find((entry) => entry.key === pace) ?? PACE[0]).text;
+}
+
+/**
+ * The synthesis rate a lesson's pace asks for, where the model has one.
+ *
+ * Undefined for `natural` and for anything unrecognised, which is the same
+ * answer `paceText` gives and means the same thing: send no field.
+ */
+export function paceSpeed(pace: string | undefined): number | undefined {
+  return (PACE.find((entry) => entry.key === pace) ?? PACE[0]).speed;
 }
 
 /** Everything a composed prompt is built from. All of it is snapshot data. */

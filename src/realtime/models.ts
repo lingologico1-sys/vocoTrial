@@ -7,13 +7,22 @@
  * from the client would let any visitor run any model on the account, which is
  * the same hole the server-side system prompt closes.
  *
- * Every model here is Gemini Live. There used to be a `provider` field and a
- * union to go with it, because OpenAI Realtime was offered beside these; that
- * path is gone and a one-member union is a worse description of the world than
- * no union at all. The face-kit image models outlasted that removal by a
- * while and have since followed it: src/facekit/imageModels.ts dropped its own
- * provider field for the same reason, and nothing in this project calls OpenAI
- * any more.
+ * THE `provider` FIELD IS BACK, AND THE ARGUMENT THAT REMOVED IT STILL HOLDS.
+ * It went out with OpenAI Realtime on the reasoning that a one-member union
+ * describes the world worse than no union at all. That was an argument about
+ * the count and never about the axis, and the count is two again.
+ *
+ * WHAT HAS NOT COME BACK IS THE OLD TRANSPORT, which is the part worth being
+ * explicit about because git log makes it look available. That path went direct
+ * from the browser over WebRTC against an ephemeral secret, and WebRTC hands
+ * back an <audio> element: no PcmPlayer, so no AudioTap, so no visemes, no head
+ * motion, no audio-synced reveal, no AudioGap and no MicSpan. Every one of
+ * those was built after it was removed. The GPT models here run over the same
+ * relayed PCM socket Gemini does, and pay the same latency leg for it.
+ *
+ * The face-kit image models followed the original removal and have not come
+ * back with it: src/facekit/imageModels.ts has no provider field, and nothing
+ * outside the voice path calls OpenAI.
  *
  * Deliberately free of imports: functions/ compiles against workers-types with
  * no DOM lib, so this has to stay pure data.
@@ -31,17 +40,31 @@
  *
  * The meters differ as a consequence: Vertex bills through Cloud Billing on the
  * GCP project, AI Studio through its own account.
+ *
+ * A GOOGLE FACT AND NOTHING ELSE. OpenAI publishes one catalogue on one host,
+ * so an OpenAI entry carries no surface at all rather than a third member
+ * meaning "not applicable" — which is why ModelChoice below is a union and not
+ * one interface with an optional field.
  */
 export type Surface = 'vertex' | 'aistudio';
 
-export interface ModelChoice {
+/**
+ * Whose API serves a model, and therefore which wire shape it speaks.
+ *
+ * THE ONE AXIS THAT DECIDES WHICH CODE RUNS. A surface changes three values in
+ * one relay; a provider changes the transport frame by frame — the setup
+ * message, the event names, the tool protocol, the audio rate. So it picks
+ * between whole files (src/realtime/gemini.ts against src/realtime/openai.ts,
+ * geminiSetup against openAiSession) rather than branching inside one.
+ */
+export type Provider = 'google' | 'openai';
+
+interface ModelBase {
   /** What the client sends. Stable; the id underneath may change. */
   key: string;
   label: string;
-  /** Google's own model id. */
+  /** The provider's own model id. */
   id: string;
-  /** Which Google surface serves this model. See Surface. */
-  surface: Surface;
   /** Allowed by the server but kept out of the picker (verification probes). */
   hidden?: boolean;
   /**
@@ -71,6 +94,32 @@ export interface ModelChoice {
    */
   unverified?: boolean;
 }
+
+export interface GoogleModel extends ModelBase {
+  provider: 'google';
+  /** Which Google surface serves this model. See Surface. */
+  surface: Surface;
+}
+
+export interface OpenAiModel extends ModelBase {
+  provider: 'openai';
+}
+
+/**
+ * A UNION RATHER THAN AN OPTIONAL FIELD, so that `surface` cannot be read off a
+ * model that has none. `findModel(key)?.surface` used to be how the client
+ * decided whether to send `scheduling: 'SILENT'`; on an OpenAI entry that
+ * expression would quietly be `undefined`, which reads as "not AI Studio" and
+ * is right by accident. Narrowing on `provider` first makes the compiler ask
+ * the question instead.
+ */
+export type ModelChoice = GoogleModel | OpenAiModel;
+
+export const isGoogle = (model: ModelChoice): model is GoogleModel =>
+  model.provider === 'google';
+
+export const isOpenAi = (model: ModelChoice): model is OpenAiModel =>
+  model.provider === 'openai';
 
 /**
  * First entry is the default, and it is the half-cascade model rather than the
@@ -106,6 +155,7 @@ export const MODELS: ModelChoice[] = [
     key: 'gemini-flash-31',
     label: 'Gemini 3.1 Flash Live',
     id: 'gemini-3.1-flash-live-preview',
+    provider: 'google',
     surface: 'aistudio',
     teach: {
       label: 'Reliable progress tracking',
@@ -124,6 +174,7 @@ export const MODELS: ModelChoice[] = [
     key: 'gemini-native-audio',
     label: 'Gemini 2.5 Flash Native Audio',
     id: 'gemini-live-2.5-flash-native-audio',
+    provider: 'google',
     surface: 'vertex',
     teach: {
       label: 'Warmer, more expressive',
@@ -145,6 +196,31 @@ export const MODELS: ModelChoice[] = [
     // Which is not the same as permanent. Vertex serves no Gemini 3 or 3.1 Live
     // model under any spelling tried, so there is nothing here to migrate *to*
     // if that changes — re-probe with /api/live/models rather than assume.
+  },
+  {
+    key: 'gpt-realtime-21',
+    label: 'GPT Realtime 2.1',
+    id: 'gpt-realtime-2.1',
+    provider: 'openai',
+    teach: {
+      label: 'Steadiest turn-taking',
+      blurb:
+        'Judges when the learner has finished by what they said rather than by counting silence, and can be asked to speak slowly.',
+      caution:
+        'Costs more per minute of speech than the other two. How much more over a whole lesson is not yet known — it charges far less to re-read the conversation each turn, which is most of what a long lesson pays for, so the end-of-call figure is the one to read.',
+    },
+    // THE THIRD ENGINE, AND THE FIRST THAT IS NOT GOOGLE'S. Added because 3.1
+    // Flash Live is unreliable in ways no prompt reaches: turns spoken twice
+    // with `NON_BLOCKING` and `SILENT` both on the wire, answers the endpointing
+    // never commits, and one turn whose words arrived six seconds ahead of its
+    // sound. See src/realtime/openai.ts, which is a good deal shorter than
+    // gemini.ts precisely because none of the tool-scheduling apparatus that
+    // fights those has any counterpart here.
+    //
+    // Two siblings exist and are deliberately not listed yet —
+    // gpt-realtime-2.1-mini and gpt-4o-realtime-preview. Both are a line each
+    // once this one has been measured on a real lesson; neither is worth
+    // offering a teacher on the strength of the flagship working.
   },
 ];
 

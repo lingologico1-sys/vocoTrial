@@ -27,13 +27,13 @@
 import { readToken, tokenIsValid } from './auth/_cookie';
 
 /*
- * `OPENAI_API_KEY` was here. Nothing reads it now: OpenAI Realtime went first,
- * leaving face-kit image generation as its only consumer, and the GPT Image
- * models went with the rest of that branch — see the foot of
- * src/facekit/imageModels.ts. Declaring a variable nothing reads invites the
- * next person to wire something to it, so it is declared nowhere; the secret
- * can be deleted from the dashboard at leisure, since an unread secret costs
- * nothing but confusion.
+ * `OPENAI_API_KEY` left this list and has come back, which is the whole of its
+ * history worth keeping. It went when OpenAI Realtime did and again when the
+ * GPT Image models followed, on the rule that declaring a variable nothing
+ * reads invites the next person to wire something to it. Something reads it
+ * again — functions/api/live/openai.ts, the realtime relay — so the same rule
+ * puts it back. The secret was never deleted from the dashboard, which is why
+ * this is a declaration rather than a migration.
  */
 export interface GateEnv {
   /** Vertex AI key (GCP billing), primary then fallback — see _vertex.ts. */
@@ -45,6 +45,8 @@ export interface GateEnv {
    * only the models marked `surface: 'aistudio'` are served by it.
    */
   GOOGLE_API_KEY?: string;
+  /** OpenAI, for the realtime relay — see functions/api/live/openai.ts. */
+  OPENAI_API_KEY?: string;
   /** The site password. A Secret in the dashboard — never in wrangler.toml. */
   SITE_PASSWORD?: string;
 }

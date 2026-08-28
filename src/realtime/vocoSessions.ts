@@ -93,6 +93,27 @@ export interface VocoSession {
   brief: string;
   /** Asked in this order. See `composeTutorPrompt` on how strictly. */
   questions: string[];
+  /**
+   * Words the learner is expected to reach for, handed to the transcriber.
+   *
+   * NOT A PROMPT FIELD AND NOT SHOWN TO ANYBODY. The tutor never reads it and
+   * the student never sees it; it goes to the speech-to-text stage as
+   * `keywords`, which biases it towards words it would otherwise smooth into
+   * commoner ones. A lesson on the weather in which "grêle" comes back as
+   * "grelle" every time is a report marking a word the learner said correctly.
+   *
+   * OPTIONAL, EMPTY BY DEFAULT, AND NOT NEEDED FOR THE COMMON CASE. The
+   * questions are used as keywords unconditionally — see `lessonKeywords` in
+   * functions/api/live/_setup.ts — so a teacher who writes nothing here still
+   * gets the words the lesson is about. This is for the vocabulary a lesson is
+   * *for* rather than the vocabulary it is *written in*: a unit's word list,
+   * which the questions may never say out loud.
+   *
+   * GEMINI HAS NO SUCH FIELD, and a lesson carrying one simply runs without it
+   * there. /teach says so rather than offering a control that silently does
+   * nothing on two of the three models.
+   */
+  vocabulary?: string;
 
   // --- The tutor: who asks them, and how the answer is marked.
   //
@@ -354,6 +375,18 @@ export function capLooksTight(questionCount: number, capMinutes: number): boolea
 /** The consigne is read on a phone-width panel. This is about a paragraph. */
 export const MAX_BRIEF = 600;
 
+/**
+ * A word list, not an essay.
+ *
+ * Sized off what it is for rather than off what the field would take. Keywords
+ * bias a transcriber towards words it would otherwise mishear, and a list long
+ * enough to hold most of a language biases it nowhere — see MAX_KEYWORDS in
+ * functions/api/live/_setup.ts, which is the real ceiling and cuts at a hundred
+ * words. This is the box's own limit, set so that hitting it means the teacher
+ * has pasted something that was never a word list.
+ */
+export const MAX_VOCABULARY = 600;
+
 /** Time for ordering, entropy so two saves in one millisecond stay distinct. */
 export function newVocoSessionId(): string {
   return `voco:${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
@@ -374,4 +407,43 @@ export function looksLikeVocoSession(value: unknown): value is VocoSession {
     strings(session.questions) &&
     session.questions.length > 0
   );
+}
+
+/**
+ * How many transcription keywords are worth sending.
+ *
+ * A CAP RATHER THAN A LIMIT THE API PUBLISHES, and chosen for what the field
+ * does rather than for what it will accept. Keywords bias the transcriber
+ * towards words it would otherwise mishear; a list long enough to contain most
+ * of a language biases it towards nothing. Twenty questions at a handful of
+ * content words each, plus a teacher's vocabulary list, lands comfortably under
+ * this — so in practice it only truncates a lesson that pasted an essay into
+ * the vocabulary box.
+ */
+export const MAX_KEYWORDS = 100;
+
+/**
+ * The words a lesson expects to hear, for the transcriber to lean towards.
+ *
+ * DRAWN FROM THE QUESTIONS FIRST, because those are the words the learner is
+ * about to be asked to use and the ones an ASR stage has least context for. A
+ * teacher's vocabulary list is added on top when they wrote one — see
+ * `vocabulary` on VocaSession, which is optional and empty by default.
+ *
+ * SHORT WORDS ARE DROPPED. Keywords work by biasing towards an unusual word the
+ * transcriber would otherwise smooth into a common one; "the" and "and" are
+ * already what it guesses. Below four characters the bias is noise, and noise
+ * across a hundred entries is a transcriber leaning nowhere.
+ *
+ * Deliberately not folded to one case: a proper noun and its lowercase
+ * homograph are different words to a transcriber, and keeping both costs one
+ * slot out of a hundred.
+ */
+export function lessonKeywords(questions: string[], vocabulary?: string): string[] {
+  const source = [...questions, ...(vocabulary ? [vocabulary] : [])].join(' ');
+  const words = source
+    .split(/[^\p{L}\p{M}'-]+/u)
+    .map((word) => word.replace(/^['-]+|['-]+$/g, ''))
+    .filter((word) => word.length >= 4);
+  return [...new Set(words)].slice(0, MAX_KEYWORDS);
 }

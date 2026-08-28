@@ -1,17 +1,19 @@
 /**
- * What a call cost, from what Google actually reported.
+ * What a call cost, from what the provider actually reported.
  *
- * This is not a wall-clock guess. Gemini sends real token counts during the
- * session, in `usageMetadata`, and they were already arriving at the browser
- * and being dropped on the floor. src/realtime/gemini.ts now collects them;
- * this file prices them.
+ * This is not a wall-clock guess. Both providers send real token counts during
+ * the session — Gemini in `usageMetadata`, OpenAI on every `response.done` —
+ * and the two clients collect them into the same buckets. This file prices
+ * them.
  *
  * Two things it deliberately does not do:
  *
- *  - It does not bill the Cloudflare Worker time the relay spends. That leg
- *    exists because Google's ephemeral tokens are refused on this account (see
- *    functions/api/live/gemini.ts) and it is metered per call, so every number
- *    here is a floor by construction.
+ *  - It does not bill the Cloudflare Worker time the relay spends. Both
+ *    providers go through one — Google's because its ephemeral tokens are
+ *    refused on this account, OpenAI's by choice, since the alternative is
+ *    WebRTC and WebRTC has no PCM to measure (see functions/api/live/
+ *    openai.ts). It is metered per call either way, so every number here is a
+ *    floor by construction.
  *  - It does not survive a socket that dies mid-call. Usage is whatever was
  *    reported before the connection went away, so an errored call under-reports.
  *
@@ -64,6 +66,28 @@ export const RATES_VERIFIED_ON = '2026-08-05';
 
 // Gemini Live bills no separate cached rate on this path — we use no context
 // caching — so the cached buckets carry the uncached rate and stay at zero.
+//
+// OPENAI IS THE OPPOSITE, AND IT IS THE MOST INTERESTING NUMBER IN THIS FILE.
+// Its cached audio input is $0.40 against $32 uncached — eighty to one — and a
+// realtime API re-sends the whole conversation as input on every single turn.
+// This file already says, under `speakingTime` below, that Gemini charges that
+// re-read at full price because nothing on that path caches. So the comparison
+// is not the one the headline rates suggest:
+//
+//   - Per second of *fresh* speech, OpenAI costs about 3.3x Gemini. Its tokens
+//     are coarser (10/s in and 20/s out against Gemini's 32/s both ways), which
+//     already absorbs most of the 10x gap in the per-token price.
+//   - Per second of *re-read* conversation — which is the term that grows with
+//     the square of a lesson's length, and therefore dominates a fifteen-minute
+//     one — OpenAI is far cheaper.
+//
+// Which of those wins over a real lesson is not predictable from this table and
+// has not been measured. The diagnostic's cost block is the instrument; run the
+// same lesson on both and read it. Nothing in the UI should claim a total until
+// somebody has. See the `caution` on the model in models.ts, worded to say
+// "more per minute of speech" and not "more".
+//
+// Verified 2026-08-27 against developers.openai.com/api/docs/models.
 const RATES: Record<string, ModelRates> = {
   'gemini-3.1-flash-live-preview': {
     textInput: 0.75,
@@ -81,6 +105,14 @@ const RATES: Record<string, ModelRates> = {
     textOutput: 2,
     audioOutput: 12,
   },
+  'gpt-realtime-2.1': {
+    textInput: 4,
+    cachedTextInput: 0.4,
+    audioInput: 32,
+    cachedAudioInput: 0.4,
+    textOutput: 24,
+    audioOutput: 64,
+  },
 };
 
 /**
@@ -91,9 +123,10 @@ const RATES: Record<string, ModelRates> = {
  * of speech. That is the only clock we have on the *content* of a call — the
  * wall clock knows how long the connection was open, not who was talking.
  *
- * Input and output are the same rate on Gemini. They were not on OpenAI, which
- * billed one token per 100 ms of the user and one per 50 ms of the assistant;
- * the two fields survive that provider because the shape is right either way.
+ * Input and output are the same rate on Gemini and are not on OpenAI, which
+ * bills one token per 100 ms of the user and one per 50 ms of the assistant.
+ * The two fields survived that provider's removal because the shape was right
+ * either way, and are load-bearing again.
  *
  * Keyed by ModelChoice.id, with the same trap the RATES table above documents.
  *
@@ -105,6 +138,20 @@ export const AUDIO_RATES_VERIFIED_ON = '2026-08-06';
 const AUDIO_TOKENS_PER_SECOND: Record<string, { input: number; output: number }> = {
   'gemini-3.1-flash-live-preview': { input: 32, output: 32 },
   'gemini-live-2.5-flash-native-audio': { input: 32, output: 32 },
+  /*
+   * NOT VERIFIED AGAINST CURRENT DOCUMENTATION, and flagged rather than quietly
+   * carried. These are the figures this file recorded for OpenAI Realtime
+   * before that provider was removed — one token per 100ms of the user, one per
+   * 50ms of the assistant — and they are the reason the input and output fields
+   * are separate at all, since Gemini has never needed them to differ.
+   *
+   * They are used for one thing: turning audio tokens back into seconds of
+   * speech, which is a readout and not a bill. The cost above is computed from
+   * the token counts the provider reports, so a wrong figure here misstates how
+   * long somebody talked and cannot misstate what it cost. Re-verify before
+   * anything starts reasoning from the seconds.
+   */
+  'gpt-realtime-2.1': { input: 10, output: 20 },
 };
 
 export interface SpeakingTime {

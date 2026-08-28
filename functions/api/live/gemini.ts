@@ -2,7 +2,15 @@ import { geminiSetup } from './_setup';
 import { VERTEX_KEY_NAMES, VERTEX_LIVE_URL, vertexKey, vertexModel } from '../_vertex';
 import { AISTUDIO_KEY_NAME, AISTUDIO_LIVE_URL, aiStudioKey, aiStudioModel } from '../_aistudio';
 import { resolveInstructions, resolveSettings } from './_resolve';
-import { findModel } from '../../../src/realtime/models';
+import {
+  CONFIG_GRACE_MS,
+  bridgeClose,
+  forwarder,
+  readConfigFrame,
+  readPingFrame,
+  upstreamWatch,
+} from './_relay';
+import { findModel, isGoogle } from '../../../src/realtime/models';
 import { defaultLanguageCode, findLanguage } from '../../../src/realtime/languages';
 import { type GateEnv, json } from '../_middleware';
 
@@ -15,11 +23,11 @@ import { type GateEnv, json } from '../_middleware';
  * as ?key=, ?access_token=, a Bearer header or x-goog-api-key. It is not a
  * WebSocket problem, so no amount of fixing the socket call would have helped.
  *
- * The cost is real and worth stating: audio now hops through Cloudflare instead
- * of going browser-to-Google, which adds a leg of latency and bills Worker
- * time for the length of every call. It is the only voice path the app has —
- * the OpenAI Realtime one, which went direct over WebRTC and paid neither, was
- * removed — so nothing here is a fallback for anything.
+ * The cost is real and worth stating: audio hops through Cloudflare instead of
+ * going browser-to-Google, which adds a leg of latency and bills Worker time
+ * for the length of every call. The OpenAI route beside this one pays it too,
+ * and by choice rather than by necessity — see _relay.ts, which holds
+ * everything the two have in common and the argument for why they have it.
  *
  * What survives from the old design is the part that mattered: the key stays
  * server-side, and the agent's configuration is not the browser's to choose —
@@ -35,85 +43,6 @@ import { type GateEnv, json } from '../_middleware';
  * is a property of the model rather than a setting.
  */
 
-/**
- * How long to wait for the browser's config frame before setting up without it.
- *
- * A socket carries no request body, so instructions and settings arrive as the
- * first frame the client sends rather than in the URL — they are far too long
- * for a query string. That makes the handshake dependent on a client that knows
- * to send one, and a cached older bundle does not. Rather than hang forever
- * waiting, fall back to the defaults after this long and let the call proceed.
- */
-const CONFIG_GRACE_MS = 3_000;
-
-/**
- * Reads a `{"ping": <number>}` frame, or reports that this is not one.
- *
- * THE ONE FRAME THE RELAY ANSWERS ITSELF. Everything else in either direction
- * is forwarded verbatim, which is what makes this file cheap and what makes it
- * invisible: a call that takes nine seconds to say hello looks identical from
- * the browser whether those seconds were spent in Google or in the two extra
- * hops this proxy adds. That was an open question on 2026-08-27 and there was
- * no measurement anywhere that could close it.
- *
- * So the browser pings and the Worker pongs, and the round trip that comes back
- * is the browser-to-Worker leg on its own — the half of the detour that runs
- * over the learner's own connection. Paired with `upgradeMs` below it bounds
- * the whole detour, and a bound is all that is needed here: if the two together
- * are a fifth of a second then a nine-second silence was Google's, and no
- * amount of removing this relay would have helped.
- *
- * Deliberately not forwarded upstream. Google has no idea what a ping frame is
- * and would be within its rights to close on one.
- */
-function readPingFrame(data: unknown): number | null {
-  if (typeof data !== 'string') return null;
-  /*
-   * THE LENGTH TEST IS NOT AN OPTIMISATION, IT IS THE POINT. Every microphone
-   * frame the browser sends is a string too — `{"realtimeInput":{"audio":{…
-   * base64 …}}}` — and without this, `includes` scans the whole of one, dozens
-   * of times a second, for the entire length of a call. That is this Worker's
-   * steady-state CPU, spent proving that an audio frame is not a ping.
-   *
-   * It matters because a Worker has a CPU budget and the runtime takes the
-   * isolate away when it is spent, leaving both sockets open and nothing
-   * running behind them — which is exactly what a call looks like from the
-   * browser when it goes deaf with no close frame. See RELAY_DEAD_PINGS.
-   *
-   * A ping is `{"ping":1756304400000}` and nothing else, so anything longer
-   * than this is something else. Generous by a factor of three, because being
-   * wrong here means never answering a ping again.
-   */
-  if (data.length > 64 || !data.includes('"ping"')) return null;
-
-  try {
-    const parsed = JSON.parse(data) as Record<string, unknown> | null;
-    if (!parsed || typeof parsed !== 'object') return null;
-    return typeof parsed.ping === 'number' ? parsed.ping : null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Reads a `{"config": …}` opening frame, or reports that this is not one.
- *
- * `null` means "not a config frame" and is distinct from a config frame with
- * nothing in it, which means "use the defaults" and is a perfectly ordinary
- * thing for the client to send.
- */
-function readConfigFrame(data: unknown): { config: unknown } | null {
-  if (typeof data !== 'string') return null;
-
-  try {
-    const parsed = JSON.parse(data) as Record<string, unknown> | null;
-    if (!parsed || typeof parsed !== 'object' || !('config' in parsed)) return null;
-    return { config: parsed.config ?? {} };
-  } catch {
-    return null;
-  }
-}
-
 export async function onRequest(
   context: EventContext<GateEnv, string, Record<string, unknown>>,
 ): Promise<Response> {
@@ -128,7 +57,20 @@ export async function onRequest(
   const modelKey = params.get('model') ?? '';
   const choice = findModel(modelKey);
   if (!choice) {
-    return json({ error: `Unknown Gemini model "${modelKey}"`, code: 'bad_model' }, 400);
+    return json({ error: `Unknown model "${modelKey}"`, code: 'bad_model' }, 400);
+  }
+  /*
+   * ONE ROUTE PER PROVIDER, AND THE ALLOWLIST IS SHARED BETWEEN THEM. A key
+   * that names an OpenAI model is a real key — it is simply not this socket's
+   * — so it is refused here rather than silently reaching for a Google URL
+   * with a Google key and failing upstream with a message about a model id.
+   * See functions/api/live/openai.ts.
+   */
+  if (!isGoogle(choice)) {
+    return json(
+      { error: `"${modelKey}" is not a Gemini model`, code: 'wrong_provider' },
+      400,
+    );
   }
 
   /**
@@ -199,63 +141,6 @@ export async function onRequest(
   google.accept();
   fromWorker.accept();
 
-  /**
-   * Forwards a frame, normalising whatever the runtime handed us.
-   *
-   * `event.data` is not always a string or ArrayBuffer here — Google's frames
-   * arrive as Blobs, and `send()` turns a Blob into the literal text
-   * "[object Blob]", which is what the browser received before this existed.
-   *
-   * Sends go through a per-direction promise chain because the Blob conversion
-   * is async: forwarding without one lets a converted frame overtake a
-   * synchronous one, and a Live stream reordered by even one frame is audible.
-   */
-  const forwarder = (target: WebSocket) => {
-    let chain: Promise<void> = Promise.resolve();
-    /**
-     * How many frames are waiting on the chain.
-     *
-     * THE FAST PATH BELOW IS ONLY SAFE WHILE THIS IS ZERO. A frame that needs
-     * no conversion can go straight out — but only if nothing is queued ahead
-     * of it, or it would overtake a Blob still converting and reorder the
-     * stream, which is the exact bug the chain was built to prevent.
-     */
-    let queued = 0;
-    return (data: unknown) => {
-      const plain = typeof data === 'string' || data instanceof ArrayBuffer;
-      /*
-       * EVERY FRAME GOING UP IS A STRING, so before this the whole async
-       * machinery ran on the microphone: a promise allocated and a microtask
-       * scheduled dozens of times a second, all of it to hand a string to
-       * `send` unchanged. Only Google's frames arrive as Blobs and actually
-       * need converting. A Worker that spends its CPU budget is taken away
-       * mid-call with its sockets left open, so this is not tidiness.
-       */
-      if (plain && queued === 0) {
-        try {
-          target.send(data as string | ArrayBuffer);
-        } catch {
-          // The peer went away mid-flight; the close handlers tear the pair down.
-        }
-        return;
-      }
-      queued += 1;
-      chain = chain
-        .then(async () => {
-          const payload = plain
-            ? (data as string | ArrayBuffer)
-            : await new Response(data as BodyInit).arrayBuffer();
-          target.send(payload);
-        })
-        .catch(() => {
-          // The peer went away mid-flight; the close handlers tear the pair down.
-        })
-        .then(() => {
-          queued -= 1;
-        });
-    };
-  };
-
   const toGoogle = forwarder(google);
   const toClient = forwarder(fromWorker);
 
@@ -311,35 +196,7 @@ export async function onRequest(
 
   const grace = setTimeout(() => sendSetup(null), CONFIG_GRACE_MS);
 
-  const upgradeMs = Date.now() - reachedAt;
-
-  /**
-   * The longest the upstream socket has gone quiet since the last pong.
-   *
-   * THE LEG NOTHING WAS WATCHING. The browser's ping measures browser to Worker
-   * and back; `upgradeMs` measures opening a fresh connection to Google. The
-   * socket this lesson is actually carried on — Worker to Google — had no
-   * instrument at all, and that is precisely where a stall would hide: on
-   * 2026-08-27 a call whose worst relay sample was 23ms still put a turn's
-   * words six seconds ahead of its sound, and every number on the page was
-   * clean.
-   *
-   * MAX SINCE THE LAST PONG, NOT QUIET RIGHT NOW. Pongs are ten seconds apart
-   * and a stall that fell between two of them would be sampled away entirely,
-   * so the gap is accumulated as frames arrive and read out on the next pong.
-   * The reset happens there, so each sample describes its own window.
-   *
-   * A GAP IS NOT A FAULT. Google says nothing while the learner talks, so quiet
-   * between turns is the protocol working. Only the browser knows where the
-   * turn boundaries are, so this stays a raw fact and the account it lands in
-   * supplies the meaning — see onRelay in types.ts.
-   *
-   * Cheap on purpose: two numbers and a subtraction per frame, no parsing, no
-   * Blob conversion. The forwarder below stays the only thing that touches the
-   * payload.
-   */
-  let lastGoogleAt = Date.now();
-  let googleMaxGapMs = 0;
+  const watch = upstreamWatch(Date.now() - reachedAt);
 
   fromWorker.addEventListener('message', (event) => {
     /*
@@ -349,49 +206,7 @@ export async function onRequest(
      */
     const ping = readPingFrame(event.data);
     if (ping !== null) {
-      /*
-       * TWO PONGS, AND THE DIFFERENCE BETWEEN THEM IS THE DIAGNOSIS.
-       *
-       * The queued one goes through the forwarder, so it sits behind whatever
-       * Google frames are still converting. That was always the point: a pong
-       * that jumped the queue would measure a path the audio never takes, and
-       * would read fastest exactly when the relay was most backed up.
-       *
-       * It also meant the instrument died with the thing it measured. On
-       * 2026-08-27 a call went deaf at about fifteen seconds and two of eleven
-       * pongs came back — which proved the failure was at or before this
-       * Worker, since a pong never touches Google, and could not say which of
-       * three things it was.
-       *
-       * So the direct one leaves immediately, past the queue, and carries
-       * everything a reader needs when nothing else survives. Direct arriving
-       * without the queued one is a wedged forwarder chain; neither arriving is
-       * this Worker not running at all. Nothing else tells those apart from the
-       * browser.
-       *
-       * The gap is measured to *now* and not to the last frame, so a socket
-       * that has been silent since well before this ping reports the silence it
-       * is still in rather than the last one it finished. Reset after reading,
-       * so the next sample describes the next window and nothing is counted
-       * twice — and it rides the direct pong, because the one measurement of
-       * the upstream leg must not be lost in exactly the failure that makes it
-       * worth having.
-       */
-      const quiet = Date.now() - lastGoogleAt;
-      try {
-        fromWorker.send(
-          JSON.stringify({
-            pong: ping,
-            direct: true,
-            upgradeMs,
-            googleMaxGapMs: Math.max(googleMaxGapMs, quiet),
-          }),
-        );
-        googleMaxGapMs = 0;
-      } catch {
-        // The browser went away mid-flight; the close handlers tear the pair down.
-      }
-      toClient(JSON.stringify({ pong: ping }));
+      watch.answer(ping, fromWorker, toClient);
       return;
     }
 
@@ -408,34 +223,10 @@ export async function onRequest(
   });
 
   google.addEventListener('message', (event) => {
-    // Stamped on arrival, before the forwarder's queue gets a say: this is
-    // meant to time Google's leg, and a frame that then waits behind a Blob
-    // conversion is the relay's cost, which `rttMs` already covers.
-    const now = Date.now();
-    const gap = now - lastGoogleAt;
-    if (gap > googleMaxGapMs) googleMaxGapMs = gap;
-    lastGoogleAt = now;
+    watch.note();
     toClient(event.data);
   });
 
-  // Either side closing must close the other, or the survivor leaks for the
-  // rest of the request's lifetime — and a hung Live socket bills for it.
-  const bridgeClose = (a: WebSocket, b: WebSocket) => {
-    a.addEventListener('close', (event) => {
-      try {
-        b.close(event.code === 1006 ? 1011 : event.code, event.reason);
-      } catch {
-        /* already closed */
-      }
-    });
-    a.addEventListener('error', () => {
-      try {
-        b.close(1011, 'peer error');
-      } catch {
-        /* already closed */
-      }
-    });
-  };
   bridgeClose(google, fromWorker);
   bridgeClose(fromWorker, google);
 
