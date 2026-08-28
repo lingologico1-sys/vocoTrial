@@ -42,7 +42,11 @@ import { defaultInstructions } from '../src/realtime/instructions';
 import { LANGUAGES, findLanguage } from '../src/realtime/languages';
 import { findModel } from '../src/realtime/models';
 import { lessonKeywords } from '../src/realtime/vocoSessions';
-import { DEFAULT_OPENAI_VOICE, patienceSettings } from '../src/realtime/settings';
+import {
+  DEFAULT_OPENAI_VOICE,
+  patienceSettings,
+  withLearnerTurnTaking,
+} from '../src/realtime/settings';
 import {
   PROGRESS_TOOL,
   TIME_UP_SIGNAL,
@@ -282,10 +286,35 @@ function buildPrompt(): string {
 function buildSetup(prompt: string): Record<string, unknown> {
   const model = findModel(MODEL_KEY)!;
   if (model.provider !== 'google') throw new Error('buildSetup is the Gemini path');
-  const setup = geminiSetup(model, aiStudioModel(model.id), findLanguage('fr')!, prompt, {
-    voice: PERSONA.voice,
-    ...patienceSettings('patient', model),
-  });
+  /*
+   * THROUGH `withLearnerTurnTaking`, BECAUSE THAT IS WHAT /ELEVE SENDS.
+   *
+   * This used to pass the patience preset alone, which left the probe testing a
+   * frame no learner ever gets: the student page fills four more turn-taking
+   * fields underneath whatever the lesson pinned, and those are exactly the
+   * fields most likely to be refused — a nested enum, a knob that is a sibling
+   * of the detector rather than a member of it. The docstring above says this
+   * runs the real setup frame, and this is what makes that true.
+   *
+   * IT DOES NOT MAKE THE PROBE TEST WHAT THEY DO. Endpointing needs audio and
+   * this socket carries typed text, so the detector never runs — what is under
+   * test here is only whether the surface *accepts* the frame, which is a
+   * refused setup and a dead page when it goes wrong. See the docstring's note
+   * on what a probe cannot tell you.
+   */
+  const setup = geminiSetup(
+    model,
+    aiStudioModel(model.id),
+    findLanguage('fr')!,
+    prompt,
+    withLearnerTurnTaking(
+      {
+        voice: PERSONA.voice,
+        ...patienceSettings('patient', model),
+      },
+      model,
+    ),
+  );
 
   /*
    * An experiment the app cannot run, bolted on here rather than in _setup.ts.
@@ -679,10 +708,16 @@ function buildOpenAiSession(prompt: string): Record<string, unknown> {
     model,
     findLanguage('fr')!,
     prompt,
-    {
-      voice: PERSONA.openAiVoice ?? DEFAULT_OPENAI_VOICE,
-      ...patienceSettings('patient', model),
-    },
+    // The same reasoning as the Gemini path above: the student page fills its
+    // own turn-taking underneath the lesson's, so a probe that skipped it would
+    // be testing a session object nobody is ever handed.
+    withLearnerTurnTaking(
+      {
+        voice: PERSONA.openAiVoice ?? DEFAULT_OPENAI_VOICE,
+        ...patienceSettings('patient', model),
+      },
+      model,
+    ),
     lessonKeywords(LESSON.questions),
   );
 }

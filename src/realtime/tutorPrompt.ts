@@ -418,6 +418,58 @@ export const KEEP_GOING_SIGNAL = `${SYSTEM_NOTE} You have gone quiet and the lea
 export const NOT_HEARD_SIGNAL = `${SYSTEM_NOTE} The learner answered, but their words never reached you — this is a fault on the line, not a silence. Tell them you did not catch that, warmly and briefly, and ask them to say it again. Do not move on to the next question, and do not guess at what they said.`;
 
 /**
+ * The note that puts a brand-new socket back into a lesson already in progress.
+ *
+ * THE ONE NOTE HERE THAT NAMES A QUESTION, and the exception proves the rule.
+ * KEEP_GOING_SIGNAL deliberately does not: the tutor it is talking to knows
+ * where it is, and a page that guessed would be overruling it on the strength
+ * of its own count. This one is talking to a tutor that has just been created.
+ * It holds the system instructions and an empty conversation — no greeting, no
+ * answers, no sense of place at all — so the page's count is not a rival
+ * account of where the lesson is, it is the only one left. Withholding it here
+ * would produce a tutor that starts the lesson over from question one, which is
+ * the failure this note exists to prevent.
+ *
+ * IT MUST ALSO STOP THE GREETING. `openingSignal` is what asks for one, and it
+ * is not sent on a resume — but a model handed an empty conversation and a
+ * prompt whose HOW THIS STARTS section describes saying hello will very often
+ * say hello anyway. To the learner that reads as the lesson restarting, which
+ * is exactly as bad as actually restarting it.
+ *
+ * WHAT IT DOES NOT DO IS EXPLAIN ITSELF. The learner is not told there was a
+ * fault, because from where they sit there was a pause and then the tutor
+ * carried on — and a tutor announcing a technical problem to a beginner in a
+ * language they are still assembling sentences in is worse than the pause was.
+ *
+ * `next` is the question to ask; null with a list behind it means the list is
+ * finished and all that is left is the ending the prompt describes. `total` is
+ * the length of that list, and zero means there is no list at all — the
+ * workshop's case, where there is no position to restore and the note falls
+ * back to what KEEP_GOING_SIGNAL would have said.
+ */
+export function resumeSignal(next: number | null, total: number): string {
+  /*
+   * Four shapes, and every one of them is a case that actually arises.
+   *
+   * The `next === 1` branch exists because "questions 1 to 0" is what one
+   * subtraction and no thought produces, and the stall it describes — before a
+   * single question was answered — is the likeliest one of all. The singular
+   * branch under it is the same care one question further on.
+   */
+  const where =
+    total === 0
+      ? `Carry on out loud from wherever the conversation had got to.`
+      : next === null
+        ? `Every question on your list has been answered. Do not ask another one: comment on where the conversation had got to, say the warm and specific sentence about how they did, and say goodbye — the ending your instructions describe.`
+        : next === 1
+          ? `Nothing on your list has been answered yet. Ask question 1 now and carry on down the list from there.`
+          : next === 2
+            ? `Question 1 on your list has been asked and answered already. Do not go back over it and do not ask it again. Ask question 2 now, and carry on down the list from there.`
+            : `Questions 1 to ${next - 1} on your list have been asked and answered already. Do not go back over them and do not ask them again. Ask question ${next} now, and carry on down the list from there.`;
+  return `${SYSTEM_NOTE} The connection dropped and has been remade, so you have lost your memory of this conversation — the learner has not, and they are mid-lesson with you. ${where} Do not greet them, do not introduce yourself and do not say hello: you are picking a conversation back up, not starting one. Say nothing about the connection, the fault or your memory of it.`;
+}
+
+/**
  * Which greeting the hour has earned, on the clock of whoever is talking.
  *
  * `getHours` reads the browser's own zone, and the browser is in the room with

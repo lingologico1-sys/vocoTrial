@@ -57,6 +57,28 @@ export interface SessionSettings {
   startSensitivity?: 'START_SENSITIVITY_HIGH' | 'START_SENSITIVITY_LOW';
   /** Gemini: how readily silence *ends* one. LOW is the patient setting. */
   endSensitivity?: 'END_SENSITIVITY_HIGH' | 'END_SENSITIVITY_LOW';
+  /**
+   * Gemini: whether detected speech cancels the turn the model is speaking.
+   *
+   * THE KNOB THAT DECIDES WHO WINS A FALSE POSITIVE. Google's default is
+   * `START_OF_ACTIVITY_INTERRUPTS`: anything its detector calls speech stops
+   * generation dead. That is barge-in, and barge-in is worth having — right up
+   * until the detector is wrong, at which point it is a question destroyed
+   * mid-word for a noise nobody made.
+   *
+   * On 2026-08-28 a lesson recorded exactly that: the tutor was cut off at
+   * +1:11.4 after "Est-ce que tu es retourné", `interrupted` arrived, and this
+   * browser's own voice gate had reported nothing between +1:07.1 and +1:25.0.
+   * Same stream, same moment, two detectors disagreeing — and the one that got
+   * to act on it was the one the learner could not hear the reason for.
+   *
+   * `NO_INTERRUPTION` takes that veto away. The model finishes what it is
+   * saying and the learner's speech is still heard, still transcribed, still
+   * answered on the next turn; what is lost is the ability to stop a tutor
+   * mid-sentence by talking over it. See LEARNER_TURN_TAKING for why the
+   * student page spends that and the workshop does not.
+   */
+  activityHandling?: 'START_OF_ACTIVITY_INTERRUPTS' | 'NO_INTERRUPTION';
 
   // --- OpenAI only.
   /**
@@ -147,6 +169,7 @@ const HOUSE_KEYS: Array<keyof HouseSettings> = [
   'silenceDurationMs',
   'startSensitivity',
   'endSensitivity',
+  'activityHandling',
   'vadMode',
   'vadThreshold',
   'vadEagerness',
@@ -408,26 +431,55 @@ export const PATIENCE: Array<{
  * lesson one question short. The common thread was the setup sending none of
  * these fields, so the sensitivity in force was one tuned for fluent speakers.
  *
- * HIGH start sensitivity is the direct answer to speech never starting a turn;
- * the prefix padding guards the first syllable of an utterance the detector
- * was slow to believe; LOW end sensitivity with an explicit silence duration
- * makes the commit deterministic instead of whatever the provider felt like.
- * The silence duration sits under the `patient` preset's 1200ms on purpose:
- * a teacher who chose a patience chose these two fields, and this only speaks
+ * The prefix padding guards the first syllable of an utterance the detector was
+ * slow to believe; LOW end sensitivity with an explicit silence duration makes
+ * the commit deterministic instead of whatever the provider felt like. The
+ * silence duration sits under the `patient` preset's 1200ms on purpose: a
+ * teacher who chose a patience chose those two fields, and this only speaks
  * where they said nothing.
+ *
+ * THE START SENSITIVITY WAS HIGH AND IS NOW LOW, WHICH IS A REVERSAL AND NOT A
+ * TUNING. HIGH was the direct answer to speech never starting a turn, and
+ * against that failure it worked. What it cost only became visible once there
+ * was an instrument for it: on 2026-08-28 the tutor was cut off mid-word at
+ * +1:11.4 — "Est-ce que tu es retourné", then nothing — with `interrupted` on
+ * the wire and this browser's own voice gate silent from +1:07.1 to +1:25.0.
+ * Google's detector called speech on audio our RMS gate did not, and under the
+ * default activity handling that call cancels the turn.
+ *
+ * HIGH AND `END_SENSITIVITY_LOW` TOGETHER ARE THE WORST PAIR AVAILABLE: latch
+ * onto any noise, then be reluctant to let go of it. While the detector
+ * believes the learner is mid-utterance the model does not generate, which is
+ * the shape of every long stall in that lesson — 20s, 15s and 42s of dead air
+ * against 5.7s and 1.3s on the turns that went normally. LOW start with the
+ * padding above is the pair that answers both failures: clearer evidence
+ * before a turn opens, and the syllable that evidence costs put back.
+ *
+ * `NO_INTERRUPTION` IS THE BELT TO THAT BRACE, and it is the one line here a
+ * teacher might reasonably want back. It gives up barge-in: a learner talking
+ * over the tutor no longer stops it, they are simply heard and answered next
+ * turn. For a beginner on a three-minute cap that is the cheaper loss — the
+ * lesson above spent 85 of its 181 seconds with the learner waiting — but it
+ * is a judgement about the room, so it is a knob on the panel and not a
+ * constant. See `activityHandling`.
  *
  * FOR THE STUDENT PAGE ONLY. The workshop pages keep sending nothing, because
  * comparing models includes comparing their defaults, and a bench that
- * silently pins four fields is a bench lying about what it measured.
+ * silently pins five fields is a bench lying about what it measured.
  */
 export const LEARNER_TURN_TAKING: Pick<
   SessionSettings,
-  'startSensitivity' | 'endSensitivity' | 'silenceDurationMs' | 'prefixPaddingMs'
+  | 'startSensitivity'
+  | 'endSensitivity'
+  | 'silenceDurationMs'
+  | 'prefixPaddingMs'
+  | 'activityHandling'
 > = {
-  startSensitivity: 'START_SENSITIVITY_HIGH',
+  startSensitivity: 'START_SENSITIVITY_LOW',
   endSensitivity: 'END_SENSITIVITY_LOW',
   silenceDurationMs: 1000,
   prefixPaddingMs: 300,
+  activityHandling: 'NO_INTERRUPTION',
 };
 
 /**
@@ -735,6 +787,17 @@ export const SETTING_FIELDS: SettingField[] = [
     options: [
       { value: 'END_SENSITIVITY_HIGH', label: 'High — ends a turn readily' },
       { value: 'END_SENSITIVITY_LOW', label: 'Low — waits longer' },
+    ],
+  },
+  {
+    key: 'activityHandling',
+    label: 'Barge-in',
+    hint: 'No-interrupt stops a noisy room cancelling the tutor mid-question.',
+    kind: 'select',
+    applies: isGoogle,
+    options: [
+      { value: 'START_OF_ACTIVITY_INTERRUPTS', label: 'Speech interrupts the tutor' },
+      { value: 'NO_INTERRUPTION', label: 'Let the tutor finish' },
     ],
   },
   {

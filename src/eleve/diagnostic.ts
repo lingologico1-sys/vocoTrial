@@ -810,6 +810,8 @@ export function buildDiagnostic(input: DiagnosticInput): string {
     'lines are the transcript as it was heard; the `·` lines are what the call did',
     'around it. The transcript is cleared when a new call is dialled and the events',
     'are not — so anything above the last `dialled` belongs to an earlier call.',
+    'A `redialled` line is not one of those: it is this lesson replacing a socket',
+    'that stopped answering, and the turns above it are the same conversation.',
     '',
   );
   put(timeline(input.turns, input.events));

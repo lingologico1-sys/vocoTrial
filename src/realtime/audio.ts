@@ -386,8 +386,23 @@ interface EnvelopeFrame extends EnvelopeSample {
  * Vancouver relayed through us-central1 and stays out of the way on a good
  * line. So the bet is not made: this is the opening guess, and PRIME_STEP_SECONDS
  * is how it is corrected by what actually happens.
+ *
+ * IT WAS 0.32 AND THE OPENING GUESS WAS STILL TOO LOW, for a reason that is
+ * about Gemini rather than about the transport. The 2026-08-28 diagnostic has
+ * a clean path underneath it — the relay leg 14ms at best and 20ms at worst
+ * over 19 samples — and four starvations anyway, 113ms, 829ms, 747ms and
+ * 995ms. The `thin` lines beside them descend gradually (79, 120, 61, 187,
+ * 235, 80) rather than falling off a cliff, and a gradual descent is the
+ * signature of a supply rate a little under playback, not of a main thread
+ * that hitched. One turn there emptied and refilled four times.
+ *
+ * Which is to say the model was handing back audio at about real time instead
+ * of faster than it, and a third of a second of slack cannot absorb a deficit
+ * that never stops accumulating — it can only decide how far into the turn the
+ * first hole falls. Two thirds is enough to cover the observed holes outright,
+ * and the step above still corrects it upward for a path that is worse.
  */
-const BASE_PRIME_SECONDS = 0.32;
+const BASE_PRIME_SECONDS = 0.6;
 
 /**
  * How much the cushion grows each time the queue is starved mid-speech.
@@ -417,6 +432,30 @@ const PRIME_STEP_SECONDS = 0.16;
  * account, in `starved` lines that say what the cushion was raised to.
  */
 const MAX_PRIME_SECONDS = 1;
+
+/**
+ * The widest cushion any call on this page has had to buy, in seconds.
+ *
+ * THE CLIMB USED TO DIE WITH THE CALL AND THE PATH DID NOT. Every player began
+ * at BASE_PRIME_SECONDS on the reasoning that "the thing being measured is this
+ * connection on this evening and not the browser" — which is right about what
+ * the measurement *means* and wrong about when it stops being true. A learner
+ * who redials after a bad call is on the same Chromebook, the same school
+ * uplink and the same region, thirty seconds later. Starting the guess over
+ * makes them pay for the same three or four audible holes again to relearn a
+ * number the last call already worked out.
+ *
+ * So the ratchet outlives the player. It is still a ratchet — see
+ * PRIME_STEP_SECONDS on why it never falls — and it is still bounded by
+ * MAX_PRIME_SECONDS, so the worst this can do is start a later call a second
+ * ahead of the clock, which is the cost that note already accepted.
+ *
+ * MODULE STATE AND NOT STORAGE, DELIBERATELY. It lasts as long as the tab, so a
+ * lesson dialled again after a stall inherits it and a fresh visit tomorrow
+ * does not. Persisting it would be claiming that a bad evening predicts a bad
+ * morning, and nothing here has ever measured that.
+ */
+let learnedPrimeSeconds = BASE_PRIME_SECONDS;
 
 /**
  * The longest dry spell still read as starvation rather than as a new turn.
@@ -526,12 +565,12 @@ export class PcmPlayer {
   /**
    * The cushion a dry queue currently restarts on, in seconds.
    *
-   * Starts at BASE_PRIME_SECONDS and climbs by PRIME_STEP_SECONDS with every
-   * starvation, to MAX_PRIME_SECONDS. Held for the life of the player, which is
-   * the life of one call: a fresh call gets a fresh guess, because the thing
-   * being measured is this connection on this evening and not the browser.
+   * Climbs by PRIME_STEP_SECONDS with every starvation, to MAX_PRIME_SECONDS.
+   * It opens at whatever the last call on this tab had to climb to rather than
+   * at BASE_PRIME_SECONDS — see `learnedPrimeSeconds`, which is where the
+   * reasoning for outliving one player is.
    */
-  private prime = BASE_PRIME_SECONDS;
+  private prime = learnedPrimeSeconds;
   /**
    * The smallest lead seen all call, in seconds. Console only, and monotonic.
    *
@@ -744,6 +783,9 @@ export class PcmPlayer {
      * old cushion wrong a second time.
      */
     this.prime = Math.min(MAX_PRIME_SECONDS, this.prime + PRIME_STEP_SECONDS);
+    // Carried past the end of this call, so the next one on this tab opens
+    // where this one finished rather than paying for the climb again.
+    learnedPrimeSeconds = Math.max(learnedPrimeSeconds, this.prime);
 
     const ms = Math.round(gap * 1000);
     const primeMs = Math.round(this.prime * 1000);

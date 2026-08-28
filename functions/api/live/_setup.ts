@@ -195,6 +195,24 @@ export function geminiSetup(
   });
 
   /*
+   * `activityHandling` IS A SIBLING OF THE DETECTOR, NOT A FIELD INSIDE IT, and
+   * that nesting is the whole reason this is a separate object rather than a
+   * fifth line above. `automaticActivityDetection` configures *what counts* as
+   * the learner speaking; this decides *what happens* to the turn in flight
+   * when it does. Folded in with the other four it would be a field Google
+   * ignores in silence, which is the failure mode this file exists to avoid —
+   * see the note on `behavior` above, which is the same mistake on a different
+   * knob.
+   *
+   * So `realtimeInputConfig` is present when either half has anything to say,
+   * and carries only the halves that do.
+   */
+  const realtimeInput = compact({
+    automaticActivityDetection: present(activityDetection) ? activityDetection : undefined,
+    activityHandling: settings.activityHandling,
+  });
+
+  /*
    * Pinned rather than left to the provider, which is the one place this file
    * does that. The documented default is the value being sent — and the socket
    * disagrees with the documentation, loudly enough that a learner hears it.
@@ -216,9 +234,7 @@ export function geminiSetup(
     inputAudioTranscription: {},
     outputAudioTranscription: {},
     ...compact({
-      realtimeInputConfig: present(activityDetection)
-        ? { automaticActivityDetection: activityDetection }
-        : undefined,
+      realtimeInputConfig: present(realtimeInput) ? realtimeInput : undefined,
       // Native-audio only, and rejected by the half-cascade model — the
       // applicability rules in settings.ts are what keep them off it.
       enableAffectiveDialog: settings.affectiveDialog,

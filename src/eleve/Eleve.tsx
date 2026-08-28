@@ -19,6 +19,7 @@ import {
   TIME_UP_SIGNAL,
   composeTutorPrompt,
   openingSignal,
+  resumeSignal,
 } from '../realtime/tutorPrompt';
 import { defaultInstructions } from '../realtime/instructions';
 import { findLanguage, defaultLanguageCode } from '../realtime/languages';
@@ -234,6 +235,47 @@ const STRANDED_AGAIN_MS = 20_000;
 const MAX_STRANDED_NUDGES = 3;
 
 /**
+ * How many stranded nudges are spent before the page stops asking this socket
+ * and opens another.
+ *
+ * THE LADDER USED TO BE THREE PRODS AND A SHRUG, and the third prod was never
+ * the one that worked. Every rung on it is `clientContent` down a socket that
+ * has already ignored two of them — and on 2026-08-28 the thing being prodded
+ * was a connection the relay could prove was silent: the Worker's own upstream
+ * watch reported Google sending nothing for 26.3s in one stretch, on a leg
+ * whose worst browser-to-relay sample all call was 20ms. There is nothing
+ * wrong with the path and nothing wrong with this page. A third sentence into
+ * that is a third sentence into a socket that is not listening.
+ *
+ * SO THE LAST RUNG CHANGES INSTRUMENT RATHER THAN REPEATING ONE. Two nudges is
+ * still where the evidence for persistence sits — the documented cure is
+ * re-engaging the tutor, and it does sometimes wake up — but once they have
+ * been spent, the thing that has not been tried is a different session. See
+ * `reconnect` in useVoiceCall, which keeps the lesson and replaces only the
+ * socket, and `resumeSignal`, which is how the new tutor is told where it is.
+ */
+const STRANDED_NUDGES_BEFORE_REDIAL = 2;
+
+/**
+ * How many times one lesson will do that.
+ *
+ * ONE, AND THE BUDGET IS THE LESSON'S RATHER THAN THE SOCKET'S. That placement
+ * is the whole of the safety here: the ladder's own counters are reset every
+ * time the call leaves `live`, which a redial does — so a budget kept beside
+ * them would be cleared by the very act it is meant to limit, and a genuinely
+ * dead path would be redialled every fifty seconds until the cap. This one is
+ * reset where a lesson begins instead, in `start`.
+ *
+ * ONE AND NOT TWO because of what a second would be evidence of. A redial that
+ * does not fix it says the fault is not this socket — a wedged region, an
+ * account limit, a model that has stopped answering this conversation — and
+ * none of those are things a third socket would find its way around. What is
+ * left after that is the ladder running out and TUTOR_GONE_MS saying so, which
+ * is an honest ending and reaches the learner in French.
+ */
+const MAX_REDIALS = 1;
+
+/**
  * How long a tutor may make no sound at all before the page stops waiting and
  * says so.
  *
@@ -427,6 +469,7 @@ export default function Eleve() {
           : {}),
         ...(session.startSensitivity ? { startSensitivity: session.startSensitivity } : {}),
         ...(session.endSensitivity ? { endSensitivity: session.endSensitivity } : {}),
+        ...(session.activityHandling ? { activityHandling: session.activityHandling } : {}),
         ...(session.affectiveDialog !== undefined
           ? { affectiveDialog: session.affectiveDialog }
           : {}),
@@ -676,6 +719,13 @@ export default function Eleve() {
     setAdvanced(null);
     setMarkingCost(null);
     setReportError(null);
+    /*
+     * The redial budget is a lesson's, not a socket's, so this is the one place
+     * it is cleared — see MAX_REDIALS, where clearing it anywhere else is the
+     * mistake being guarded against.
+     */
+    redials.current = 0;
+    redialling.current = false;
     await call.connect();
     call.say(openingSignal(), 'opening — greet the learner');
   };
@@ -858,6 +908,21 @@ export default function Eleve() {
    * quiet is the idle timer's to deal with, and it will.
    */
   const heardSinceStranded = useRef(true);
+  /**
+   * Redials spent on this lesson, and whether one is in flight.
+   *
+   * NEITHER IS CLEARED WITH THE REST OF THE LADDER, which is deliberate and is
+   * explained at MAX_REDIALS: a redial takes the call out of `live`, and every
+   * other counter here is reset by exactly that. `start` clears them, because
+   * a lesson is what the budget belongs to.
+   *
+   * `redialling` is the re-entry guard. The effect these are read from ticks
+   * once a second and `reconnect` is a promise — a socket that takes three
+   * seconds to open would otherwise be asked for three times over, and the
+   * second attempt would tear down the first mid-handshake.
+   */
+  const redials = useRef(0);
+  const redialling = useRef(false);
   const capMs = session ? capMinutesOf(session) * 60_000 : 0;
 
   /**
@@ -1068,6 +1133,94 @@ export default function Eleve() {
         Date.now() - strandedAt.current >= STRANDED_AGAIN_MS;
       const silenceDue =
         silent >= NUDGE_AFTER_MS && nudges.current < MAX_NUDGES && heardSinceNudge.current;
+
+      /*
+       * The stranded ladder has spent its nudges and there is a redial left.
+       *
+       * TESTED BEFORE THE NUDGE AND NOT INSTEAD OF IT, so this is the top rung
+       * of the same ladder rather than a second one: everything that makes
+       * `strandedDue` true — thirty seconds of tutor silence, a learner still
+       * trying, a settled microphone, twenty seconds since the last attempt —
+       * has to hold here too. What changes at the top is only what gets sent.
+       */
+      if (
+        strandedDue &&
+        strandedNudges.current >= STRANDED_NUDGES_BEFORE_REDIAL &&
+        redials.current < MAX_REDIALS &&
+        !redialling.current
+      ) {
+        redials.current += 1;
+        redialling.current = true;
+        /*
+         * THE LADDER STARTS OVER HERE, AND IT MUST START OVER *HERE*.
+         *
+         * The reset at the top of this effect looks like it covers this: a
+         * redial takes the call out of `live` and everything below is cleared
+         * there. It does not, and relying on it is a hang-up. That branch runs
+         * on a tick, and the gap between the old socket going and the new one
+         * reporting `live` is a few hundred milliseconds — so whether it runs
+         * at all is a race with a one-second interval, and the losing side of
+         * that race is the dangerous one.
+         *
+         * `tutorSoundAt` is why. It is the clock TUTOR_GONE_MS reads, and at
+         * this moment it says the tutor has been silent for the whole stall
+         * that got us here — well over a minute in the case worth redialling
+         * for. Carry that across and the very next tick hangs up the call this
+         * branch just rescued, before the new tutor has had a chance to speak.
+         *
+         * So the clocks are moved forward explicitly, in the same breath as the
+         * decision that makes them wrong. The new socket gets the full ladder
+         * again: thirty seconds before it counts as stranded, and its own
+         * nudges before anything else is concluded about it.
+         */
+        tutorSoundAt.current = Date.now();
+        silentSince.current = Date.now();
+        silentBecause.current = 'the socket being replaced';
+        strandedNudges.current = 0;
+        strandedAt.current = Date.now();
+        heardSinceStranded.current = true;
+        nudges.current = 0;
+        heardSinceNudge.current = true;
+        /*
+         * The next question is the page's count, and on a fresh socket it is
+         * the only count there is — the new tutor arrives remembering nothing.
+         * Null means there is nothing left to ask: either the list is finished
+         * and what is owed is the goodbye, or there was never a list. See
+         * resumeSignal, which tells those two apart on `total`.
+         */
+        let next: number | null = null;
+        for (let number = 1; number <= total; number++) {
+          if (!call.answered.includes(number)) {
+            next = number;
+            break;
+          }
+        }
+        /*
+         * Not awaited, because this effect is a tick and has nothing to do with
+         * the result. `redialling` is what keeps the next tick off it, and it
+         * is cleared either way — a redial that fails leaves the call in
+         * `error`, which is the honest state and the one the page should show.
+         */
+        void call
+          .reconnect(
+            `the tutor made no sound for ${(tutorQuiet / 1000).toFixed(0)}s across ` +
+              `${strandedNudges.current} stranded nudge(s), so this is redial ` +
+              `${redials.current} of ${MAX_REDIALS} rather than a third nudge; ` +
+              `${call.answered.length} of ${total} answered`,
+          )
+          .then(() => {
+            call.say(
+              resumeSignal(next, total),
+              `resuming — a new socket, told to ${
+                next === null ? 'close the lesson out' : `pick up at question ${next}`
+              }`,
+            );
+          })
+          .finally(() => {
+            redialling.current = false;
+          });
+        return;
+      }
 
       if (silenceDue || strandedDue) {
         if (strandedDue) {

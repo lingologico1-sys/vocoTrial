@@ -238,6 +238,18 @@ export interface CallEvent {
   kind:
     /** `connect` was called — one per press of the microphone. */
     | 'dialled'
+    /**
+     * `reconnect` was called: a fresh socket under a lesson already in
+     * progress, with the transcript and the count carried across.
+     *
+     * A SEPARATE KIND BECAUSE THE READER'S RULE DEPENDS ON IT. The header of
+     * the timeline tells whoever is reading it that the transcript is cleared
+     * on `dialled`, so anything above the last one belongs to an earlier call.
+     * That is exactly what a redial does not do — the turns above it are this
+     * lesson's — and a redial logged as a dial would send every reader of a
+     * recovered call to the wrong half of the account.
+     */
+    | 'redialled'
     /** The session reported a new status, with whatever it said about it. */
     | 'status'
     /** The page said something to the tutor as the learner. See `say`. */
@@ -625,6 +637,21 @@ export interface VoiceCall {
    */
   events: CallEvent[];
   connect: () => Promise<void>;
+  /**
+   * Replaces the socket without ending the conversation.
+   *
+   * WHAT SURVIVES IS THE LESSON AND WHAT DOES NOT IS THE SESSION: the
+   * transcript, the answered list, the learner-turn ceiling behind it and the
+   * clock the cap is measured against all carry across; the relay samples, the
+   * usage buckets and the stall timer start again, because they describe a
+   * socket and this is a new one.
+   *
+   * THE NEW TUTOR REMEMBERS NOTHING, and nothing here pretends otherwise. It
+   * arrives with the system instructions and an empty conversation, so whoever
+   * calls this owes it a note saying where the lesson had got to. See
+   * `resumeSignal` and the stranded ladder in Eleve.tsx.
+   */
+  reconnect: (why?: string) => Promise<void>;
   /**
    * Ends the call, in two registers.
    *
@@ -1388,6 +1415,23 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
    */
   const stall = useRef<number | null>(null);
   /**
+   * Whether the socket now closing is being replaced rather than given up on.
+   *
+   * THE OLD SESSION'S HANDLERS OUTLIVE THE DECISION TO REPLACE IT. `stop()`
+   * drives `onStatus('closed')` synchronously through the closure the dead
+   * session was built with, and that branch is written for a call that has
+   * ended: it puts the status to `closed`, forgets when the call started, and
+   * bills the elapsed time to `lastCallMs`. Every one of those is wrong for a
+   * redial — the lesson is still running, the cap is still counting from the
+   * original connect, and a page that saw `closed` flash would run its own
+   * closing machinery underneath the recovery.
+   *
+   * A ref rather than an argument because there is nothing to pass it to: the
+   * closure that reads it was created by a previous call to `dial` and cannot
+   * be reached any other way.
+   */
+  const resuming = useRef(false);
+  /**
    * When this page last put a note on the wire, for the barge-in line to read.
    *
    * Starts at -Infinity rather than 0 so the first interruption of a call is
@@ -1444,9 +1488,49 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
     [clearStall, record],
   );
 
-  const connect = useCallback(async () => {
-    record('dialled', `${latest.current.modelKey} · ${latest.current.language}`);
-    setTurns([]);
+  /**
+   * Opens a socket, either for a new conversation or under a running one.
+   *
+   * ONE FUNCTION AND NOT TWO, because everything about *making a call* is
+   * shared — the handlers, the settings, the error path — and the difference is
+   * confined to which state survives it. A second copy of this would be a
+   * second set of handlers to keep in step, and the ones below are where every
+   * instrument in the app is wired.
+   *
+   * `resume` MEANS THE LESSON IS ALREADY UNDER WAY. The transcript, the
+   * progress count, the learner-turn ceiling that governs it and the clock the
+   * cap is measured against all belong to the conversation rather than to the
+   * socket, so a redial keeps them. What is rebuilt is the socket and
+   * everything that describes one: the relay samples, the usage buckets, the
+   * stall timer.
+   *
+   * THE USAGE BUCKETS ARE THE ONE ARGUABLE CASE. They are zeroed either way,
+   * because they are provider-reported against a session and a fresh session
+   * starts its own count — carrying the old total forward would double-count
+   * the moment Google sends its first cumulative frame. The cost readout for a
+   * recovered lesson is therefore a floor, which is what its own note already
+   * says it is for a socket that dies.
+   */
+  const dial = useCallback(async (resume: boolean, why?: string) => {
+    record(
+      resume ? 'redialled' : 'dialled',
+      `${latest.current.modelKey} · ${latest.current.language}` +
+        (resume ? ` — a fresh socket under the lesson already running; ${why ?? 'no reason given'}` : ''),
+    );
+    /*
+     * The old socket goes first, and it goes quietly.
+     *
+     * BEFORE THE AWAIT BELOW, WHICH IS WHAT MAKES THE ORDER SAFE. `stop()`
+     * drives the dead session's `onStatus('closed')` synchronously, so it has
+     * finished nulling `session.current` before the new session is assigned to
+     * it. Tearing down after the connect would null the socket we just opened.
+     */
+    if (resume) {
+      resuming.current = true;
+      session.current?.stop();
+      session.current = null;
+    }
+    if (!resume) setTurns([]);
     setDetail(null);
     setMuted(false);
     clearStall();
@@ -1455,8 +1539,10 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
     stopWaiting();
     setTranscribing(false);
     queue.current.discard();
-    setOpeningDone(false);
-    tutorHasSpoken.current = false;
+    if (!resume) {
+      setOpeningDone(false);
+      tutorHasSpoken.current = false;
+    }
     said.current = { heard: '', shown: 0, stray: false };
     setUsage(emptyUsage());
 
@@ -1464,8 +1550,20 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
       onUsage: setUsage,
       onStatus: (next: SessionStatus, message?: string) => {
         record('status', message ? `${next} — ${oneLine(message)}` : next);
-        setStatus(next);
-        setDetail(message ?? null);
+        /*
+         * A socket being replaced does not get to say the call ended.
+         *
+         * The status is what every consumer keys off — /eleve runs its closing
+         * ladder on it — so letting `closed` through here for the half-second
+         * between the old socket going and the new one arriving would have the
+         * page finalise a lesson it is in the middle of rescuing. The event is
+         * still recorded above, because the account should show the seam.
+         */
+        const replaced = resuming.current && (next === 'closed' || next === 'error');
+        if (!replaced) {
+          setStatus(next);
+          setDetail(message ?? null);
+        }
         if (next === 'live' && startedAt.current === null) {
           startedAt.current = Date.now();
           setConnectedAt(startedAt.current);
@@ -1489,6 +1587,18 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
           setHeard(false);
           stopWaiting();
           setTranscribing(false);
+          /*
+           * Everything below belongs to the conversation rather than to the
+           * socket, so a redial keeps all of it.
+           *
+           * `openingDone` because the learner is long past the greeting and the
+           * pill would otherwise go back to promising a tutor that speaks
+           * first. `startedAt` because the cap is measured from it, and a
+           * recovered lesson that reset it would hand out a fresh three
+           * minutes for having stalled. `lastCallMs` because there is no call
+           * to bill yet — the one that is running has not ended.
+           */
+          if (resuming.current) return;
           setOpeningDone(false);
           tutorHasSpoken.current = false;
           // Measured from the moment the call went live rather than from the
@@ -1941,14 +2051,24 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
 
     try {
       lastActivity.current = Date.now();
-      // A new call is a new pass down the list. Reset here rather than on hang
-      // up, so the state stays readable on the summary of the call that ended.
-      accepted.current = [];
-      held.current = null;
-      setAnswered([]);
-      learnerTurns.current = 0;
-      micAnswers.current = 0;
-      setUnheard(false);
+      /*
+       * A new call is a new pass down the list. Reset here rather than on hang
+       * up, so the state stays readable on the summary of the call that ended.
+       *
+       * A REDIAL IS NOT A NEW PASS, and this is the block that decides it. The
+       * learner has answered these questions; the socket forgot, and the page
+       * did not. `learnerTurns` above all — it is the ceiling `acceptProgress`
+       * refuses reports against, so zeroing it would have the resumed tutor's
+       * very first report refused for a turn the learner demonstrably took.
+       */
+      if (!resume) {
+        accepted.current = [];
+        held.current = null;
+        setAnswered([]);
+        learnerTurns.current = 0;
+        micAnswers.current = 0;
+        setUnheard(false);
+      }
       const { modelKey, language: code, instructions, settings, keywords } = latest.current;
       const started = await startSession(handlers, modelKey, code, {
         instructions,
@@ -1964,8 +2084,39 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
       setConnectedAt(null);
       setStatus('error');
       setDetail(error instanceof Error ? error.message : 'Could not start the session');
+    } finally {
+      /*
+       * Cleared however the dial went, and only once it is over. A failed
+       * redial has left the lesson with no socket at all, and the `error`
+       * status it just set is the one thing that tells anybody so — but the
+       * flag above would have swallowed it if the catch ran while still set,
+       * which is why this is a `finally` and not a line in the `try`.
+       */
+      resuming.current = false;
     }
   }, [acceptProgress, append, clearStall, cue, onTranscript, record, reveal, say, stopWaiting]);
+
+  /** A conversation from the top: a cleared transcript and a fresh count. */
+  const connect = useCallback(() => dial(false), [dial]);
+
+  /**
+   * A fresh socket under the lesson already running.
+   *
+   * FOR A SOCKET THAT HAS STOPPED ANSWERING RATHER THAN ONE THAT CLOSED. The
+   * failure this exists for leaves everything looking healthy — the socket
+   * OPEN, the relay pongs coming back on time, the microphone still shipping
+   * audio — while Google sends nothing back for half a minute at a stretch.
+   * Nothing on this side can close a socket like that, because nothing on this
+   * side is broken; the only move left is to stop talking to it and open
+   * another.
+   *
+   * IT DOES NOT SAY ANYTHING TO THE NEW TUTOR, which is the caller's job and
+   * deliberately not this one's. A fresh session has no memory of the
+   * conversation, so it needs to be told where the lesson had got to — and
+   * what to say is a question about the lesson, which lives on the page that
+   * owns one. See the stranded ladder in Eleve.tsx and `resumeSignal`.
+   */
+  const reconnect = useCallback((why?: string) => dial(true, why), [dial]);
 
   // Read-then-set rather than a functional updater: the session call is a side
   // effect, and StrictMode double-invokes updaters in development, so putting
@@ -2001,6 +2152,7 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
     answered,
     events,
     connect,
+    reconnect,
     hangUp,
     toggleMute,
     mute,
