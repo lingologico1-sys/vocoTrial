@@ -258,7 +258,29 @@ export interface SessionHandlers {
    * one per question is the feature working; anything else is worth reading the
    * transcript over. See `echoArmed` in gemini.ts for what arms it.
    */
-  onEchoTurn?: () => void;
+  onEchoTurn?: (turn: { afterFlushMs: number }) => void;
+  /**
+   * A tool response went out on a restart surface, and what was predicted of it.
+   *
+   * THE DECISION, NOT THE OUTCOME, and it is here because three diagnostics in
+   * a row were misread without it. Only dropped turns left a mark, so a
+   * timeline could not distinguish the arming being wrong from the arming never
+   * happening — and those have opposite fixes. This says a restart was bought,
+   * whether the catch was set for it, and which release let go: `turn` is the
+   * ordinary path, `timeout` is the model taking longer than RESPONSE_HOLD_MS
+   * to begin its reply.
+   *
+   * READ IT AGAINST THE `echo-turn` LINE THAT SHOULD FOLLOW. Armed with a drop
+   * after it is the feature working. Armed with no drop is a restart that never
+   * came, and the expiry gave the turn back. Not armed is a turn deliberately
+   * let through — correct after a bookkeeping-only turn, and the whole bug on
+   * 2026-08-28 when it was every question in the call.
+   */
+  onRestartBought?: (flush: {
+    armed: boolean;
+    release: 'turn' | 'timeout';
+    calls: number;
+  }) => void;
   /**
    * Running totals for the call so far, pushed every time Google reports usage
    * rather than once at the end. A call that dies mid-flight never sends a

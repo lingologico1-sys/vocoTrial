@@ -418,6 +418,18 @@ export async function startGeminiSession(
   /** Tool responses waiting for the turn in flight to end. See the tool call. */
   let heldResponses: unknown[] = [];
   let responseHold: number | null = null;
+  /**
+   * Whether the last model turn to complete made a sound.
+   *
+   * THE ARMING EVIDENCE, KEPT PAST THE TURN THAT PRODUCED IT. It used to be
+   * read inline at `turnComplete`, which armed correctly only when that frame
+   * was also what released the hold. A hold released by RESPONSE_HOLD_MS
+   * instead — the model taking longer than five seconds to start its reply —
+   * flushed from a timer with no turn in hand and armed nothing, so the restart
+   * it bought was spoken in full. Same decision, two release paths, and only
+   * one of them was making it.
+   */
+  let lastTurnSpoke = false;
 
   /**
    * The next model turn is the one the tool response caused, and nobody hears it.
@@ -486,14 +498,35 @@ export async function startGeminiSession(
     socket.send(JSON.stringify({ toolResponse: { functionResponses: responses } }));
   };
 
-  /** Lets go of anything held, whatever released it. */
-  const flushResponses = () => {
+  /**
+   * Lets go of anything held, whatever released it — and predicts the restart
+   * that letting go buys.
+   *
+   * THE ARMING LIVES HERE BECAUSE THE FLUSH IS THE EVENT. A restart is bought
+   * by the response reaching Google and by nothing else, so every path that
+   * sends one has to make the same prediction: the `turnComplete` that ends the
+   * wait, and the timer that gives up on it. Deciding at one of them and not
+   * the other is how a slow reply came to be spoken twice.
+   */
+  const flushResponses = (release: 'turn' | 'timeout') => {
     if (responseHold !== null) {
       clearTimeout(responseHold);
       responseHold = null;
     }
     const waiting = heldResponses;
     heldResponses = [];
+    if (!waiting.length) return;
+    if (!silentResponses) {
+      // `lastTurnSpoke` is the whole of the judgement — see `echoArmed`. A turn
+      // that said nothing schedules no generation of its own, so its restart is
+      // the tutor's only speech on this question and must not be dropped.
+      if (lastTurnSpoke) {
+        echoArmed = true;
+        echoAt = Date.now();
+        echoSubstantive = false;
+      }
+      handlers.onRestartBought?.({ armed: lastTurnSpoke, release, calls: waiting.length });
+    }
     sendResponses(waiting);
   };
 
@@ -737,33 +770,35 @@ export async function startGeminiSession(
          * always, and the arming happens where the answer is known.
          */
         /*
-         * A CALL THAT ARRIVED BETWEEN TURNS HAS NOTHING TO WAIT FOR, and on the
-         * restart surface it used to wait five seconds anyway. The hold below
-         * is for a turn in flight: it exists so the arming can read whether
-         * that turn made a sound, and `answering` false means the turn is over
-         * and the flag has already been read and reset. Nothing further will
-         * release it, so it sits out the whole of RESPONSE_HOLD_MS and the
-         * tutor's next turn — the one this response buys — starts five seconds
-         * late. On 2026-08-28 questionDone(2) landed at +0:09.0 with the turn
-         * already complete, flushed at +0:14.0 into the middle of a seven-second
-         * answer, and every number in that lesson was late from there.
+         * "A CALL THAT ARRIVED BETWEEN TURNS HAS NOTHING TO WAIT FOR" IS FALSE
+         * ON THIS SURFACE, AND GATING THE HOLD ON `spoken` COST A LESSON. It
+         * reads well: `answering` is false, the previous turn is over and its
+         * flag already read, so nothing is left to release the hold. What it
+         * misses is that the turn worth waiting for has not started yet. This
+         * model emits its bookkeeping *ahead* of the reply it belongs to —
+         * questionDone lands between turns, and the tutor's actual answer
+         * begins half a second later. Holding until that turn completes is what
+         * puts a spoken turn behind `spokeThisTurn`, and it is the only thing
+         * that ever arms the catch on the ordinary question.
          *
-         * Sent at once instead, and unarmed: no turn made a sound, so the
-         * restart is the tutor's reply rather than a duplicate of anything.
+         * Sent at once instead, the response was never in `heldResponses` when
+         * the reply completed, so nothing armed and every restart was spoken.
+         * On 2026-08-28 that was a tutor asking each question twice — "Qui sont
+         * tes camarades de chambre cette année?" at +0:07.2 and again at
+         * +0:11.3 — with not one echo-turn line in the whole call, which is the
+         * signature: no drops at all rather than the wrong drops.
          *
-         * WHICH LEAVES ONE CONDITION FOR BOTH SURFACES. They arrived at it from
-         * opposite directions — one holds a mid-speech call so the response
-         * lands after the speech, the other so the arming can be decided — and
-         * `spoken` is the answer to both questions. The two notes above are kept
-         * because the reasoning is not the same reasoning, and a later change to
-         * either surface should not read this as one rule.
+         * So on a restart surface every response waits, and the five seconds it
+         * can cost when no turn follows is the price of that. RESPONSE_HOLD_MS
+         * is the bound, and a hold that reaches it is the model failing to
+         * generate rather than this hold being pointless.
          */
-        if (spoken) {
+        if ((silentResponses && spoken) || !silentResponses) {
           heldResponses.push(...responses);
           if (responseHold === null) {
             responseHold = window.setTimeout(() => {
               responseHold = null;
-              flushResponses();
+              flushResponses('timeout');
             }, RESPONSE_HOLD_MS);
           }
         } else {
@@ -929,7 +964,10 @@ export async function startGeminiSession(
              */
             turnBeganAt = 0;
             generatedAt = 0;
-            handlers.onEchoTurn?.();
+            // How long after the flush it arrived, because that number is what
+            // separates a restart from a stray frame: Google took 5.6s once,
+            // and the thing that wrongly spent the arming took 100ms.
+            handlers.onEchoTurn?.({ afterFlushMs: Date.now() - echoAt });
           }
           return;
         }
@@ -1068,12 +1106,8 @@ export async function startGeminiSession(
          * generation of its own, and the restart is how the tutor gets its
          * voice back at all.
          */
-        if (!silentResponses && heldResponses.length && spokeThisTurn) {
-          echoArmed = true;
-          echoAt = Date.now();
-          echoSubstantive = false;
-        }
-        flushResponses();
+        lastTurnSpoke = spokeThisTurn;
+        flushResponses('turn');
         // The queue is about to run dry because the agent has stopped talking,
         // not because anything failed to arrive. Saying so keeps the player's
         // underrun logging honest — see PcmPlayer.endTurn.

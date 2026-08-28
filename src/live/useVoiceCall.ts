@@ -391,6 +391,16 @@ export interface CallEvent {
     | 'silent-turn'
     /** A restarted turn, dropped before the learner heard it. See onEchoTurn. */
     | 'echo-turn'
+    /**
+     * A tool response went out on a restart surface, and what was predicted.
+     *
+     * IT SITS UNDER THE `tool` LINE IT BELONGS TO and is the line that says
+     * whether the suppression below is even switched on. An `echo-turn` on its
+     * own has never been enough to read one of these calls: it marks the drops
+     * and says nothing about the flushes that armed nothing, which is the shape
+     * of a tutor asking every question twice. See onRestartBought.
+     */
+    | 'restart'
     /** Something asked for the call to stop, and said why. */
     | 'hung-up';
   detail: string;
@@ -2371,13 +2381,44 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
        * dropped. One per question is the shape to expect on a Vertex lesson;
        * none at all is the shape on AI Studio, which needs no suppression.
        */
-      onEchoTurn: () => {
+      onEchoTurn: ({ afterFlushMs }: { afterFlushMs: number }) => {
         record(
           'echo-turn',
           'the tutor started the turn above again — this surface answers a tool ' +
             'call by restarting generation — and the repeat was dropped before ' +
-            'the learner heard it',
+            `the learner heard it, ${(afterFlushMs / 1000).toFixed(1)}s after the ` +
+            'response went out',
         );
+      },
+      /*
+       * The flush, whether or not anything is ever dropped for it.
+       *
+       * ONE LINE PER QUESTION, next to the `tool` line that caused it, and the
+       * one this account was missing. Three lessons on this surface were read
+       * wrong in a row because a timeline with no `echo-turn` lines in it looks
+       * exactly like a timeline that needed none — and on Vertex those are
+       * opposite facts. Now the flush says so itself.
+       */
+      onRestartBought: ({
+        armed,
+        release,
+        calls,
+      }: {
+        armed: boolean;
+        release: 'turn' | 'timeout';
+        calls: number;
+      }) => {
+        const held =
+          release === 'timeout'
+            ? 'released by the clock, so the model had not started its reply within five seconds'
+            : 'released by the turn it was waiting on';
+        const what = calls === 1 ? 'tool response' : `${calls} tool responses`;
+        const fate = armed
+          ? 'is expected: the last turn spoke, so the repeat is armed to be dropped'
+          : 'is the reply itself and is being let through — the last turn made no sound, ' +
+            'so there is nothing for a repeat to duplicate';
+        record('restart', `the ${what} went out — ${held}. This surface answers one by ` +
+          `generating again, and that turn ${fate}`);
       },
       // Every report, unexamined, straight to the one place allowed to
       // examine it. See `acceptProgress`.
