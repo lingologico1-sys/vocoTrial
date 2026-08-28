@@ -255,7 +255,9 @@ export const OPENAI_INPUT_RATE = 24_000;
  * `keywords` carries the words the transcriber should expect. They are separate
  * from `instructions` on purpose: the composed prompt is thousands of
  * characters of style and rules, and keywords drawn from it would be mostly
- * noise. See `keywords` on SessionConfig.
+ * noise. See `keywords` on SessionConfig. Where they land on the wire depends
+ * on which transcriber is running — see `takesKeywords` below, which is the
+ * difference between a biased transcript and a socket that refuses to open.
  */
 export function openAiSession(
   model: OpenAiModel,
@@ -280,6 +282,38 @@ export function openAiSession(
    */
   const hinted = settings.transcriptionHint !== false;
 
+  /*
+   * WHICH TRANSCRIBER IS RUNNING DECIDES WHERE THE LESSON'S WORDS GO.
+   *
+   * `keywords` is a field on the diarizing transcriber alone. Sent to
+   * whisper-1 or to either gpt-4o-transcribe, the session update comes back
+   * `The 'keywords' parameter is not supported for this model.` and the socket
+   * never goes live — the whole lesson is lost, not the bias. That is what
+   * happened on 2026-08-28: five dials, five errors, a learner talking into a
+   * page with nothing on the other end.
+   *
+   * So the words are folded into `prompt` instead wherever `keywords` is not
+   * accepted. That is not a downgrade to a second-best field: `prompt`
+   * conditions the transcriber as though it were the transcript leading up to
+   * the audio, so a line of the lesson's own vocabulary is exactly the bias
+   * `keywords` was asked for — see `sample` in languages.ts, whose style hint
+   * leads the same string.
+   */
+  const transcriptionModel = settings.transcriptionModel ?? 'whisper-1';
+  const takesKeywords = transcriptionModel.includes('diarize');
+  const words = keywords.slice(0, MAX_KEYWORDS);
+
+  /*
+   * The sample first, the lesson's words after it, and either half alone is a
+   * usable hint. The diarizing transcriber takes no prompt at all, so it gets
+   * none — its words went to `keywords` above.
+   */
+  const prompt = takesKeywords
+    ? undefined
+    : [hinted ? language.sample : '', words.join(', ')]
+        .filter((part) => part.length > 0)
+        .join(' ') || undefined;
+
   const transcription = compact({
     /*
      * whisper-1 unless asked otherwise, and it is a pin rather than a default
@@ -296,10 +330,10 @@ export function openAiSession(
      * transcript arriving after the tutor has already answered still lands in
      * the turn it belongs to.
      */
-    model: settings.transcriptionModel ?? 'whisper-1',
+    model: transcriptionModel,
     language: hinted ? language.code : undefined,
-    prompt: hinted ? language.sample : undefined,
-    keywords: keywords.length ? keywords.slice(0, MAX_KEYWORDS) : undefined,
+    prompt,
+    keywords: takesKeywords && words.length ? words : undefined,
   });
 
   /*
