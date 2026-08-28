@@ -48,6 +48,31 @@ export interface LanguageChoice {
    */
   liveCode?: string;
   /**
+   * The regional variety a tutor speaks by default, as an adjective — "Parisian".
+   *
+   * WHAT IT IS FOR. OpenAI's realtime API has no accent or locale field of any
+   * kind: `audio.output.voice` takes a bare name and nothing else. The only
+   * lever on how the tutor *sounds* is the prompt, and OpenAI's own realtime
+   * guide is specific about the shape — name the variety in the role line, and
+   * say it has to hold. This field is the noun that goes in that sentence. See
+   * ACCENT in tutorPrompt.ts, which composes it.
+   *
+   * SO IT IS A SYNTHESIS FIELD AND `liveCode` IS NOT. They look like the same
+   * fact spelled twice and they are not: `liveCode` is BCP-47 handed to
+   * Google's ASR so it stops hedging between languages, and it never touches
+   * how anything is said. This is prose handed to the model about its own
+   * voice. Neither derives from the other — `fr-FR` says France, not Paris,
+   * and a country is not an accent.
+   *
+   * ABSENT NAMES NO REGION, and composes "a native French speaker" rather than
+   * nothing at all. Only French is filled in, because only French has been
+   * asked for and a guessed variety is a real choice made silently: whether a
+   * Spanish learner should hear Castilian or Latin American is a decision for
+   * whoever is teaching them, not a default worth inventing here. Fill one in
+   * when someone asks for it.
+   */
+  variety?: string;
+  /**
    * A sample of well-formed text in the language.
    *
    * NOTHING READS THIS TODAY. It was handed to whisper-1 as `prompt`, which
@@ -93,8 +118,13 @@ export const LANGUAGES: LanguageChoice[] = [
     liveCode: 'fr-FR',
     label: 'French',
     endonym: 'Français',
+    variety: 'Parisian',
+    // The sample named Montréal until the variety above was filled in. It is a
+    // style hint conditioned on as though it were the transcript leading up to
+    // the audio, so on the one language that now pins a variety it should not
+    // be leading with the other side of the Atlantic. Metropolitan throughout.
     sample:
-      "Bonjour, je m'appelle Claire. Aujourd'hui, j'aimerais parler de mes vacances à Montréal, où il a fait très froid.",
+      "Bonjour, je m'appelle Claire. Aujourd'hui, j'aimerais parler de mes vacances à Marseille, où il a fait très chaud.",
   },
   {
     code: 'es',

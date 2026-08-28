@@ -27,7 +27,7 @@ import {
 } from '../../../src/realtime/settings';
 import type { LanguageChoice } from '../../../src/realtime/languages';
 import type { GoogleModel, OpenAiModel } from '../../../src/realtime/models';
-import { PROGRESS_TOOL } from '../../../src/realtime/tutorPrompt';
+import { PROGRESS_TOOL, accentText } from '../../../src/realtime/tutorPrompt';
 import { MAX_KEYWORDS } from '../../../src/realtime/vocoSessions';
 
 /**
@@ -409,10 +409,35 @@ export function openAiSession(
 
   const effort = reasoningEffortFor(model);
 
+  /*
+   * The accent block, above whatever prompt the caller brought.
+   *
+   * HERE RATHER THAN IN composeTutorPrompt, WHICH IS THE WHOLE POINT OF THE
+   * PLACEMENT. Only a published lesson goes through that function. The bench
+   * sends free text straight out of PromptEditor, and the bench is where an
+   * accent actually gets judged — a fix that composed into lessons only would
+   * be invisible on the one page built for listening to it. Every OpenAI
+   * session in the app is built here, so here is the one seam that catches all
+   * of them.
+   *
+   * PREPENDED, NOT APPENDED. It is a role line and OpenAI's guide wants role
+   * lines first; see ACCENT in tutorPrompt.ts for why that argument beat this
+   * codebase's usual "late survives longest" rule, and what to try if it turns
+   * out to have been the wrong call.
+   *
+   * It costs prompt, and the ceiling is real: publish.ts measures a composed
+   * prompt against MAX_INSTRUCTIONS before it stores a lesson, and this is
+   * added after that measurement. The block is ~600 characters against a cap of
+   * 8000, so a lesson close enough to the line for this to push it over was
+   * already one edit from failing — but that is where it would show up.
+   */
+  const accent = accentText(language, settings.accent);
+  const withAccent = accent ? `${accent}\n\n${instructions}` : instructions;
+
   return {
     type: 'realtime',
     model: model.id,
-    instructions,
+    instructions: withAccent,
     // Audio only, matching Gemini's responseModalities. The API refuses both at
     // once, and a text turn is a turn the learner cannot hear.
     output_modalities: ['audio'],

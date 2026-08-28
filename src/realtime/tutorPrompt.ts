@@ -161,12 +161,13 @@
  * learner afterwards that playing safe cost them something — and an ask with no
  * reward attached is one nobody repeats.
  *
- * Deliberately free of imports beyond one type: functions/ compiles against
+ * Deliberately free of imports beyond two types: functions/ compiles against
  * workers-types with no DOM lib, and the publish route reads this file to
  * measure a prompt before it stores a lesson.
  */
 
 import type { Persona } from '../facekit/persona';
+import type { LanguageChoice } from './languages';
 
 /**
  * The one tool a tutor has, and the only structured channel into a live call.
@@ -674,6 +675,119 @@ export function paceText(pace: string | undefined): string {
  */
 export function paceSpeed(pace: string | undefined): number | undefined {
   return (PACE.find((entry) => entry.key === pace) ?? PACE[0]).speed;
+}
+
+/**
+ * How the tutor sounds — the accent, not the language.
+ *
+ * WHAT THIS IS FIXING. The French voices on gpt-realtime speak French with an
+ * American accent, which for a rig whose whole purpose is a language tutor is
+ * close to the worst available defect: the learner is copying it. There is no
+ * setting for this. OpenAI's realtime API has no accent or locale field at all
+ * — `audio.output.voice` takes a bare name, and the ISO code we send goes to
+ * the *transcriber* and never touches synthesis (see openAiSession in
+ * functions/api/live/_setup.ts). The prompt is the only lever there is.
+ *
+ * AND WE HAD NEVER PULLED IT. Every preset in instructions.ts says "Speak
+ * French", which is an instruction about *which language* and says nothing
+ * about how it should sound. Nothing anywhere in this file asserted a native
+ * identity. The documented lever had simply never been used.
+ *
+ * THE SHAPE IS OPENAI'S OWN, from their realtime prompting guide: name the
+ * variety in the role line, say it has to hold, and do not be vague. Their
+ * worked example is "You are french quebecois speaking customer service bot" —
+ * a nationality stated flatly, up front. The guide is explicit that vague
+ * phrasing ("sound French") causes drift and, worse, unintended language
+ * switching, which is why the last paragraph below exists to nail the accent
+ * and the language apart.
+ *
+ * IT GOES AT THE TOP OF THE PROMPT, WHICH BREAKS THIS FILE'S OTHER RULE.
+ * composeTutorPrompt's header says a constraint that must hold for a whole call
+ * survives longest at the *end*. That rule is right about pace and wrong here,
+ * because OpenAI's guide puts accent in the role line specifically and the
+ * stability clause is what carries the duration instead of the position. If it
+ * turns out to drift anyway, moving it down beside HOW YOU SPEAK is the first
+ * thing to try — and unlike most of this file, that is an afternoon's test
+ * rather than an argument.
+ *
+ * HOW FAR IT CAN GET, said plainly because the ceiling is low and known. This
+ * is an instruction, so it is followed rather than obeyed — the same caveat
+ * PACE makes above, with no readable-back field to check it against. Beyond
+ * that, accent quality on this provider is a reported regression: it collapsed
+ * at gpt-realtime-1.5 and has not recovered through 2.x, with French named
+ * repeatedly as one of the worst affected. OpenAI's own guide concedes that
+ * prompting "cannot fully replace voice design", and points at Custom Voices,
+ * which are gated behind their sales team. So: try this, listen, and if it is
+ * not enough the next lever is pinning the older gpt-realtime — deprecated but
+ * served until 2027-01-20 — not a better paragraph here.
+ */
+export type Accent = 'native' | 'off';
+
+/**
+ * ABSENT MEANS `native`, WHICH INVERTS THIS APP'S USUAL RULE ON PURPOSE.
+ * Everywhere else — see SessionSettings — an unset field means "send nothing
+ * and leave the decision upstream", because upstream has a default worth
+ * deferring to. There is no upstream default here. There is only prose we
+ * either send or do not, and *not sending it is the thing that produces the
+ * American accent*. So the good value is the one you get by doing nothing, and
+ * `off` is an explicit opt-out kept for one purpose: measuring a run against
+ * the lessons composed before this existed.
+ */
+export const ACCENT: Array<{
+  key: Accent;
+  label: string;
+  hint: string;
+  /** The block composed above the prompt. Empty composes nothing at all. */
+  render: (language: LanguageChoice) => string;
+}> = [
+  {
+    key: 'native',
+    label: 'Native speaker',
+    hint: "Names the variety the tutor speaks and asks it to hold. French gets Parisian; see `variety` in languages.ts.",
+    render: (language) => {
+      /*
+       * "a native Parisian French speaker", or "a native Japanese speaker"
+       * where no variety is filled in. The unregioned form is still worth
+       * sending: it is the assertion of nativeness doing most of the work, and
+       * a language with no `variety` should not silently compose nothing.
+       */
+      const variety = language.variety
+        ? `${language.variety} ${language.label}`
+        : language.label;
+
+      return `You are a native ${variety} speaker. You have spoken it all your life, and
+it is the accent you have when you are not thinking about it: its vowels, its
+rhythm, where it puts the stress in a phrase. Hold it steady from your first
+word to your last — not just in your opening turn, but in the twentieth one
+too.
+
+Sound like an ordinary person from where you are from, not like someone doing
+an impression of one. Do not exaggerate it, and never let it cost you clarity:
+the person you are talking to is learning this language and is listening to you
+for how the sounds are supposed to go.
+
+This is about how you sound and nothing else. It never changes which language
+you speak, and it never changes what you say.`;
+    },
+  },
+  {
+    key: 'off',
+    label: 'Say nothing about it',
+    hint: 'Composes no accent block. What every lesson ran on before this control existed, and the only way to A/B against one.',
+    render: () => '',
+  },
+];
+
+/**
+ * The accent block to put above a prompt, for a language and a choice.
+ *
+ * Unknown reads as `native` rather than as `off`, which is the same fallback
+ * `paceText` makes and means something stronger here: a lesson carrying a value
+ * this build no longer recognises should get the good accent, not lose it.
+ */
+export function accentText(language: LanguageChoice, accent: string | undefined): string {
+  const entry = ACCENT.find((option) => option.key === accent) ?? ACCENT[0];
+  return entry.render(language);
 }
 
 /** Everything a composed prompt is built from. All of it is snapshot data. */

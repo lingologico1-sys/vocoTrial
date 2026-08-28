@@ -198,6 +198,13 @@ function list(entries: string[] | undefined, bullet = (index: number) => `${inde
  *
  * Only the fields this model accepts are named either way, because a field the
  * model would reject is not a decision anybody made — see `applies`.
+ *
+ * ONE FIELD IS EXEMPT AND HAS TO BE. `accent` inverts the rule this block is
+ * built on: absent does not leave it to the provider, because OpenAI has no
+ * accent field to leave it to — absent composes the native block, which is the
+ * whole point of it (see `accent` on SessionSettings). Filing an unset accent
+ * under "the provider decides" would be this dump asserting the exact thing
+ * that is not happening, in the one place someone reads to find out what was.
  */
 function settingsBlock(settings: SessionSettings, modelKey: string): string {
   const model = findModel(modelKey);
@@ -208,6 +215,10 @@ function settingsBlock(settings: SessionSettings, modelKey: string): string {
   for (const setting of applicable) {
     const value = settings[setting.key];
     if (value === undefined) {
+      if (setting.key === 'accent') {
+        sent.push(`  ${setting.key.padEnd(20)}native (by default — nobody set it)`);
+        continue;
+      }
       unsent.push(setting.key);
       continue;
     }

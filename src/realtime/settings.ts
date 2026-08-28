@@ -89,6 +89,25 @@ export interface SessionSettings {
    * rather than obeyed — this is the half that can be read back off a payload.
    */
   speed?: number;
+  /**
+   * Whether the prompt asserts a native accent, and the one field here that is
+   * not sent as a field.
+   *
+   * It composes prose above the instructions instead — see ACCENT in
+   * tutorPrompt.ts and openAiSession in functions/api/live/_setup.ts, which is
+   * where it is spent. It lives in this table anyway because this table is what
+   * gives a knob a panel, a validator and a published lesson to ride in, and a
+   * second mechanism for one select would be a second mechanism to keep honest.
+   *
+   * ABSENT MEANS `native` HERE, WHICH IS THE OPPOSITE OF EVERY OTHER FIELD
+   * ABOVE. There is no provider default to defer to — OpenAI has no accent
+   * field of any kind — so "send nothing" is not neutral, it is the American
+   * accent. ACCENT's own note has the argument.
+   *
+   * OpenAI only, because Gemini does not have the problem: it is handed a
+   * BCP-47 `liveCode` and sounds French when told to speak French.
+   */
+  accent?: 'native' | 'off';
   /** Input transcription model. See the note in the field list before changing. */
   transcriptionModel?: string;
   /** Whether to send the language hint and sample to the transcriber. */
@@ -132,6 +151,7 @@ const HOUSE_KEYS: Array<keyof HouseSettings> = [
   'vadThreshold',
   'vadEagerness',
   'speed',
+  'accent',
   'transcriptionModel',
   'transcriptionHint',
   'noiseReduction',
@@ -541,6 +561,31 @@ export const SETTING_FIELDS: SettingField[] = [
     max: 1.5,
     step: 0.05,
     applies: isOpenAi,
+  },
+  {
+    key: 'accent',
+    label: 'Accent',
+    /**
+     * THE BLANK OPTION DOES NOT MEAN "SEND NOTHING" ON THIS ONE FIELD, and the
+     * hint has to say so, because everywhere else on this panel it does. There
+     * is no provider default behind this control to fall back to — OpenAI has
+     * no accent field — so leaving it alone gets the native block, and turning
+     * it off is the deliberate act. See `accent` on SessionSettings.
+     */
+    hint: 'On by default. Turn it off only to hear what the tutor sounded like before.',
+    kind: 'select',
+    applies: isOpenAi,
+    /*
+     * Two values and no list of regions, because which variety a language
+     * defaults to is a fact about the language and lives on it — `variety` in
+     * languages.ts — rather than a choice re-made per lesson. French is
+     * Parisian there. A knob offering Parisian against Quebecois is worth
+     * adding the day somebody wants to teach the other one, and not before.
+     */
+    options: [
+      { value: 'native', label: 'Native speaker (default)' },
+      { value: 'off', label: 'Say nothing about it' },
+    ],
   },
   {
     key: 'silenceDurationMs',
