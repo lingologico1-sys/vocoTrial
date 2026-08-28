@@ -245,6 +245,21 @@ export interface SessionHandlers {
    */
   onSilentTurn?: (turn: { tookMs: number; generatedMs?: number; textMs?: number }) => void;
   /**
+   * A model turn that was dropped before the learner could hear it.
+   *
+   * IT ONLY EVER FIRES ON A SURFACE WITHOUT `scheduling: 'SILENT'`, where
+   * delivering a tool result restarts generation and the restart is the turn
+   * the tutor has already spoken. On AI Studio this is never called at all.
+   *
+   * REPORTED BECAUSE IT IS A PREDICTION AND NOT A MEASUREMENT. The suppression
+   * arms on the turn before, so it can be wrong in one direction: a call that
+   * declines to restart loses a genuine turn, and the only evidence of that
+   * would be this line sitting above a silence in the timeline. A count that is
+   * one per question is the feature working; anything else is worth reading the
+   * transcript over. See `echoArmed` in gemini.ts for what arms it.
+   */
+  onEchoTurn?: () => void;
+  /**
    * Running totals for the call so far, pushed every time Google reports usage
    * rather than once at the end. A call that dies mid-flight never sends a
    * final figure, so the last push is the only record we get to keep.

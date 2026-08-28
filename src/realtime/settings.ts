@@ -247,8 +247,22 @@ export type SettingField = FieldBase &
 /**
  * Native audio is its own dialect of Gemini Live: it gains affective dialog and
  * proactivity, and it is the reason no languageCode is sent (see below).
+ *
+ * READ OFF THE ID RATHER THAN THE KEY, because the same model is now published
+ * on both of Google's surfaces and the dialect belongs to the model. This was
+ * `key === 'gemini-native-audio'` while there was one entry to match; a second
+ * entry with its own key would have silently been treated as half-cascade, and
+ * what that looks like is `enableAffectiveDialog` offered on a model that takes
+ * it and a `languageCode` sent to one that refuses the field outright — a
+ * socket that fails at connect, on the surface added to avoid a failure.
+ *
+ * The substring is Google's own family name for these models and appears in
+ * every spelling either surface has ever served, dated previews included. A
+ * bare `includes` rather than a list of ids for that reason: the ids move with
+ * every preview, and the dialect does not.
  */
-const isNativeAudio = (model: ModelChoice) => model.key === 'gemini-native-audio';
+const isNativeAudio = (model: ModelChoice) =>
+  isGoogle(model) && model.id.includes('native-audio');
 
 /**
  * Whether this model takes `speechConfig.languageCode`.

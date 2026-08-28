@@ -389,6 +389,8 @@ export interface CallEvent {
      */
     | 'floor'
     | 'silent-turn'
+    /** A restarted turn, dropped before the learner heard it. See onEchoTurn. */
+    | 'echo-turn'
     /** Something asked for the call to stop, and said why. */
     | 'hung-up';
   detail: string;
@@ -2358,6 +2360,23 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
               : `. IT HAD WORDS THOUGH — transcribed ${(textMs / 1000).toFixed(1)}s before the ` +
                 `turn closed and no audio ever came for them; they are released on the line ` +
                 `below rather than dropped`),
+        );
+      },
+      /**
+       * The doubled turn, caught on its way to the learner.
+       *
+       * On the timeline rather than in a counter, because what makes it
+       * readable is the line above it: an echo line directly after a tutor turn
+       * is this working, and an echo line followed by silence is a real turn
+       * dropped. One per question is the shape to expect on a Vertex lesson;
+       * none at all is the shape on AI Studio, which needs no suppression.
+       */
+      onEchoTurn: () => {
+        record(
+          'echo-turn',
+          'the tutor started the turn above again — this surface answers a tool ' +
+            'call by restarting generation — and the repeat was dropped before ' +
+            'the learner heard it',
         );
       },
       // Every report, unexamined, straight to the one place allowed to

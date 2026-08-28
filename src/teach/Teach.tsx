@@ -962,6 +962,23 @@ export default function Teach() {
                               {model.teach!.caution}
                             </span>
                           )}
+                          {/*
+                            An id nobody has dialled yet, said in teacher
+                            language rather than as the workshop's "(unverified
+                            id)". The workshop can afford that shorthand because
+                            whoever reads it can try the model in the next
+                            breath; a teacher here is committing a class to it,
+                            and the consequence they need warning about is not
+                            "the string is a guess" but "this may not connect at
+                            all". Same colour as the caution, being the same
+                            kind of fact.
+                          */}
+                          {model.unverified && (
+                            <span className="text-[11px] leading-relaxed text-lingo-accent-deep">
+                              Not yet confirmed working on this build — try a lesson on it
+                              yourself before handing the code to a class.
+                            </span>
+                          )}
                           <span className="font-lingo-mono text-[10px] leading-relaxed text-lingo-muted opacity-70">
                             {model.id}
                           </span>

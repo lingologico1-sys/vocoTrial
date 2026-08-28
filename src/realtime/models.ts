@@ -180,7 +180,7 @@ export const MODELS: ModelChoice[] = [
       label: 'Warmer, more expressive',
       blurb: 'Hears the tone the learner speaks in and answers in kind.',
       caution:
-        'Progress through the questions is counted unreliably, and the tutor may repeat a question it has already asked. What the learner said is written down by the model itself, sometimes in the wrong script — the vocabulary list and the end-of-lesson report both read that text.',
+        'What the learner said is written down by the model itself, sometimes in the wrong script — the vocabulary list and the end-of-lesson report both read that text. Progress through the questions is counted from a signal this surface answers by making the tutor start its turn again; the repeat is caught and silenced before the learner hears it, which costs a second or two of quiet between turns.',
     },
     // The GA id, not the dated preview. Both work — this and
     // gemini-live-2.5-flash-preview-native-audio-09-2025 each reach
@@ -196,6 +196,50 @@ export const MODELS: ModelChoice[] = [
     // Which is not the same as permanent. Vertex serves no Gemini 3 or 3.1 Live
     // model under any spelling tried, so there is nothing here to migrate *to*
     // if that changes — re-probe with /api/live/models rather than assume.
+  },
+  {
+    key: 'gemini-native-audio-studio',
+    label: 'Gemini 2.5 Flash Native Audio (AI Studio)',
+    id: 'gemini-live-2.5-flash-preview-native-audio-09-2025',
+    provider: 'google',
+    surface: 'aistudio',
+    unverified: true,
+    teach: {
+      label: 'Warmer, and never asks twice',
+      blurb:
+        'Hears the tone the learner speaks in and answers in kind, and moves between the questions without repeating itself.',
+      caution:
+        'Runs on a different Google account from the other two, with weaker guarantees about where the audio is processed and who may see it. Prefer the other warm voice for a class whose recordings must stay inside a school agreement. What the learner said is still written down by the model itself, sometimes in the wrong script.',
+    },
+    // THE SAME MODEL AS THE ENTRY ABOVE, ON THE SURFACE THAT IMPLEMENTS ASYNC
+    // TOOL CALLS. Not a duplicate and not a fallback: the two differ in exactly
+    // one behaviour a learner can hear, and it is not a behaviour any prompt
+    // reaches. `behavior: 'NON_BLOCKING'` and `scheduling: 'SILENT'` are Gemini
+    // Developer API features — Vertex has never implemented either, and ignores
+    // both in silence rather than refusing them. Without them a tool response
+    // restarts generation, and the restart is the turn the tutor has already
+    // spoken, said again in different words. Five questions, five doubled
+    // turns, every lesson. See the tool handling in gemini.ts, which gates the
+    // fields on `surface` and suppresses the repeat where they are unavailable.
+    //
+    // WHAT IT COSTS IS THE ACCOUNT IT RUNS ON, which is why the caution above
+    // is about governance and not about speech. AI Studio is billed on
+    // GOOGLE_API_KEY — an ordinary API key, no service account, no IAM, no
+    // VPC-SC, no CMEK, no data residency guarantee and no SLA. The paid tier
+    // does not train on prompts or responses; the free tier does, and that is
+    // a property of the billing on the key rather than of anything in this
+    // file. Confirm the key's project has billing enabled before a class runs
+    // on this.
+    //
+    // UNVERIFIED, AND THAT FLAG IS DOING ITS JOB HERE. This id reached
+    // setupComplete twelve times out of twelve against AI Studio before the
+    // move to Vertex, and that confirmation is old: it predates this build, and
+    // a dated preview retires 45 days after its replacement ships. A
+    // replacement exists (native-audio-preview-12-2025). The Vertex probe at
+    // /api/live/models cannot check this — it asks Vertex — so the flag comes
+    // off on a handshake and not before. If the socket closes at setup, the id
+    // is the first thing to suspect and AI Studio's own ListModels is the
+    // cheapest way to ask.
   },
   {
     key: 'gpt-realtime-21',

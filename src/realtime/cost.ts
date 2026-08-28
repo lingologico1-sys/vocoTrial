@@ -105,6 +105,20 @@ const RATES: Record<string, ModelRates> = {
     textOutput: 2,
     audioOutput: 12,
   },
+  // The same model on AI Studio, at the same published rates, and the equality
+  // is the thing to re-check rather than to trust. Google prices the two
+  // surfaces from separate rate cards onto separate meters — GCP billing
+  // against the AI Studio account — and nothing obliges them to agree. They
+  // agreed when this was written. A divergence here shows up as a lesson
+  // costed correctly on one surface and not the other, which no error reports.
+  'gemini-live-2.5-flash-preview-native-audio-09-2025': {
+    textInput: 0.5,
+    cachedTextInput: 0.5,
+    audioInput: 3,
+    cachedAudioInput: 3,
+    textOutput: 2,
+    audioOutput: 12,
+  },
   'gpt-realtime-2.1': {
     textInput: 4,
     cachedTextInput: 0.4,
@@ -138,6 +152,7 @@ export const AUDIO_RATES_VERIFIED_ON = '2026-08-06';
 const AUDIO_TOKENS_PER_SECOND: Record<string, { input: number; output: number }> = {
   'gemini-3.1-flash-live-preview': { input: 32, output: 32 },
   'gemini-live-2.5-flash-native-audio': { input: 32, output: 32 },
+  'gemini-live-2.5-flash-preview-native-audio-09-2025': { input: 32, output: 32 },
   /*
    * NOT VERIFIED AGAINST CURRENT DOCUMENTATION, and flagged rather than quietly
    * carried. These are the figures this file recorded for OpenAI Realtime
