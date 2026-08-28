@@ -264,25 +264,6 @@ export async function startGeminiSession(
   let audioThisTurn = false;
 
   /**
-   * Whether the learner has said anything since the tutor last made a sound.
-   *
-   * THE DISCRIMINATOR THE ECHO PREDICTION ACTUALLY WANTED. It used to ask
-   * whether the completing turn had spoken, on the reasoning that a turn spent
-   * entirely on bookkeeping has produced nothing for a restart to duplicate —
-   * so there the restart must be the tutor's only speech on that question. On
-   * 2026-08-28 that reading cost a lesson: a bookkeeping-only turn completed at
-   * +0:16.5 *after* the tutor had already asked question three at +0:14.0, so
-   * its restart was surplus rather than the only speech, and what it said was
-   * question four to a learner who had answered two.
-   *
-   * What separates the two is not whether the finished turn made a sound. It is
-   * whether anybody is owed a reply: if the learner has spoken since the tutor
-   * last did, the next turn is theirs and must not be dropped; if they have
-   * not, the tutor has already had its say and a further turn is the restart.
-   */
-  let learnerSinceAudio = false;
-
-  /**
    * When this turn's first words arrived, and those words while the sound of
    * them has not caught up.
    *
@@ -462,24 +443,22 @@ export async function startGeminiSession(
    * than a turn said twice. So the response goes out, on time, and the turn it
    * buys is dropped on this side.
    *
-   * WHAT MAKES IT SAFE IS THE GATE, NOT THE GUESS, and the gate is whether
-   * anybody is owed a reply. It arms at `turnComplete` when the learner has not
-   * spoken since the tutor last made a sound: the tutor has already had its
-   * say, so a further turn is the restart. When they *have* spoken — a
-   * bookkeeping-only turn landing between their answer and the tutor's reply —
-   * the restart is that reply, and arming would swallow the lesson rather than
-   * the echo. That case sends the response and stays disarmed. See
-   * `learnerSinceAudio`.
+   * WHAT MAKES IT SAFE IS THE GATE, NOT THE GUESS. This arms at `turnComplete`
+   * and only when the turn that just completed actually made a sound. A turn
+   * spent entirely on bookkeeping produced nothing for a restart to duplicate,
+   * and there the restart is the tutor's only speech on that question — arming
+   * would be swallowing the lesson rather than the echo, which is exactly what
+   * a broader gate did on 2026-08-28 before it was put back. That case sends
+   * the response and stays disarmed.
    *
-   * IT IS A PREDICTION, AND IT EXPIRES ON A CLOCK RATHER THAN ON THEM. A
-   * barge-in invalidates it, because a cut-off turn buys no restart. The
-   * learner merely talking does not: the restart was bought when the response
-   * went out and is generated from the context of that moment, so nothing they
-   * say afterwards is in it. Believing otherwise is what let a duplicate
-   * through at +0:13.7 on 2026-08-28. The failure it can still have is a Vertex
-   * call that declines to restart, where one genuine turn is lost — bounded by
-   * ECHO_WAIT_MS, and written down rather than silently discarded either way.
-   * See onEchoTurn, and read the timeline before trusting this.
+   * IT IS A PREDICTION, AND IT EXPIRES. A barge-in invalidates it outright,
+   * because a cut-off turn buys no restart, and the learner's transcription
+   * disarms it too — though later than it reads, since that frame arrives with
+   * the commit rather than while they speak. The clock is what actually bounds
+   * it: see ECHO_WAIT_MS. The failure it can still have is a Vertex call that
+   * declines to restart, where one genuine turn is lost — which is why every
+   * armed turn is written down rather than silently discarded. See onEchoTurn,
+   * and read the timeline before trusting this.
    */
   let echoArmed = false;
   /** When it was armed, for the expiry below. */
@@ -757,7 +736,29 @@ export async function startGeminiSession(
          * So the response is held to the end of the turn on this surface
          * always, and the arming happens where the answer is known.
          */
-        if ((silentResponses && spoken) || !silentResponses) {
+        /*
+         * A CALL THAT ARRIVED BETWEEN TURNS HAS NOTHING TO WAIT FOR, and on the
+         * restart surface it used to wait five seconds anyway. The hold below
+         * is for a turn in flight: it exists so the arming can read whether
+         * that turn made a sound, and `answering` false means the turn is over
+         * and the flag has already been read and reset. Nothing further will
+         * release it, so it sits out the whole of RESPONSE_HOLD_MS and the
+         * tutor's next turn — the one this response buys — starts five seconds
+         * late. On 2026-08-28 questionDone(2) landed at +0:09.0 with the turn
+         * already complete, flushed at +0:14.0 into the middle of a seven-second
+         * answer, and every number in that lesson was late from there.
+         *
+         * Sent at once instead, and unarmed: no turn made a sound, so the
+         * restart is the tutor's reply rather than a duplicate of anything.
+         *
+         * WHICH LEAVES ONE CONDITION FOR BOTH SURFACES. They arrived at it from
+         * opposite directions — one holds a mid-speech call so the response
+         * lands after the speech, the other so the arming can be decided — and
+         * `spoken` is the answer to both questions. The two notes above are kept
+         * because the reasoning is not the same reasoning, and a later change to
+         * either surface should not read this as one rule.
+         */
+        if (spoken) {
           heldResponses.push(...responses);
           if (responseHold === null) {
             responseHold = window.setTimeout(() => {
@@ -860,23 +861,22 @@ export async function startGeminiSession(
 
       if (content.inputTranscription?.text) {
         heardLearner = true;
-        learnerSinceAudio = true;
         /*
-         * THE LEARNER SPEAKING NO LONGER DISARMS THIS, and that reversal is the
-         * whole fix. The old rule read their speech as proof that the next
-         * model turn would answer them rather than repeat anyone — true on a
-         * surface where a tool response schedules nothing, and false here. The
-         * restart is bought at the moment the response goes out and is
-         * generated from the context that existed then; what the learner says
-         * afterwards does not reach it. On 2026-08-28 the tutor's turn at
-         * +0:14.0 opened 0.3s before the microphone even closed and commented
-         * on "amis musiciens", a phrase nowhere in the learner's answer —
-         * generation that predated a word of it, let through because they had
-         * started talking at +0:11.9 and disarmed the catch.
+         * The learner has spoken, so the next model turn is a reply to them and
+         * not the restart a tool response bought. Disarmed on their speech
+         * rather than on a clock, and disarmed in the direction that is safe to
+         * be wrong in: dropping the prediction too early costs a doubled turn
+         * the learner hears, which is the behaviour this replaced. Holding it
+         * too long costs a real turn, which is a lesson.
          *
-         * So the arming is spent by the turn it predicted or by the clock, and
-         * never by them. See ECHO_WAIT_MS.
+         * IT FIRES LATER THAN IT READS. This frame does not arrive while they
+         * are talking — Google sends nothing across the whole of a learner's
+         * turn on this surface, and the transcription lands with the commit. So
+         * this disarms after the fact rather than during, which is why it is
+         * the backstop and ECHO_WAIT_MS is the bound.
          */
+        echoArmed = false;
+        echoSubstantive = false;
         handlers.onTranscript({ role: 'user', text: content.inputTranscription.text, done: false });
       }
 
@@ -918,6 +918,17 @@ export async function startGeminiSession(
           if (content.turnComplete && echoSubstantive) {
             echoArmed = false;
             echoSubstantive = false;
+            /*
+             * The dropped turn opened and closed without `answerBegins` ever
+             * running, so nothing here set `turnBeganAt` — but whatever set it
+             * last is still standing, and the next silent turn will be measured
+             * from it. That is where the 11.8s on 2026-08-28 came from: a stamp
+             * left over from a tool call twelve seconds earlier, reported as
+             * the length of a turn that took no time at all. Cleared with the
+             * turn it belonged to.
+             */
+            turnBeganAt = 0;
+            generatedAt = 0;
             handlers.onEchoTurn?.();
           }
           return;
@@ -963,9 +974,6 @@ export async function startGeminiSession(
         answerBegins();
         if (!audioThisTurn) {
           audioThisTurn = true;
-          // The tutor has had its say on whatever they last told it, so from
-          // here nobody is owed a reply until they speak again.
-          learnerSinceAudio = false;
           // Before the enqueue, or the schedules read here are the time the
           // chunk *ends* rather than the time it starts.
           const tap = player.tap();
@@ -988,6 +996,8 @@ export async function startGeminiSession(
       if (content.generationComplete && !generatedAt) generatedAt = Date.now();
 
       if (content.turnComplete) {
+        // Read before the resets below clear it, for the arming further down.
+        const spokeThisTurn = audioThisTurn;
         /*
          * A turn that finished without making a sound, reported as a fact.
          *
@@ -1035,14 +1045,30 @@ export async function startGeminiSession(
          * landing inside the turn it just closed.
          *
          * AND ON A RESTART SURFACE, THIS IS WHERE THE ECHO IS PREDICTED. The
-         * response about to go out will buy a turn, and what decides whether
-         * that turn is surplus is whether anybody is owed a reply — see
-         * `learnerSinceAudio`, which is read rather than `audioThisTurn`
-         * because a bookkeeping-only turn arriving after the tutor has already
-         * asked its question buys a restart just as surplus as an audible
-         * one's.
+         * response about to go out will buy a turn; `spokeThisTurn` is the
+         * whole of what decides whether that turn is a duplicate of the one
+         * just finished or the tutor's only speech on this question. Read from
+         * the flag captured at the top of this block, because the resets above
+         * have already cleared it.
+         *
+         * THIS WAS BRIEFLY "HAS THE LEARNER SPOKEN SINCE THE TUTOR LAST DID",
+         * AND THAT COST A LESSON. The reasoning was that a bookkeeping-only
+         * turn arriving after the tutor has already asked buys a surplus
+         * restart — which reads well and is unmeasurable here, because on this
+         * surface Google sends nothing at all while the learner is talking. The
+         * input transcription lands *after* the turn commits, so at the moment
+         * of arming that flag is false almost every time, and almost every
+         * restart got armed. On 2026-08-28 two of them were the tutor's real
+         * turns: the reply to question two with question three inside it, and
+         * the goodbye. The learner heard neither.
+         *
+         * So the discriminator is the one thing about the restart that *is*
+         * knowable when it is bought: whether the turn that bought it had
+         * already spoken. On this surface a bookkeeping-only turn schedules no
+         * generation of its own, and the restart is how the tutor gets its
+         * voice back at all.
          */
-        if (!silentResponses && heldResponses.length && !learnerSinceAudio) {
+        if (!silentResponses && heldResponses.length && spokeThisTurn) {
           echoArmed = true;
           echoAt = Date.now();
           echoSubstantive = false;

@@ -1067,6 +1067,13 @@ turn you take in response, alongside whatever you say in it. Do not wait until
 you have replied, and do not carry it into a later turn — a later turn may never
 come, and the learner is left sitting in silence while you hold a call back.
 
+The number is the question they just answered — the one you last asked — and
+never the one you are about to ask. Almost every turn you take does both things
+at once: you comment on their answer to a question and then ask the next one. In
+that turn the number is the question you are commenting on, not the question you
+are asking. So a turn where you go on to ask question 3 carries the call for
+question 2.
+
 Never spend a turn on the call alone either: a turn with nothing but bookkeeping
 in it is silence too. It is between you and the program, so never mention it,
 never say how many questions are left, and carry straight on talking.
