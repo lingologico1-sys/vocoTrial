@@ -1845,21 +1845,30 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
       /**
        * Written down, never shown.
        *
-       * The player does what can be done about it — every starvation widens the
-       * cushion the queue restarts on, so a bad path corrects itself over the
-       * first few holes rather than paying for the same one all lesson. What is
-       * left is nothing to tell the learner: somebody told their connection is
-       * poor is somebody no longer thinking about French. So it goes on the
-       * timeline instead, where the lesson that "kept cutting out" has something
-       * in its account saying so — and the one that did not has the absence,
-       * which is the more useful half. The cushion each hole bought is on the
-       * line too: it is what says whether the widening kept up with the path.
+       * The player does what can be done about it, which is less than it once
+       * claimed: a hole the path caused widens the cushion the queue restarts
+       * on, so a jittery line corrects itself over the first few holes rather
+       * than paying for the same one all lesson — and a hole the *model* caused
+       * widens nothing, because a cushion cannot manufacture audio that was
+       * never sent. See `cause` on AudioGap, which is the distinction, and
+       * BASE_PRIME_SECONDS for the lesson that forced it.
+       *
+       * What is left is nothing to tell the learner: somebody told their
+       * connection is poor is somebody no longer thinking about French. So it
+       * goes on the timeline instead, where the lesson that "kept cutting out"
+       * has something in its account saying so — and the one that did not has
+       * the absence, which is the more useful half. Each line says which fault
+       * it was and what the cushion stands at, which is what lets a reader tell
+       * a path that needs fixing from a model that needs waiting for.
        */
       onAudioGap: (gap: AudioGap) => {
         record(
           'audio',
           gap.kind === 'starved'
-            ? `the tutor's voice broke off for ${gap.ms}ms — the audio queue ran dry mid-sentence (${gap.count} so far this call); the queue now restarts ${gap.primeMs}ms ahead`
+            ? `the tutor's voice broke off for ${gap.ms}ms — the audio queue ran dry mid-sentence (${gap.count} so far this call); ` +
+              (gap.cause === 'jitter'
+                ? `a chunk arrived late off a healthy queue, so the queue now restarts ${gap.primeMs}ms ahead`
+                : `the queue was already thin, so the model was supplying audio slower than it plays — not something a cushion reaches, and it stays at ${gap.primeMs}ms`)
             : `the audio queue is thin: ${gap.ms}ms of lead left, so the next hiccup is likely to be heard`,
         );
       },

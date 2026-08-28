@@ -387,38 +387,59 @@ interface EnvelopeFrame extends EnvelopeSample {
  * line. So the bet is not made: this is the opening guess, and PRIME_STEP_SECONDS
  * is how it is corrected by what actually happens.
  *
- * IT WAS 0.32 AND THE OPENING GUESS WAS STILL TOO LOW, for a reason that is
- * about Gemini rather than about the transport. The 2026-08-28 diagnostic has
- * a clean path underneath it — the relay leg 14ms at best and 20ms at worst
- * over 19 samples — and four starvations anyway, 113ms, 829ms, 747ms and
- * 995ms. The `thin` lines beside them descend gradually (79, 120, 61, 187,
- * 235, 80) rather than falling off a cliff, and a gradual descent is the
- * signature of a supply rate a little under playback, not of a main thread
- * that hitched. One turn there emptied and refilled four times.
+ * IT WENT 0.18 TO 0.32 TO 0.6 AND BACK, AND THE REVERSAL IS THE ENTRY WORTH
+ * READING. The 06:54 diagnostic on 2026-08-28 was diagnosed correctly and
+ * treated wrongly: a clean path underneath — the relay leg 14ms at best and
+ * 20ms at worst over 19 samples — four starvations anyway, and `thin` lines
+ * descending gradually (79, 120, 61, 187, 235, 80) rather than falling off a
+ * cliff. That reading still stands. A gradual descent is a supply rate a
+ * little under playback, not a main thread that hitched.
  *
- * Which is to say the model was handing back audio at about real time instead
- * of faster than it, and a third of a second of slack cannot absorb a deficit
- * that never stops accumulating — it can only decide how far into the turn the
- * first hole falls. Two thirds is enough to cover the observed holes outright,
- * and the step above still corrects it upward for a path that is worse.
+ * THE ERROR WAS ANSWERING IT WITH A WIDER CUSHION. A cushion buys cover against
+ * a chunk that arrives *late*; against a supply rate under playback it is spent
+ * and gone, and all it decides is how far into the turn the first hole falls.
+ * The 14:08 run the same day settled it outright. The cushion was 600ms and the
+ * queue ran dry three times anyway — 348ms, 355ms and 512ms — every hole
+ * smaller than the lead that was supposed to absorb it. Jitter of that size
+ * against 600ms of slack is not audible at all; these were, because the slack
+ * had already been eaten by the time they arrived. One sentence came out in
+ * four fragments.
+ *
+ * So the cushion goes back to about where it was before any of this, and the
+ * deficit case is handed to the instrument that can actually see it: the
+ * ratchet now fires only on the cliff, and this is the opening guess for a path
+ * whose jitter is unknown. What a cushion cannot do is manufacture audio that
+ * was never sent, and no figure here will make a model that speaks slower than
+ * real time speak faster.
  */
-const BASE_PRIME_SECONDS = 0.6;
+const BASE_PRIME_SECONDS = 0.3;
 
 /**
  * How much the cushion grows each time the queue is starved mid-speech.
  *
- * A hole in the audio is the transport saying the cushion was too small, and it
- * is the only honest measurement of that available — which makes it the one
- * thing worth changing the cushion on. Each starvation adds this to the prime
- * for the rest of the call, so a path that stalls once has more slack the next
- * time and a path that stalls repeatedly climbs until it stops stalling.
+ * A hole in the audio *can* be the transport saying the cushion was too small,
+ * and where it is, this is the correction: each such starvation adds this to
+ * the prime for the rest of the call, so a path that stalls once has more slack
+ * the next time and a path that stalls repeatedly climbs until it stops.
  *
- * It never comes back down. A quiet stretch is not evidence the path improved,
- * only that nothing has been asked of it lately, and lowering the cushion on
- * that reasoning is how you arrive back at the hole you just paid for. The
- * price of holding a cushion that turned out to be generous is a slightly later
- * start to each turn, which nobody hears; the price of dropping it too early is
- * another seam mid-sentence, which everybody does.
+ * ONLY WHERE IT IS, THOUGH, WHICH IS THE PART THAT WAS MISSING. A hole can also
+ * be the model supplying audio slower than it is played, and the two want
+ * opposite treatments: widening the cushion against a deficit makes every later
+ * hole bigger and every turn start later while absorbing nothing. `watch` is
+ * where they are told apart, and it is the only caller of this. See the cliff
+ * test there, and BASE_PRIME_SECONDS for the run that forced the distinction.
+ *
+ * It never comes back down inside a call. A quiet stretch is not evidence the
+ * path improved, only that nothing has been asked of it lately, and lowering
+ * the cushion on that reasoning is how you arrive back at the hole you just
+ * paid for. The price of holding a cushion that turned out to be generous is a
+ * slightly later start to each turn, which nobody hears; the price of dropping
+ * it too early is another seam mid-sentence, which everybody does.
+ *
+ * A WHOLE CALL IS A DIFFERENT MATTER, and `close` spends one step of this back.
+ * See learnedPrimeSeconds: a quiet stretch proves nothing, but a call that ran
+ * start to finish without a hole is the strongest evidence about this path
+ * available anywhere in the app.
  */
 const PRIME_STEP_SECONDS = 0.16;
 
@@ -445,10 +466,25 @@ const MAX_PRIME_SECONDS = 1;
  * makes them pay for the same three or four audible holes again to relearn a
  * number the last call already worked out.
  *
- * So the ratchet outlives the player. It is still a ratchet — see
- * PRIME_STEP_SECONDS on why it never falls — and it is still bounded by
- * MAX_PRIME_SECONDS, so the worst this can do is start a later call a second
- * ahead of the clock, which is the cost that note already accepted.
+ * So the ratchet outlives the player. It is bounded by MAX_PRIME_SECONDS, and
+ * — now that the climb answers jitter alone rather than any hole at all — what
+ * it carries between calls is a fact about this uplink, which is exactly the
+ * kind of fact that survives a redial.
+ *
+ * IT IS NO LONGER MONOTONIC, AND THAT IS THE 14:08 LESSON. The first version
+ * only ever rose, and on 2026-08-28 it climbed 600 → 760 → 920 → 1000ms inside
+ * a single turn, thirty seconds into a lesson, off three sub-second holes that
+ * were a supply deficit and not jitter at all. From there every remaining turn
+ * of the tab — including any redial — would have opened on a full second of
+ * silence, with nothing in the app able to lower it short of a page reload.
+ * Narrowing the climb to the cliff case fixes most of that; a value that can
+ * only ever rise fixes none of it, because one bad minute still pins the tab.
+ *
+ * So `close` gives a step back after any call that never starved. That is not
+ * the "quiet stretch" PRIME_STEP_SECONDS refuses to read anything into — it is
+ * a complete call, the largest sample this app ever takes of a path, and a
+ * cushion this app cannot climb down from is worse than one that guesses low
+ * and is corrected within the turn.
  *
  * MODULE STATE AND NOT STORAGE, DELIBERATELY. It lasts as long as the tab, so a
  * lesson dialled again after a stall inherits it and a fresh visit tomorrow
@@ -520,6 +556,23 @@ export type AudioGap =
        * apart on a timeline read after the fact.
        */
       primeMs: number;
+      /**
+       * Which of the two faults this hole was, as `watch` read it.
+       *
+       * THE QUESTION A READER OF THIS TIMELINE ACTUALLY HAS. `jitter` is a
+       * chunk that did not turn up in time — ours, in the sense that the path
+       * or the browser is where it went wrong, and the cushion above is the
+       * answer to it. `supply` is the model handing back audio slower than it
+       * is played, which no cushion reaches; the lead was already thin when the
+       * hole arrived, and the cushion deliberately does not move.
+       *
+       * It is on the wire rather than inferred from `primeMs` standing still,
+       * because a cushion already at MAX_PRIME_SECONDS also stands still and
+       * the two mean opposite things. Without this the timeline can show a
+       * stalling lesson and not say whose fault it is, which is the single most
+       * useful thing it knows.
+       */
+      cause: 'jitter' | 'supply';
     }
   | {
       /** The queue is still ahead, but by less than half the cushion. */
@@ -579,6 +632,22 @@ export class PcmPlayer {
    * that decides whether to warn — see `episodeLow`.
    */
   private worstLead = Infinity;
+  /**
+   * The lead the chunk before this one found, in seconds. The cliff test.
+   *
+   * WHAT SEPARATES A LATE CHUNK FROM A SLOW SUPPLY, and the whole reason the
+   * ratchet can now decline to fire. Both end in an empty queue and they sound
+   * identical to the learner, but the approach differs completely: a supply
+   * rate under playback eats the lead a little at a time, so the chunk before
+   * the hole already found a thin queue, while a chunk that was simply late
+   * arrives after a healthy one. One measurement tells them apart, and it is
+   * this one.
+   *
+   * Infinity at the start of a call is read as healthy on purpose. No previous
+   * chunk means no evidence of a descent, and the ratchet's own bound is what
+   * limits the cost of guessing wrong once.
+   */
+  private lastLead = Infinity;
   /**
    * The smallest lead since the queue was last at a full cushion, in seconds.
    *
@@ -738,6 +807,12 @@ export class PcmPlayer {
     this.awaitingTurn = false;
 
     const lead = this.playhead - context.currentTime;
+    // Read before it is overwritten, and overwritten on every path out of here:
+    // the cliff test below is a comparison between this chunk and the one
+    // before it, so the record has to advance whether or not anything is wrong.
+    const previous = this.lastLead;
+    this.lastLead = lead;
+
     if (lead >= 0) {
       const ms = Math.round(lead * 1000);
 
@@ -773,27 +848,66 @@ export class PcmPlayer {
     // here, and the descent that follows is worth warning about again.
     this.episodeLow = Infinity;
 
-    /**
-     * The correction, and the only place the cushion ever changes.
+    /*
+     * Whether this hole is the transport's or the model's.
      *
-     * It is applied *before* the chunk that found the queue dry is scheduled —
-     * `watch` runs first in `enqueue` for exactly this reason — so the audio
-     * that resumes after the hole already resumes on the wider cushion. Waiting
-     * until the next dry queue would spend the whole of this turn proving the
-     * old cushion wrong a second time.
+     * A CLIFF IS A CHUNK THAT DID NOT TURN UP: the queue was healthy right up
+     * to the moment it was empty, which is jitter, and jitter is the one thing
+     * a cushion can actually absorb. A hole reached down a queue that was
+     * already thin is the other case — the lead was being eaten steadily, which
+     * is a supply rate under playback, and no cushion covers a deficit that
+     * never stops accumulating.
+     *
+     * THE SAME THRESHOLD THE WARNING USES, deliberately. `thin` is already this
+     * file's statement of "low enough that the next hiccup will be heard", and
+     * a second threshold here would be a second opinion about the same queue
+     * that could disagree with the line already on the learner's timeline.
      */
-    this.prime = Math.min(MAX_PRIME_SECONDS, this.prime + PRIME_STEP_SECONDS);
-    // Carried past the end of this call, so the next one on this tab opens
-    // where this one finished rather than paying for the climb again.
-    learnedPrimeSeconds = Math.max(learnedPrimeSeconds, this.prime);
+    const cliff = previous >= this.prime * THIN_LEAD_FRACTION;
+
+    /**
+     * The correction, and the only place the cushion ever climbs.
+     *
+     * IT IS PAID FOR JITTER AND NOT FOR A DEFICIT, which is what `cliff` above
+     * decides. A cushion is cover against a chunk that arrives late; against a
+     * model supplying audio slower than it is played it is spent before the
+     * hole arrives, buys nothing, and costs the width of every later hole plus
+     * a later start to every turn. On 2026-08-28 at 14:08 that bill came in
+     * full: 600ms of cushion, three holes anyway at 348, 355 and 512ms — each
+     * one smaller than the lead that was supposed to absorb it — and a climb to
+     * the 1000ms ceiling inside a single turn, thirty seconds into the lesson.
+     *
+     * So a hole approached down a thinning queue changes nothing. It is still
+     * counted, still warned about, still on the call's timeline where somebody
+     * can read it; it simply is not evidence about the cushion, because the
+     * cushion is not what failed.
+     *
+     * The climb, when it does happen, is applied *before* the chunk that found
+     * the queue dry is scheduled — `watch` runs first in `enqueue` for exactly
+     * this reason — so the audio that resumes after the hole already resumes on
+     * the wider cushion. Waiting until the next dry queue would spend the whole
+     * of this turn proving the old cushion wrong a second time.
+     */
+    if (cliff) {
+      this.prime = Math.min(MAX_PRIME_SECONDS, this.prime + PRIME_STEP_SECONDS);
+      // Carried past the end of this call, so the next one on this tab opens
+      // where this one finished rather than paying for the climb again.
+      learnedPrimeSeconds = Math.max(learnedPrimeSeconds, this.prime);
+    }
 
     const ms = Math.round(gap * 1000);
     const primeMs = Math.round(this.prime * 1000);
+    const cause = cliff ? 'jitter' : 'supply';
     console.warn(
       `PcmPlayer: underrun #${this.underruns} — queue dry for ${ms}ms ` +
-        `mid-speech; that is the pause you heard. Cushion now ${primeMs}ms.`,
+        `mid-speech; that is the pause you heard. ${
+          cliff
+            ? `A chunk arrived late off a healthy queue, so the cushion is now ${primeMs}ms.`
+            : `The queue was already thin, so this is supply and not jitter; the ` +
+              `cushion stays at ${primeMs}ms because widening it would not have helped.`
+        }`,
     );
-    this.report?.({ kind: 'starved', ms, count: this.underruns, primeMs });
+    this.report?.({ kind: 'starved', ms, count: this.underruns, primeMs, cause });
   }
 
   /**
@@ -990,6 +1104,9 @@ export class PcmPlayer {
     // A barge-in ends the turn as surely as finishing it does, and whatever the
     // model says next starts a new one from an empty queue on purpose.
     this.awaitingTurn = true;
+    // The lead measured before a queue that was thrown away says nothing about
+    // the one that replaces it, and the cliff test would read it as a descent.
+    this.lastLead = Infinity;
 
     // Everything measured beyond now describes audio that was just thrown away
     // unplayed. Leaving it would let the mouth go on speaking the interrupted
@@ -1002,6 +1119,26 @@ export class PcmPlayer {
   }
 
   close(): void {
+    /*
+     * A whole call without a hole gives a step of the cushion back.
+     *
+     * THE ONE PLACE THE RATCHET DESCENDS, and the sample is what earns it.
+     * PRIME_STEP_SECONDS refuses to read anything into a quiet stretch mid-call
+     * — rightly, since nothing may have been asked of the path lately — but a
+     * call that ran start to finish and never once ran dry is the largest
+     * measurement this app ever takes of a connection, and treating it as no
+     * evidence at all is what left `learnedPrimeSeconds` pinned at its ceiling
+     * for the life of a tab off three sub-second holes.
+     *
+     * ONE STEP AND NOT A RESET. The climb is bounded and slow on the way up, so
+     * the way down is too: a path that really is bad reaches its cushion again
+     * in a hole or two, and a path that has recovered walks back to the base
+     * over a few calls rather than losing everything it learned at the first
+     * quiet lesson.
+     */
+    if (this.underruns === 0) {
+      learnedPrimeSeconds = Math.max(BASE_PRIME_SECONDS, learnedPrimeSeconds - PRIME_STEP_SECONDS);
+    }
     this.clear();
     void this.context?.close();
     this.context = null;
