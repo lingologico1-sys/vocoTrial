@@ -240,6 +240,22 @@ export function geminiSetup(
  */
 export const OPENAI_INPUT_RATE = 24_000;
 
+/**
+ * The rate the tutor's own audio comes back at.
+ *
+ * REQUIRED, NOT ASSUMED. `audio.output.format` is refused without a `rate` —
+ * `Missing required parameter: 'session.audio.output.format.rate'` — so naming
+ * the format at all commits us to naming the rate with it, unlike Gemini where
+ * the output rate is fixed and unspoken.
+ *
+ * It is the same 24000 as the input side, but it is a different fact: this one
+ * has to equal OUTPUT_SAMPLE_RATE in src/realtime/audio.ts, which is the rate
+ * the AudioContext playing these frames was opened at. A mismatch is not an
+ * error anywhere — it is a tutor speaking too fast or too slow, at the wrong
+ * pitch, with nothing in the log to say why.
+ */
+export const OPENAI_OUTPUT_RATE = 24_000;
+
 
 /**
  * Builds the `session.update` payload for OpenAI's realtime API.
@@ -375,7 +391,7 @@ export function openAiSession(
   });
 
   const output = compact({
-    format: { type: 'audio/pcm' },
+    format: { type: 'audio/pcm', rate: OPENAI_OUTPUT_RATE },
     voice: settings.voice,
     /*
      * The lesson's pace, as a rate rather than as a request. PACE in
