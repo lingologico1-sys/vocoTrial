@@ -299,36 +299,37 @@ export function openAiSession(
   const hinted = settings.transcriptionHint !== false;
 
   /*
-   * WHICH TRANSCRIBER IS RUNNING DECIDES WHERE THE LESSON'S WORDS GO.
+   * WHICH TRANSCRIBER IS RUNNING DECIDES WHICH FIELDS IT WILL TAKE, and the
+   * three of them here are not a matter of taste: sending the wrong one is a
+   * refused session update and a socket that never goes live. That is not a
+   * transcript degraded, it is a lesson lost — on 2026-08-28 a learner talked
+   * into a dead page through five dials, each one refused with
+   * `The 'keywords' parameter is not supported for this model.`
    *
-   * `keywords` is a field on the diarizing transcriber alone. Sent to
-   * whisper-1 or to either gpt-4o-transcribe, the session update comes back
-   * `The 'keywords' parameter is not supported for this model.` and the socket
-   * never goes live — the whole lesson is lost, not the bias. That is what
-   * happened on 2026-08-28: five dials, five errors, a learner talking into a
-   * page with nothing on the other end.
+   * `keywords` — a list of literal terms to lean towards — belongs to the
+   * current transcribers, gpt-live-transcribe and gpt-transcribe. whisper-1 and
+   * the gpt-4o-transcribe pair predate it and reject it.
    *
-   * So the words are folded into `prompt` instead wherever `keywords` is not
-   * accepted. That is not a downgrade to a second-best field: `prompt`
-   * conditions the transcriber as though it were the transcript leading up to
-   * the audio, so a line of the lesson's own vocabulary is exactly the bias
-   * `keywords` was asked for — see `sample` in languages.ts, whose style hint
-   * leads the same string.
+   * `languages` — plural, a list — is gpt-live-transcribe's spelling of the
+   * language hint, and the documentation is explicit that it replaces
+   * `language` rather than joining it: do not send both.
+   *
+   * `prompt` every one of them takes. It conditions the transcriber as though
+   * it were the transcript leading up to the audio, so where `keywords` is not
+   * available the lesson's words are folded in here instead — not a second-best
+   * substitute but the same bias by the older route. See `sample` in
+   * languages.ts, whose style hint leads the string.
    */
   const transcriptionModel = settings.transcriptionModel ?? 'whisper-1';
-  const takesKeywords = transcriptionModel.includes('diarize');
+  const takesKeywords =
+    transcriptionModel === 'gpt-transcribe' || transcriptionModel.startsWith('gpt-live-transcribe');
+  const takesLanguages = transcriptionModel.startsWith('gpt-live-transcribe');
   const words = keywords.slice(0, MAX_KEYWORDS);
 
-  /*
-   * The sample first, the lesson's words after it, and either half alone is a
-   * usable hint. The diarizing transcriber takes no prompt at all, so it gets
-   * none — its words went to `keywords` above.
-   */
-  const prompt = takesKeywords
-    ? undefined
-    : [hinted ? language.sample : '', words.join(', ')]
-        .filter((part) => part.length > 0)
-        .join(' ') || undefined;
+  const prompt =
+    [hinted ? language.sample : '', takesKeywords ? '' : words.join(', ')]
+      .filter((part) => part.length > 0)
+      .join(' ') || undefined;
 
   const transcription = compact({
     /*
@@ -347,7 +348,8 @@ export function openAiSession(
      * the turn it belongs to.
      */
     model: transcriptionModel,
-    language: hinted ? language.code : undefined,
+    language: hinted && !takesLanguages ? language.code : undefined,
+    languages: hinted && takesLanguages ? [language.code] : undefined,
     prompt,
     keywords: takesKeywords && words.length ? words : undefined,
   });

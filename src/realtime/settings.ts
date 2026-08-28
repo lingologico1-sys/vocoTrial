@@ -616,11 +616,22 @@ export const SETTING_FIELDS: SettingField[] = [
      * measured, not so it can be assumed — which is why nothing is pinned here
      * and an untouched control sends no field at all.
      */
-    hint: 'whisper-1 waits for the whole utterance and is the most accurate on hesitant speech.',
+    hint: 'whisper-1 waits for the whole utterance. Only the two newest take the lesson's word list.',
     kind: 'select',
     applies: isOpenAi,
+    /**
+     * THE LIST IS TWO GENERATIONS AND THEY DIFFER IN MORE THAN ACCURACY. Only
+     * gpt-live-transcribe and gpt-transcribe accept `keywords`, so only they
+     * can be handed the lesson's vocabulary as a list; on the older three it
+     * goes into `prompt` instead and biases more softly. That routing lives in
+     * openAiSession in functions/api/live/_setup.ts, and it is not cosmetic —
+     * sending the field to a transcriber that has never heard of it refuses the
+     * whole session, which is how a learner ends up talking into a dead page.
+     */
     options: [
       { value: 'whisper-1', label: 'whisper-1 (batch, most accurate)' },
+      { value: 'gpt-live-transcribe', label: 'gpt-live-transcribe (streaming, takes keywords)' },
+      { value: 'gpt-transcribe', label: 'gpt-transcribe (batch, takes keywords)' },
       { value: 'gpt-4o-transcribe', label: 'gpt-4o-transcribe (streaming)' },
       { value: 'gpt-4o-mini-transcribe', label: 'gpt-4o-mini-transcribe (streaming)' },
     ],
