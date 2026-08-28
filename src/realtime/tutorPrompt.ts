@@ -330,6 +330,135 @@ export function wroteASystemNote(text: string): boolean {
 }
 
 /**
+ * The other thing a tutor says that was never meant to be speech: its own
+ * bookkeeping call, pronounced.
+ *
+ * OBSERVED, NOT GUARDED AGAINST IN ADVANCE. On 2026-08-28 a turn came back as
+ * `call:${PROGRESS_TOOL}{number:3}On dirait que vous avez une bonne ambiance!`
+ * — the model writing a text-shaped version of the tool call into the channel
+ * that is read aloud, with its actual reply carrying straight on afterwards.
+ * The page counts real tool calls and never saw this one, so nothing about the
+ * lesson went wrong; what went wrong is that a beginner in the middle of a
+ * French sentence heard an identifier and a brace.
+ *
+ * THE NAME ALONE IS ENOUGH TO CUT ON. `${PROGRESS_TOOL}` is camelCase English
+ * inside a lesson taught in something else — no tutor has any reason to utter
+ * it in any language, so there is no sentence this can take away. The openers
+ * and the argument blob are matched only to widen the cut: an orphaned `call:`
+ * left standing would be the same fault with fewer letters.
+ *
+ * IT EXCISES RATHER THAN TRUNCATES, which is the one place it disagrees with
+ * withoutSystemNote above. An invented note replaces a turn — nothing has ever
+ * been observed after one — but this arrived welded to the front of a real
+ * reply the learner is listening to as it is cut. Blanking that would put a
+ * silent bubble under a talking face to punish the model for a token.
+ *
+ * AND IT IS COSMETIC, WHICH IS WORTH BEING PLAIN ABOUT. The audio was generated
+ * and played before any of this ran. What this protects is the bubble, the
+ * report and the words a learner can tap on — not their ears. The ears are the
+ * prompt's problem, under REPORTING YOUR PROGRESS in composeTutorPrompt.
+ */
+const OPENERS = ['function call', 'tool call', 'tool_call', 'toolcall', 'api call', 'call'];
+
+/** The whole construct, once enough of it has arrived to be sure. */
+const SPOKEN_TOOL = new RegExp(
+  `(?:\\b(?:${OPENERS.join('|')})\\s*[:=]?\\s*)?` +
+    PROGRESS_TOOL +
+    String.raw`\s*(?:\{[^}]*\}|\([^)]*\))?`,
+  'gi',
+);
+
+/**
+ * How far back from the tail a cut might still reach, in characters.
+ *
+ * The construct is an opener, a name and an argument blob, and only the blob
+ * has no length of its own. Sixty-four covers every one yet seen with room to
+ * spare, and it bounds a scan that runs on every fragment of every turn.
+ */
+const LOOKBACK = 64;
+
+/**
+ * Whether what is left at the end of a fragment could still grow into one.
+ *
+ * THE HALF THAT KEEPS THE CUT MONOTONIC. Text is put on screen as it becomes
+ * audible and cannot be taken back, so a tail that might turn out to be the
+ * front of a spoken tool call has to be withheld until the next fragment says
+ * which it was. Without it the four characters of `call:` are painted, the name
+ * completes, the cut moves underneath what is already on screen, and the words
+ * after it are sliced at the wrong offset — corrupt output, which is worse than
+ * the token this exists to remove.
+ *
+ * IT OVER-WITHHOLDS AND THAT IS THE CHEAP DIRECTION. `que` is the front of
+ * `${PROGRESS_TOOL}` as far as three letters can tell, and it ends a great many
+ * French clauses; those are held for one fragment — a fraction of a second,
+ * against audio that is still playing — and released whole. Being wrong the
+ * other way is a permanent mark on the screen.
+ */
+function couldBeSpokenTool(rest: string): boolean {
+  const low = rest.toLowerCase();
+  const name = PROGRESS_TOOL.toLowerCase();
+
+  // The name itself, arriving a letter at a time.
+  if (name.startsWith(low)) return true;
+  // The name, followed by an argument blob that has not closed yet.
+  if (low.startsWith(name)) {
+    const after = low.slice(name.length).trimStart();
+    return after === '' || (/^[{(]/.test(after) && !/[)}]/.test(after));
+  }
+  // An opener, arriving or arrived, with however much has followed it.
+  for (const opener of OPENERS) {
+    if (opener.startsWith(low)) return true;
+    if (!low.startsWith(opener)) continue;
+    const after = low.slice(opener.length).replace(/^[\s:=]*/, '');
+    if (after === '' || couldBeSpokenTool(after)) return true;
+  }
+  return false;
+}
+
+/**
+ * The tutor's words with any spoken bookkeeping taken out.
+ *
+ * `done` releases whatever was being withheld: a turn that has finished has no
+ * next fragment to prove itself in, and "question" — a prefix of the name and
+ * an ordinary French word — is a likely enough last word that losing it would
+ * be a worse bug than the one being fixed.
+ */
+export function withoutSpokenTool(text: string, done: boolean): string {
+  /*
+   * WITHHELD FIRST, CUT SECOND, AND THE ORDER IS THE WHOLE CORRECTNESS OF THIS.
+   * Done the other way round, `${PROGRESS_TOOL}{num` has its name taken out —
+   * the name is complete, after all — and the orphaned `{num` left behind is
+   * not the front of anything this recognises, so it goes on screen and the
+   * `ber:3}` that closes it follows a fragment later. Deciding what is still in
+   * flight before cutting anything means the only thing the cut ever sees is a
+   * construct that has finished arriving.
+   */
+  let arrived = text;
+  if (!done) {
+    for (let take = Math.min(text.length, LOOKBACK); take > 0; take--) {
+      if (couldBeSpokenTool(text.slice(text.length - take))) {
+        arrived = text.slice(0, text.length - take);
+        break;
+      }
+    }
+  }
+  return arrived.replace(SPOKEN_TOOL, '');
+}
+
+/**
+ * Whether the tutor said its bookkeeping out loud, for the account.
+ *
+ * Unlike the note above, this earns a line even though the transcript comes out
+ * clean, and precisely because it does: the reader of a diagnostic is looking
+ * for why a learner reported hearing gibberish, and a cut that left no trace
+ * would send them looking at the audio pipe.
+ */
+export function spokeATool(text: string): boolean {
+  SPOKEN_TOOL.lastIndex = 0;
+  return SPOKEN_TOOL.test(text);
+}
+
+/**
  * The same marker, minus the half that would silence the opening note.
  *
  * "Do not answer it" is right for a note that arrives mid-conversation: it says
@@ -942,6 +1071,13 @@ Never spend a turn on the call alone either: a turn with nothing but bookkeeping
 in it is silence too. It is between you and the program, so never mention it,
 never say how many questions are left, and carry straight on talking.
 
+Making the call is not saying it. It goes out through the tool, on a channel of
+its own that the learner never hears. Its name written into your turn is not the
+call at all — that is you pronouncing "${PROGRESS_TOOL}", or worse
+"call:${PROGRESS_TOOL}{number:2}", out loud to a beginner in the middle of a
+sentence they are trying to follow. If the tool is not there to call, say nothing
+about it and carry on with the lesson.
+
 HOW THIS STARTS
 A note arrives before the learner has said anything, asking you to greet them.
 The greeting and the first question on the list are one turn, not two: say
@@ -983,6 +1119,7 @@ conversation wherever it has got to, and you do what it says.
 Notes only ever arrive, and you have no way to write one. Everything you produce
 in a turn is spoken aloud to the learner, brackets and all — so a note in your
 own turn is not a note at all, it is you reading instructions aloud to a
-beginner in the middle of their lesson. The only thing you can say to the
-program is ${PROGRESS_TOOL}. Everything else, they hear.`;
+beginner in the middle of their lesson. There is nothing you can say to the
+program: the one thing you can tell it goes out as a tool call and not as words.
+Everything in a turn, they hear.`;
 }

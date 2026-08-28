@@ -5,6 +5,8 @@ import type { SessionSettings } from '../realtime/settings';
 import {
   KEEP_GOING_SIGNAL,
   PROGRESS_TOOL,
+  spokeATool,
+  withoutSpokenTool,
   withoutSystemNote,
   wroteASystemNote,
 } from '../realtime/tutorPrompt';
@@ -223,6 +225,9 @@ const MIC_FLICKER_MS = 750;
  */
 const SENT_SHORTFALL = 0.75;
 
+/** A tutor turn nothing has arrived for yet. See `said` in the hook. */
+const blankTurn = () => ({ heard: '', shown: 0, stray: false, blurted: false, raw: false });
+
 export interface Turn {
   role: 'user' | 'agent';
   text: string;
@@ -316,6 +321,13 @@ export interface CallEvent {
      * left: the words never reach the bubble, the report or the vocabulary
      * list, and without this the diagnostic of a lesson that ended strangely
      * would show a tutor doing nothing unusual at all. See withoutSystemNote.
+     *
+     * OR IT SAID ITS BOOKKEEPING CALL OUT LOUD, which is the same fault at the
+     * other end of the protocol and gets the same kind of line. The two differ
+     * in what the cut can save: an invented note is usually text with no audio
+     * behind it, and a spoken tool call is audio by definition — the learner
+     * has already heard it by the time anything here runs, and the line says
+     * so. See withoutSpokenTool.
      */
     | 'stray'
     /**
@@ -1464,7 +1476,7 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
    * monotonic, which is the property that lets this subtract two lengths and
    * never have to unsay anything.
    */
-  const said = useRef({ heard: '', shown: 0, stray: false });
+  const said = useRef(blankTurn());
 
   /**
    * Puts words on screen, and is the only thing that may.
@@ -1486,7 +1498,22 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
       for (const item of items) {
         const turn = said.current;
         turn.heard += item.text;
-        const spoken = withoutSystemNote(turn.heard);
+        /*
+         * Two cuts, and the second one can be abandoned mid-turn.
+         *
+         * `withoutSystemNote` only ever truncates, so what it produces always
+         * extends what it produced a fragment ago. `withoutSpokenTool` takes
+         * something out of the middle, and its guard against doing that under
+         * text already on screen is a guess about how the next fragment will
+         * read — so this checks the property rather than trusting it. If a cut
+         * ever fails to extend what has been shown, the tutor's own words are
+         * let through raw for the rest of the turn: the token reaches the
+         * bubble, which is exactly where it was going before any of this
+         * existed, and half a word spliced onto another half is new damage.
+         */
+        const cut = withoutSpokenTool(withoutSystemNote(turn.heard), item.done);
+        if (!turn.raw && cut.length < turn.shown) turn.raw = true;
+        const spoken = turn.raw ? withoutSystemNote(turn.heard) : cut;
 
         if (spoken.length > turn.shown) {
           const fresh = spoken.slice(turn.shown);
@@ -1504,7 +1531,22 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
           record('stray', 'the tutor wrote itself a system note; it was cut from the transcript');
         }
 
-        if (item.done) said.current = { heard: '', shown: 0, stray: false };
+        /*
+         * The same line for the same class of fault, and it says what the note
+         * line cannot: the learner heard this one. The cut above is the screen
+         * only, and a diagnostic that reported nothing would send its reader to
+         * the audio pipe looking for gibberish that came from the model.
+         */
+        if (!turn.blurted && spokeATool(turn.heard)) {
+          turn.blurted = true;
+          record(
+            'stray',
+            'the tutor said its bookkeeping call out loud — cut from the transcript, ' +
+              'but the audio for it had already gone out and the learner heard it',
+          );
+        }
+
+        if (item.done) said.current = blankTurn();
       }
 
       return shown;
@@ -1785,7 +1827,7 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
       setOpeningDone(false);
       tutorHasSpoken.current = false;
     }
-    said.current = { heard: '', shown: 0, stray: false };
+    said.current = blankTurn();
     setUsage(emptyUsage());
 
     const handlers = {
@@ -2105,7 +2147,7 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
         // The turn those words belonged to is over, so the note test starts
         // again with the next one. What is already on screen was audible and
         // stays; this is only the part that never got there.
-        said.current = { heard: '', shown: 0, stray: false };
+        said.current = blankTurn();
       },
       /**
        * Written down, never shown.
