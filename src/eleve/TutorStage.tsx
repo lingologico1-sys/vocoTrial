@@ -198,6 +198,14 @@ export default function TutorStage({
           are the one thing there that is not in doubt. So the mark goes here,
           where the answer is expected to come from.
 
+          AND THE FIRST OF THOSE WAITS IS THE OPENING, which has the same shape
+          and worse consequences: the learner has just pressed the button, the
+          greeting is six seconds away, and nothing on the page has moved since
+          they pressed it. The pill does say something there — the tutor is
+          starting — but a line of text under a motionless face is what a page
+          says before it has begun, not while it is working. The dots are the
+          part that is obviously running.
+
           INSIDE THE RING AND OVER THE CHIN, translucent so the face stays
           legible under it. Anywhere outside would move the layout every time
           the tutor took a moment — this column is laid out to fit exactly once

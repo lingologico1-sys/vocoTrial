@@ -593,12 +593,14 @@ export interface VoiceCall {
   /**
    * Whether the tutor owes a turn and has been owing it long enough to say so.
    *
-   * TRUE FROM THE CLOSE OF THE LEARNER'S TURN TO THE TUTOR'S FIRST SOUND, less
-   * the grace in PONDER_SHOW_MS, and false everywhere else — while the tutor is
-   * speaking, while the learner is, and before either has. It is the one span
-   * in a call where nothing at all is happening on screen and something very
-   * much is happening upstream, and the face carries a mark for it: see
-   * TutorStage.
+   * TRUE FROM A TURN BEING ASKED FOR TO THE TUTOR'S FIRST SOUND, less the grace
+   * in PONDER_SHOW_MS. Two things ask: the learner's turn closing, and this page
+   * sending a note — which makes the opening greeting, the longest unexplained
+   * silence a lesson has, the first thing it covers. It is false while the tutor
+   * is speaking and while the learner is, though the second of those only hides
+   * it. It marks the one span in a call where nothing at all is happening on
+   * screen and a great deal is happening upstream: see TutorStage, which draws
+   * it on the face.
    *
    * IT IS NOT A HEALTH CLAIM. A wait this covers is usually just the model
    * thinking, and the page has other machinery for the kind that has gone wrong
@@ -862,29 +864,48 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
    * See `pondering` on VoiceCall. The timer beside it is the grace before it
    * shows; the two are always cleared together, because a wait that has ended
    * must not be announced a moment later by a timer nobody stopped.
+   *
+   * THE DEBT AND THE DRAWING OF IT ARE SEPARATE, and they have to be. The mark
+   * is hidden while the learner is talking — the pill has its own loader for
+   * that — but a tutor that owed a turn before they opened their mouth still
+   * owes it after, so hiding may not discharge anything. `owed` is the fact and
+   * survives; `pondering` is the mark and comes and goes underneath it.
    */
   const [pondering, setPondering] = useState(false);
   const ponder = useRef<number | null>(null);
-  const stopPondering = useCallback(() => {
+  const owed = useRef(false);
+  /** The mark goes away; the debt stands. */
+  const hidePondering = useCallback(() => {
     if (ponder.current !== null) {
       clearTimeout(ponder.current);
       ponder.current = null;
     }
     setPondering(false);
   }, []);
+  const stopPondering = useCallback(() => {
+    owed.current = false;
+    hidePondering();
+  }, [hidePondering]);
   /**
-   * The learner's turn has closed and the tutor's has not begun.
+   * A turn has been asked for and has not arrived.
+   *
+   * TWO THINGS ASK FOR ONE. The learner finishing an answer is the obvious one;
+   * the other is this page putting a note on the wire — the opening greeting
+   * above all, which is a wait of several seconds with nothing on screen that
+   * has started yet, and which learners read as a lesson that has not begun.
+   * See `say`, which arms it for every note it sends.
    *
    * Armed rather than raised: PONDER_SHOW_MS of it belongs to an ordinary turn
    * and is never drawn.
    */
   const startPondering = useCallback(() => {
-    stopPondering();
+    owed.current = true;
+    hidePondering();
     ponder.current = window.setTimeout(() => {
       ponder.current = null;
       setPondering(true);
     }, PONDER_SHOW_MS);
-  }, [stopPondering]);
+  }, [hidePondering]);
   /**
    * See `openingDone` on VoiceCall for what this means. The ref beside it is
    * the guard that keeps it honest: it flips on an *end* of tutor audio, and
@@ -1645,8 +1666,20 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
        */
       record('note', session.current ? said : `${said} — DROPPED, no call was running`);
       session.current?.say(text);
+      /*
+       * Every note asks for a turn, so every note that lands starts a wait.
+       *
+       * THE OPENING IS THE ONE THAT MATTERS. It goes out the moment the socket
+       * is up and the tutor's first sound can be six or ten seconds behind it,
+       * and until now the page said nothing at all across that gap — a learner
+       * who has just pressed the button, watching a still face, cannot tell a
+       * lesson that is composing its greeting from one that has failed to
+       * start. The nudges and the closing note are the same shape and get the
+       * same mark. A note with no call to land in asks nothing of anybody.
+       */
+      if (session.current) startPondering();
     },
-    [clearStall, record],
+    [clearStall, record, startPondering],
   );
 
   /**
@@ -1857,16 +1890,19 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
         // put a note on the wire in the middle of their sentence.
         if (active) clearStall();
         /*
-         * And a learner who is talking is not a learner waiting to be answered.
+         * A learner who is talking is not a learner waiting to be answered —
+         * but a tutor that owed a turn before they spoke still owes it.
          *
-         * They have taken the floor back — often because the wait went on long
-         * enough that they said something into it — and the pill's own loader
-         * is the mark for that half of the call. Two loaders on one screen
-         * saying different things about the same silence is worse than either.
-         * The debt is not forgotten: the tutor's turn, when it comes, is what
-         * closes theirs, and that arms this again.
+         * HIDDEN, NOT DISCHARGED. While they are speaking the pill's own loader
+         * is the mark for the call, and two loaders saying different things
+         * about one silence is worse than either. When they stop, the debt is
+         * still standing wherever it was — a greeting that has not come, a
+         * question they answered into and then talked over the wait for — so
+         * the mark is armed again from that moment, grace and all. Only sound
+         * from the tutor, or the call ending, actually clears it.
          */
-        if (active) stopPondering();
+        if (active) hidePondering();
+        else if (owed.current) startPondering();
         // A learner talking is proof the floor is theirs, whatever the audio
         // channel did or failed to report. Belt and braces for the one failure
         // that would matter — a greeting whose end never arrives, leaving the
@@ -2296,7 +2332,7 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
        */
       resuming.current = false;
     }
-  }, [acceptProgress, append, clearStall, cue, onTranscript, record, reveal, say, settle, stopPondering, stopWaiting]);
+  }, [acceptProgress, append, clearStall, cue, onTranscript, record, reveal, say, hidePondering, settle, startPondering, stopPondering, stopWaiting]);
 
   /** A conversation from the top: a cleared transcript and a fresh count. */
   const connect = useCallback(() => dial(false), [dial]);
