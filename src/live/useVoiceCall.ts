@@ -1050,10 +1050,12 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
    * call, and on what evidence.
    *
    * IT COUNTS TO THE MOMENT, WHICH IT DID NOT USED TO. Two things in gemini.ts
-   * decide what arrives here: a turn is closed when the model begins answering
-   * — including when it begins with a tool call, which on this model is the
-   * first thing it emits — and a turn the learner never spoke in is not closed
-   * at all. Before the first, a report made as the learner stopped talking
+   * decide what arrives here: a turn is closed at both ends of the tutor's
+   * reply — as it begins, which on a surface with a tool is the tool call, and
+   * again when it completes — and a turn the learner never spoke in is not
+   * closed at all. The second close is not spare: the transcription burst races
+   * the reply's first sound and lands either side of it, and a turn left open
+   * because the burst lost that race goes on collecting the next answer too. Before the first, a report made as the learner stopped talking
    * arrived while their turn was still open here and was refused for being one
    * short. Before the second, the greeting credited every lesson with a turn
    * nobody had taken, and the two cancelled out — a ceiling one too high

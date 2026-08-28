@@ -160,6 +160,7 @@ export async function startGeminiSession(
   const chosen = findModel(modelKey);
   const silentResponses = !!chosen && isGoogle(chosen) && chosen.surface === 'aistudio';
 
+
   const mic = new MicCapture(GEMINI_INPUT_RATE);
   // The player reports its own queue running out, straight through to whoever
   // is keeping the account of the call — the one fault in here the learner
@@ -333,14 +334,45 @@ export async function startGeminiSession(
    * exactly what that watches for — but a turn with no learner speech in it has
    * no turn of theirs to end. See `heardLearner`.
    */
+  /**
+   * Their turn is over, once, and only if they took one.
+   *
+   * CALLED AT BOTH ENDS OF THE TUTOR'S TURN, WHICH IS NOT BELT AND BRACES — the
+   * two catch different halves of a race. Google delivers the learner's
+   * transcription in a burst after their turn commits, and that burst arrives
+   * either side of the reply's first sound: usually a couple of tenths ahead,
+   * once on 2026-08-28 a tenth behind. Whichever end the burst lands outside
+   * of, the other end shuts the turn.
+   *
+   * WHAT IT COST WHEN ONLY THE FIRST END EXISTED. The close ran at +0:47.4 with
+   * `heardLearner` still false and did nothing; the words arrived a tenth later
+   * into a turn nothing would shut until the *next* reply began, seventeen
+   * seconds and a whole question afterwards. One displayed turn carried two
+   * answers — the summer and the evening — the page counted it once, and a
+   * lesson the tutor had asked and closed correctly ended four of five and
+   * never hung up.
+   *
+   * THE FIRST END IS STILL THE ONE THAT MATTERS WHERE THERE IS A TOOL. A
+   * progress report arrives at the top of the turn it belongs to, ahead of the
+   * audio, and is refused for being one short if their turn is still open here.
+   * Nothing about that changes: the close at `turnComplete` finds the turn
+   * already shut and does nothing.
+   *
+   * Anything of theirs that lands after both is speech made while the tutor was
+   * talking, which belongs to the next turn and gets one.
+   */
+  const closeLearnerTurn = () => {
+    if (!heardLearner) return;
+    heardLearner = false;
+    handlers.onTranscript({ role: 'user', text: '', done: true });
+  };
+
   const answerBegins = () => {
     if (answering) return;
     answering = true;
     turnBeganAt = Date.now();
     generatedAt = 0;
-    if (!heardLearner) return;
-    heardLearner = false;
-    handlers.onTranscript({ role: 'user', text: '', done: true });
+    closeLearnerTurn();
   };
 
   let stopped = false;
@@ -1069,6 +1101,11 @@ export async function startGeminiSession(
          * page found out.
          */
         flushPendingText(player.scheduledAt());
+
+        // The other end of the race. A burst that lost to the first sound of
+        // this reply has had the whole of its generation to arrive, and this is
+        // what shuts the turn it landed in. See `closeLearnerTurn`.
+        closeLearnerTurn();
 
         answering = false;
         audioThisTurn = false;
