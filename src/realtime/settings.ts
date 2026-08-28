@@ -183,6 +183,17 @@ interface FieldBase {
    * and dropping it would lose the value if they switched back.
    */
   requires?: (settings: SessionSettings) => boolean;
+  /**
+   * What the panel's blank option says, where "Model default" would be false.
+   *
+   * It is right for every field but one. `accent` composes prose rather than
+   * sending a field, and the model has no accent default to fall back to — so
+   * an untouched control there does not defer to anything, it takes *our*
+   * default. Labelling that "Model default" is precisely the small lie the
+   * comment over that option warns about, and worse than the wording it
+   * replaced: it points at the provider for a decision the provider never made.
+   */
+  unsetLabel?: string;
 }
 
 export type SettingField = FieldBase &
@@ -572,20 +583,26 @@ export const SETTING_FIELDS: SettingField[] = [
      * no accent field — so leaving it alone gets the native block, and turning
      * it off is the deliberate act. See `accent` on SessionSettings.
      */
-    hint: 'On by default. Turn it off only to hear what the tutor sounded like before.',
+    hint: 'On unless you turn it off. French speaks Parisian; see `variety` in languages.ts.',
     kind: 'select',
     applies: isOpenAi,
+    unsetLabel: 'Native speaker (default)',
     /*
-     * Two values and no list of regions, because which variety a language
-     * defaults to is a fact about the language and lives on it — `variety` in
-     * languages.ts — rather than a choice re-made per lesson. French is
-     * Parisian there. A knob offering Parisian against Quebecois is worth
-     * adding the day somebody wants to teach the other one, and not before.
+     * ONE OPTION, BECAUSE THERE IS ONLY ONE CHOICE TO MAKE. `native` is not
+     * listed beside `off` even though the type has it: the blank option above
+     * already means native, and offering both would put two entries that do
+     * the identical thing in one dropdown, which reads as a difference nobody
+     * can find. Turning it off is the only decision available here, so it is
+     * the only one shown. The value stays in the type because probe.ts and a
+     * published lesson can still say it out loud, and sanitizeSettings dropping
+     * an unlisted `native` lands on the same prompt anyway.
+     *
+     * NO LIST OF REGIONS EITHER, because which variety a language defaults to
+     * is a fact about the language and lives on it. A knob offering Parisian
+     * against Quebecois is worth adding the day somebody wants to teach the
+     * other one, and not before.
      */
-    options: [
-      { value: 'native', label: 'Native speaker (default)' },
-      { value: 'off', label: 'Say nothing about it' },
-    ],
+    options: [{ value: 'off', label: 'Say nothing about it' }],
   },
   {
     key: 'silenceDurationMs',

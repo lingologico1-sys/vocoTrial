@@ -76,8 +76,10 @@ function Field({
       >
         {/* Not "Google default" any more: whose default it is depends on the
             model, and naming the wrong provider is exactly the sort of small
-            lie that sends somebody looking in the wrong documentation. */}
-        <option value={UNSET}>Model default</option>
+            lie that sends somebody looking in the wrong documentation. A field
+            may override it outright, for the case where no provider decides
+            this at all — see `unsetLabel` in settings.ts. */}
+        <option value={UNSET}>{field.unsetLabel ?? 'Model default'}</option>
         {field.kind === 'toggle' ? (
           <>
             <option value="true">On</option>
