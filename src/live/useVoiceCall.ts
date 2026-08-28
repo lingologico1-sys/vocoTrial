@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { startSession } from '../realtime/start';
+import { acceptsProgressTool, findModel } from '../realtime/models';
 import { emptyUsage, type UsageTotals } from '../realtime/cost';
 import type { SessionSettings } from '../realtime/settings';
 import {
@@ -1138,6 +1139,20 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
   const latest = useRef(options);
   latest.current = options;
 
+  /**
+   * Whether the model being dialled reports its own progress.
+   *
+   * Read through `latest` rather than captured, for the same reason everything
+   * else in here is: the option can change between renders and the handlers
+   * outlive the render that made them. A key this build does not know reads as
+   * yes, which is what start.ts sends for it too — better a report that never
+   * comes than a lesson counting turns the tutor is also counting.
+   */
+  const toolReports = () => {
+    const model = findModel(latest.current.modelKey);
+    return model ? acceptsProgressTool(model) : true;
+  };
+
   const { language } = options;
 
   useEffect(() => () => session.current?.stop(), []);
@@ -1421,6 +1436,31 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
         }
         if (delta.done) {
           learnerTurns.current += 1;
+          /*
+           * ON A SURFACE WITH NO TOOL, THE TURN IS THE REPORT.
+           *
+           * Vertex is given no progress tool at all — answering one there buys
+           * an extra generated turn, and that turn is in the model's context
+           * whatever this end does with it. See `acceptsProgressTool`. So
+           * nothing arrives through `onQuestionDone` on that surface, and the
+           * count has to come from somewhere else.
+           *
+           * IT COMES FROM THE CEILING, WHICH WAS ALREADY HERE. Every report the
+           * tutor has ever made was checked against the learner's finished
+           * turns before being believed — a tutor could never claim more
+           * questions than the learner had taken turns. Where there is no
+           * tutor to check, the ceiling is the whole of the answer: the Nth
+           * finished turn is the Nth question. `undefined` is how
+           * `acceptProgress` is told to fill the next free slot, and every
+           * other test it runs — the total, the repeats, the order — still
+           * applies unchanged.
+           *
+           * WHAT IT GIVES UP is the tutor's judgement about whether an answer
+           * was really an answer. On a fixed list worked in order that is a
+           * smaller loss than it sounds, and the end-of-call report still reads
+           * the transcript and remains the authority on what was actually said.
+           */
+          if (!toolReports()) acceptProgress([undefined]);
           // The words the loader was standing in for. Cleared here rather than
           // on the turn appearing in `turns`, because this is the same frame
           // and the pill would otherwise flicker back to the previous sentence
@@ -1473,7 +1513,7 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
       // what -Infinity means to the queue: due on the next frame.
       queue.current.push({ text: delta.text, done: delta.done, at: delta.at ?? -Infinity });
     },
-    [append, settle, startPondering, takeHeld, waitForWords],
+    [acceptProgress, append, settle, startPondering, takeHeld, waitForWords],
   );
 
   /**

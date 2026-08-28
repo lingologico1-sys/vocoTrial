@@ -122,6 +122,37 @@ export const isOpenAi = (model: ModelChoice): model is OpenAiModel =>
   model.provider === 'openai';
 
 /**
+ * Whether this model can be given the progress tool at all.
+ *
+ * A FACT ABOUT THE SURFACE, AND THE ONE THAT DECIDES WHETHER A LESSON WORKS ON
+ * IT. Vertex implements neither `behavior: 'NON_BLOCKING'` nor
+ * `scheduling: 'SILENT'`, so answering a tool call there is itself a reason to
+ * generate: the model produces one turn more than the conversation called for.
+ *
+ * WHAT WAS TRIED FIRST WAS CATCHING THAT TURN, and it cannot work — not because
+ * the catch was badly written, but because the turn is already in the model's
+ * context by the time anything here sees it. Suppressing it decides only
+ * whether the learner hears it, never whether the tutor believes it said it. So
+ * both branches are wrong in opposite directions, measured on 2026-08-28: let
+ * it through and the tutor asks every question twice; drop it and the learner
+ * never hears a question while the tutor runs a place ahead, commenting at
+ * +0:21.8 on a summer holiday nobody had described.
+ *
+ * The restart is bought by the tool response and by nothing else, so the only
+ * fix is not to have the tool. On this surface progress is counted from the
+ * learner's own finished turns instead — see `acceptProgress` in
+ * useVoiceCall.ts, which was already the ceiling on what a tutor could claim
+ * and is now the whole of the claim.
+ *
+ * NOT PHRASED AS `surface === 'aistudio'` at the call sites, though that is
+ * what it comes to today. What the callers mean is "may this model be told to
+ * report", and a second surface with async tools would be a change here rather
+ * than in three files.
+ */
+export const acceptsProgressTool = (model: ModelChoice): boolean =>
+  !isGoogle(model) || model.surface !== 'vertex';
+
+/**
  * First entry is the default, and it is the half-cascade model rather than the
  * native-audio one. That order was the other way round until a student lesson
  * was watched end to end on 2.5, and the two things that went wrong there are
@@ -180,7 +211,7 @@ export const MODELS: ModelChoice[] = [
       label: 'Warmer, more expressive',
       blurb: 'Hears the tone the learner speaks in and answers in kind.',
       caution:
-        'What the learner said is written down by the model itself, sometimes in the wrong script — the vocabulary list and the end-of-lesson report both read that text. Progress through the questions is counted from a signal this surface answers by making the tutor start its turn again; the repeat is caught and silenced before the learner hears it, which costs a second or two of quiet between turns.',
+        'What the learner said is written down by the model itself, sometimes in the wrong script — the vocabulary list and the end-of-lesson report both read that text. This surface cannot be asked how far it has got without making the tutor repeat itself, so it is not asked: progress is counted from the answers themselves, one question per answer. A learner who covers two questions in one breath, or who says nothing to one, moves the count by one either way.',
     },
     // The GA id, not the dated preview. Both work — this and
     // gemini-live-2.5-flash-preview-native-audio-09-2025 each reach

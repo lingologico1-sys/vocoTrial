@@ -24,7 +24,13 @@ import {
 import { defaultInstructions } from '../realtime/instructions';
 import { findLanguage, defaultLanguageCode } from '../realtime/languages';
 import { codeFromUrl, fetchSetup } from '../realtime/sessionStore';
-import { MODELS, defaultModelKey, findModel, type ModelChoice } from '../realtime/models';
+import {
+  MODELS,
+  acceptsProgressTool,
+  defaultModelKey,
+  findModel,
+  type ModelChoice,
+} from '../realtime/models';
 import { withLearnerTurnTaking, type SessionSettings } from '../realtime/settings';
 import { useVoiceCall, type Turn } from '../live/useVoiceCall';
 import ConsignePanel from './ConsignePanel';
@@ -534,6 +540,10 @@ export default function Eleve() {
       persona: session.persona,
       pace: session.pace,
       questions: session.questions,
+      // The protocol section only where a tool exists to carry it. Resolved
+      // from the lesson's own model rather than passed in, so the prompt and
+      // the setup frame cannot disagree about whether there is one.
+      reportsProgress: acceptsProgressTool(lessonModel(session)),
     });
   }, [session]);
 

@@ -26,6 +26,7 @@ import {
   type SessionSettings,
 } from '../../../src/realtime/settings';
 import type { LanguageChoice } from '../../../src/realtime/languages';
+import { acceptsProgressTool } from '../../../src/realtime/models';
 import type { GoogleModel, OpenAiModel } from '../../../src/realtime/models';
 import { PROGRESS_TOOL, accentText } from '../../../src/realtime/tutorPrompt';
 import { MAX_KEYWORDS } from '../../../src/realtime/vocoSessions';
@@ -230,7 +231,23 @@ export function geminiSetup(
       thinkingConfig: thinkingLevel ? { thinkingLevel } : undefined,
     }),
     systemInstruction: { parts: [{ text: instructions }] },
-    tools: [{ functionDeclarations: [progressDeclaration(model)] }],
+    /*
+     * The tool, where the surface can carry one.
+     *
+     * OMITTED ENTIRELY ON VERTEX RATHER THAN DECLARED AND IGNORED. Answering a
+     * call there restarts generation, and the extra turn that buys is in the
+     * model's context whatever this end does about it — see
+     * `acceptsProgressTool` in models.ts for the two ways that fails and why
+     * neither can be caught. A declaration nobody can safely answer is worse
+     * than none: the model calls it, the call must be answered, and answering
+     * is the failure. So there is nothing to call.
+     *
+     * The prompt is composed to match — no reporting section, and no promise
+     * that a channel exists. See composeTutorPrompt.
+     */
+    ...(acceptsProgressTool(model)
+      ? { tools: [{ functionDeclarations: [progressDeclaration(model)] }] }
+      : {}),
     inputAudioTranscription: {},
     outputAudioTranscription: {},
     ...compact({

@@ -1001,6 +1001,61 @@ export interface TutorPromptParts {
    */
   pace?: string;
   questions: string[];
+  /**
+   * Whether this call has the progress tool. Absent reads as yes.
+   *
+   * A PROMPT THAT DESCRIBES A CHANNEL THE CALL DOES NOT HAVE IS A PROMPT THAT
+   * INVITES THE MODEL TO IMPROVISE ONE. The reporting section is nine hundred
+   * characters telling the tutor to call a tool, insisting the call is silent,
+   * and warning it not to read the name aloud — and where no tool is declared,
+   * every one of those sentences is about nothing. The likeliest thing a model
+   * does with an instruction it cannot follow is say it.
+   *
+   * So the section is composed only where the tool exists. See
+   * `acceptsProgressTool` in models.ts for which surfaces those are, and
+   * `acceptProgress` in useVoiceCall.ts for what counts the questions when this
+   * is false.
+   */
+  reportsProgress?: boolean;
+}
+
+/**
+ * The progress protocol, composed only where a tool exists to carry it.
+ *
+ * LIFTED OUT OF THE TEMPLATE RATHER THAN WRAPPED IN A TERNARY INSIDE IT,
+ * because it is the longest single section in the prompt and a conditional in
+ * the middle of the composed string is where a missing newline hides. The
+ * template now reads as the order of the sections, which is what the note on
+ * composeTutorPrompt says it is for.
+ */
+function REPORTING(count: number): string {
+  return `REPORTING YOUR PROGRESS
+Call ${PROGRESS_TOOL} as soon as the learner has finished answering a question,
+with that question's number — once each, in order, up to ${count}. Finished is
+about their answer and not about your reply: make the call at the top of the
+turn you take in response, alongside whatever you say in it. Do not wait until
+you have replied, and do not carry it into a later turn — a later turn may never
+come, and the learner is left sitting in silence while you hold a call back.
+
+The number is the question they just answered — the one you last asked — and
+never the one you are about to ask. Almost every turn you take does both things
+at once: you comment on their answer to a question and then ask the next one. In
+that turn the number is the question you are commenting on, not the question you
+are asking. So a turn where you go on to ask question 3 carries the call for
+question 2.
+
+Never spend a turn on the call alone either: a turn with nothing but bookkeeping
+in it is silence too. It is between you and the program, so never mention it,
+never say how many questions are left, and carry straight on talking.
+
+Making the call is not saying it. It goes out through the tool, on a channel of
+its own that the learner never hears. Its name written into your turn is not the
+call at all — that is you pronouncing "${PROGRESS_TOOL}", or worse
+"call:${PROGRESS_TOOL}{number:2}", out loud to a beginner in the middle of a
+sentence they are trying to follow. If the tool is not there to call, say nothing
+about it and carry on with the lesson.
+
+`;
 }
 
 /**
@@ -1049,6 +1104,29 @@ export function composeTutorPrompt(parts: TutorPromptParts): string {
   const pace = paceText(parts.pace);
   const paceBlock = pace ? `HOW YOU SPEAK\n${pace}\n\n` : '';
 
+  /*
+   * The whole protocol section, or nothing where there is no tool to describe.
+   *
+   * NOTHING REPLACES IT. There is no weaker instruction to fall back on —
+   * "keep track of where you are" is the tutor's own business and it does that
+   * anyway, and saying it aloud is how a tutor comes to announce its position
+   * on the list, which HOW THIS STARTS spends a paragraph forbidding. Where
+   * there is no tool the program does the counting and never asks about it.
+   */
+  const reporting = parts.reportsProgress === false ? '' : REPORTING(count);
+
+  /*
+   * NOTES FROM THE SYSTEM ends by saying the one thing the tutor can tell the
+   * program goes out as a tool call. Where there is no tool there is no such
+   * thing, and the honest ending is that nothing goes back at all.
+   */
+  const backChannel =
+    parts.reportsProgress === false
+      ? `There is nothing you can say to the
+program, and nothing you can send it either: everything you produce is speech.`
+      : `There is nothing you can say to the
+program: the one thing you can tell it goes out as a tool call and not as words.`;
+
   return `${personaBlock(parts.persona)}YOUR JOB
 ${parts.style.trim()}
 
@@ -1059,33 +1137,7 @@ ${questions.join('\n')}
 
 ${rules}
 
-${paceBlock}REPORTING YOUR PROGRESS
-Call ${PROGRESS_TOOL} as soon as the learner has finished answering a question,
-with that question's number — once each, in order, up to ${count}. Finished is
-about their answer and not about your reply: make the call at the top of the
-turn you take in response, alongside whatever you say in it. Do not wait until
-you have replied, and do not carry it into a later turn — a later turn may never
-come, and the learner is left sitting in silence while you hold a call back.
-
-The number is the question they just answered — the one you last asked — and
-never the one you are about to ask. Almost every turn you take does both things
-at once: you comment on their answer to a question and then ask the next one. In
-that turn the number is the question you are commenting on, not the question you
-are asking. So a turn where you go on to ask question 3 carries the call for
-question 2.
-
-Never spend a turn on the call alone either: a turn with nothing but bookkeeping
-in it is silence too. It is between you and the program, so never mention it,
-never say how many questions are left, and carry straight on talking.
-
-Making the call is not saying it. It goes out through the tool, on a channel of
-its own that the learner never hears. Its name written into your turn is not the
-call at all — that is you pronouncing "${PROGRESS_TOOL}", or worse
-"call:${PROGRESS_TOOL}{number:2}", out loud to a beginner in the middle of a
-sentence they are trying to follow. If the tool is not there to call, say nothing
-about it and carry on with the lesson.
-
-HOW THIS STARTS
+${paceBlock}${reporting}HOW THIS STARTS
 A note arrives before the learner has said anything, asking you to greet them.
 The greeting and the first question on the list are one turn, not two: say
 hello and ask question 1 together. Every turn you take carries one question,
@@ -1126,7 +1178,6 @@ conversation wherever it has got to, and you do what it says.
 Notes only ever arrive, and you have no way to write one. Everything you produce
 in a turn is spoken aloud to the learner, brackets and all — so a note in your
 own turn is not a note at all, it is you reading instructions aloud to a
-beginner in the middle of their lesson. There is nothing you can say to the
-program: the one thing you can tell it goes out as a tool call and not as words.
+beginner in the middle of their lesson. ${backChannel}
 Everything in a turn, they hear.`;
 }

@@ -251,6 +251,14 @@ export async function onRequestPost(
    */
   const pace = PACE.find((entry) => entry.key === incoming.pace)?.key ?? 'natural';
 
+  /*
+   * Composed with the reporting section, whatever this lesson's model does
+   * with it, because the only thing read off it here is the length. That
+   * section is the longest in the prompt and a surface without it composes
+   * shorter — so checking the with-tool variant is checking the ceiling that
+   * binds, and a lesson that fits here fits however it is dialled. The prompt
+   * the tutor actually receives is composed at dial time in Eleve.tsx.
+   */
   const composed = composeTutorPrompt({
     style: styleText || defaultInstructions(language),
     rules: lessonRules ?? undefined,

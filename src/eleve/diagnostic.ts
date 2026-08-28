@@ -14,7 +14,7 @@ import {
 import type { AdvancedReport } from '../realtime/oralRubric';
 import { findL1 } from '../realtime/l1';
 import { findLanguage } from '../realtime/languages';
-import { findModel } from '../realtime/models';
+import { acceptsProgressTool, findModel } from '../realtime/models';
 import type { SessionReport } from '../realtime/report';
 import type { PublishedSetup } from '../realtime/session';
 import { SETTING_FIELDS, fieldsFor, type SessionSettings } from '../realtime/settings';
@@ -830,12 +830,17 @@ export function buildDiagnostic(input: DiagnosticInput): string {
      * a call that never happened, which is the failure the whole document
      * exists to make impossible.
      */
+    const dialled = findModel(input.modelKey);
     const composed = composeTutorPrompt({
       style: setup.style?.trim() || defaultInstructions(language),
       rules: setup.lessonRules,
       persona: setup.persona,
       pace: setup.pace,
       questions: setup.questions,
+      // Same resolution the page made when it dialled — a model this build does
+      // not know reads as the tool being present, which is what start.ts would
+      // have sent for it too.
+      reportsProgress: dialled ? acceptsProgressTool(dialled) : true,
     });
     put(
       `${composed.length} characters, composed by this build at the moment of dialling.`,
