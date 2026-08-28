@@ -586,8 +586,9 @@ export interface VoiceCall {
    * just made, so when a span ends with no words behind it this says so and the
    * pill shows nothing at all. See `learnerText` in Eleve, which reads it.
    *
-   * It clears the moment any transcript text arrives, including text that
-   * arrives after the wait was given up on.
+   * It moves only when a turn closes, because a turn closing is the only thing
+   * that changes what there is to show. Words arriving mid-turn restart the
+   * wait instead — see the text branch of `onTranscript`.
    */
   wordless: boolean;
   /**
@@ -855,10 +856,38 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
       stopWaiting();
       awaiting.current = false;
       setTranscribing(false);
-      if (!words) setWordless(true);
+      /*
+       * BOTH DIRECTIONS, AND ONLY FROM HERE. This used to raise the flag on a
+       * wait that came back empty and lower it the moment any text arrived,
+       * which is a different question from the one the pill asks. The pill
+       * shows the last *completed* turn, and a partial belongs to a turn that
+       * has not completed — so on 2026-08-28 the words for the roommates
+       * answer landed at 1:30.5, the flag came down, and the sentence revealed
+       * underneath it was the answer to question one, which stood there until
+       * the turn finally closed four seconds later. A turn closing is the only
+       * event that changes what there is to show, so it is the only event that
+       * moves this.
+       */
+      setWordless(!words);
     },
     [stopWaiting],
   );
+  /**
+   * Waits out TRANSCRIPT_BACKSTOP_MS for words that may never come.
+   *
+   * Started when a voice stops, and again if words turn up after it has already
+   * given up on them — the second time is the same wait restarted, not a new
+   * kind of one, which is the whole reason this has a name.
+   */
+  const waitForWords = useCallback(() => {
+    stopWaiting();
+    waiting.current = window.setTimeout(() => {
+      waiting.current = null;
+      // Nothing closed this: no tutor turn, no completed transcript. Whatever
+      // the microphone heard, there is nothing to show for it.
+      settle(false);
+    }, TRANSCRIPT_BACKSTOP_MS);
+  }, [settle, stopWaiting]);
 
   /**
    * See `pondering` on VoiceCall. The timer beside it is the grace before it
@@ -1347,11 +1376,24 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
         if (delta.text) {
           micAnswers.current = 0;
           setUnheard(false);
-          // Words for this utterance, wherever the wait had got to. Late is
-          // still an answer: if the loader has already been given up on, this
-          // is what lets the sentence appear rather than stay suppressed.
           spoke.current = true;
-          setWordless(false);
+          /*
+           * LATE WORDS PUT THE LOADER BACK UP RATHER THAN A SENTENCE.
+           *
+           * The backstop can expire on a provider that is merely slow — 34s
+           * between the microphone closing and the transcript arriving, on
+           * 2026-08-28 — and then the words turn up after all. They arrive in
+           * pieces, ahead of the turn that will carry them, so there is still
+           * nothing to show; what is true is that the transcript is coming in
+           * right now, which is exactly what the loader says. Restarting the
+           * wait here is what keeps the sentence before this one off the screen
+           * across those last few seconds.
+           */
+          if (!awaiting.current) {
+            awaiting.current = true;
+            setTranscribing(true);
+            waitForWords();
+          }
         }
         if (delta.done) {
           learnerTurns.current += 1;
@@ -1407,7 +1449,7 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
       // what -Infinity means to the queue: due on the next frame.
       queue.current.push({ text: delta.text, done: delta.done, at: delta.at ?? -Infinity });
     },
-    [append, settle, startPondering, takeHeld],
+    [append, settle, startPondering, takeHeld, waitForWords],
   );
 
   /**
@@ -1988,13 +2030,7 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
           spoke.current = false;
           awaiting.current = true;
           setTranscribing(true);
-        } else
-          waiting.current = window.setTimeout(() => {
-            waiting.current = null;
-            // Nothing closed this: no tutor turn, no transcript. Whatever the
-            // microphone heard, there is nothing to show for it.
-            settle(false);
-          }, TRANSCRIPT_BACKSTOP_MS);
+        } else waitForWords();
       },
       /*
        * Every tool call, named, with what it carried and what became of it.
@@ -2332,7 +2368,7 @@ export function useVoiceCall(options: VoiceCallOptions): VoiceCall {
        */
       resuming.current = false;
     }
-  }, [acceptProgress, append, clearStall, cue, onTranscript, record, reveal, say, hidePondering, settle, startPondering, stopPondering, stopWaiting]);
+  }, [acceptProgress, append, clearStall, cue, onTranscript, record, reveal, say, hidePondering, startPondering, stopPondering, stopWaiting, waitForWords]);
 
   /** A conversation from the top: a cleared transcript and a fresh count. */
   const connect = useCallback(() => dial(false), [dial]);
