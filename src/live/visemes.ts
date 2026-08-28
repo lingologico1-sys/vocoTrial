@@ -31,7 +31,7 @@ import { ROUNDING_SPLIT_HZ, SPEECH_BAND, type AudioTap } from '../realtime/audio
  *
  * It exists because a text-driven driver has the information the audio does
  * not. Amazon Polly's speech marks name the labiodental outright, and its
- * eighteen visemes otherwise collapse onto these six with nothing lost that a
+ * twenty visemes otherwise collapse onto these six with nothing lost that a
  * flat drawn mouth could have shown — f/v against p/b/m is the one distinction
  * worth a seventh image. Carrying the slot now means a kit generated today is
  * still complete when that driver arrives, rather than every face needing to be
@@ -424,13 +424,21 @@ const SHARE_TAU = 4;
 /**
  * Time constants, in seconds. A mouth opens far faster than it closes, and
  * matching the two makes speech look like chewing.
+ *
+ * Exported, along with SHAPE_TAU and `ease` below, because the mark-driven
+ * mouth in polly.ts eases exactly the same way and there is no version of this
+ * worth having twice. What that driver replaces is the *classifier* — it is
+ * told which viseme rather than deciding — and everything downstream of the
+ * decision is presentation the two share. Copying these four would let a mouth
+ * driven by text and a mouth driven by sound drift apart in how they move, for
+ * no reason anyone could point at afterwards.
  */
-const ATTACK = 0.015;
-const RELEASE = 0.09;
+export const ATTACK = 0.015;
+export const RELEASE = 0.09;
 /** How fast the loudness reference forgets a loud passage. */
 const PEAK_RELEASE = 1.5;
 /** How fast the drawn shape chases the target shape. */
-const SHAPE_TAU = 0.035;
+export const SHAPE_TAU = 0.035;
 
 /**
  * The quietest sound allowed to serve as the loudness reference.
@@ -446,7 +454,7 @@ const PEAK_FLOOR = 0.02;
 const MIN_HOLD = 0.07;
 
 /** Frame-rate independent approach: the fraction of the remaining gap to close. */
-function ease(dt: number, tau: number): number {
+export function ease(dt: number, tau: number): number {
   return 1 - Math.exp(-dt / tau);
 }
 
