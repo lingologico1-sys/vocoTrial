@@ -264,6 +264,25 @@ export async function startGeminiSession(
   let audioThisTurn = false;
 
   /**
+   * Whether the learner has said anything since the tutor last made a sound.
+   *
+   * THE DISCRIMINATOR THE ECHO PREDICTION ACTUALLY WANTED. It used to ask
+   * whether the completing turn had spoken, on the reasoning that a turn spent
+   * entirely on bookkeeping has produced nothing for a restart to duplicate —
+   * so there the restart must be the tutor's only speech on that question. On
+   * 2026-08-28 that reading cost a lesson: a bookkeeping-only turn completed at
+   * +0:16.5 *after* the tutor had already asked question three at +0:14.0, so
+   * its restart was surplus rather than the only speech, and what it said was
+   * question four to a learner who had answered two.
+   *
+   * What separates the two is not whether the finished turn made a sound. It is
+   * whether anybody is owed a reply: if the learner has spoken since the tutor
+   * last did, the next turn is theirs and must not be dropped; if they have
+   * not, the tutor has already had its say and a further turn is the restart.
+   */
+  let learnerSinceAudio = false;
+
+  /**
    * When this turn's first words arrived, and those words while the sound of
    * them has not caught up.
    *
@@ -426,9 +445,15 @@ export async function startGeminiSession(
    * schedules no generation, so there is no restart to catch and this stays
    * false for the whole call. Vertex implements neither `behavior:
    * 'NON_BLOCKING'` nor `scheduling: 'SILENT'` and ignores both rather than
-   * refusing them, so delivering a result *is* a reason to generate — and what
-   * it generates is the turn it has already spoken, reworded. Five questions,
-   * five doubled turns, in every diagnostic taken on that surface.
+   * refusing them, so delivering a result *is* a reason to generate. What it
+   * generates is sometimes the turn it has already spoken, reworded — five
+   * questions, five doubled turns, in the diagnostics this was written for —
+   * and sometimes not a repeat at all but the *next* question, because the
+   * prompt says every turn ends with one. That second shape is the worse of the
+   * two and the reason the gate below changed: a duplicate is a tutor saying
+   * something twice, while a turn ahead is a tutor asking question four of a
+   * learner who has answered two, generated from context that predates a word
+   * of their answer.
    *
    * WHY SUPPRESSION AND NOT SOMETHING CLEVERER. There is nothing cleverer
    * available. The fields are the mechanism, the mechanism is not on this
@@ -437,21 +462,45 @@ export async function startGeminiSession(
    * than a turn said twice. So the response goes out, on time, and the turn it
    * buys is dropped on this side.
    *
-   * WHAT MAKES IT SAFE IS THE GATE, NOT THE GUESS. This arms at `turnComplete`
-   * and only when the turn that just completed actually made a sound. A turn
-   * spent entirely on bookkeeping produced nothing for a restart to duplicate,
-   * and there the restart is the tutor's only speech on that question — arming
-   * would be swallowing the lesson rather than the echo. That case sends the
-   * response and stays disarmed, exactly as before.
+   * WHAT MAKES IT SAFE IS THE GATE, NOT THE GUESS, and the gate is whether
+   * anybody is owed a reply. It arms at `turnComplete` when the learner has not
+   * spoken since the tutor last made a sound: the tutor has already had its
+   * say, so a further turn is the restart. When they *have* spoken — a
+   * bookkeeping-only turn landing between their answer and the tutor's reply —
+   * the restart is that reply, and arming would swallow the lesson rather than
+   * the echo. That case sends the response and stays disarmed. See
+   * `learnerSinceAudio`.
    *
-   * IT IS A PREDICTION, AND IT EXPIRES. Anything the learner does invalidates
-   * it: their speech, or a barge-in, means the next model turn answers them
-   * rather than repeating anyone, so both disarm it. The failure it can still
-   * have is a Vertex call that declines to restart, where one genuine turn is
-   * lost — which is why every armed turn is written down rather than silently
-   * discarded. See onEchoTurn, and read the timeline before trusting this.
+   * IT IS A PREDICTION, AND IT EXPIRES ON A CLOCK RATHER THAN ON THEM. A
+   * barge-in invalidates it, because a cut-off turn buys no restart. The
+   * learner merely talking does not: the restart was bought when the response
+   * went out and is generated from the context of that moment, so nothing they
+   * say afterwards is in it. Believing otherwise is what let a duplicate
+   * through at +0:13.7 on 2026-08-28. The failure it can still have is a Vertex
+   * call that declines to restart, where one genuine turn is lost — bounded by
+   * ECHO_WAIT_MS, and written down rather than silently discarded either way.
+   * See onEchoTurn, and read the timeline before trusting this.
    */
   let echoArmed = false;
+  /** When it was armed, for the expiry below. */
+  let echoAt = 0;
+  /** Whether the turn being dropped has actually said anything yet. */
+  let echoSubstantive = false;
+
+  /**
+   * The longest the prediction waits for the restart it predicted.
+   *
+   * THE RESTART IS NOT PROMPT. Measured at 5.6 seconds once — the response
+   * flushed at +0:08.0 and the duplicate's first audio landed at +0:13.7, with
+   * the relay's socket to Google quiet for 4.8s of that. So the window has to
+   * be generous or the prediction expires just before the thing it was waiting
+   * for and lets it through, which is the failure it was armed against.
+   *
+   * Eight seconds, and it sits under STALL_NUDGE_MS deliberately: a Vertex call
+   * that declines to restart costs one genuine turn, and the nudge is what asks
+   * for another. Expiring first is what keeps that from being a lesson.
+   */
+  const ECHO_WAIT_MS = 8_000;
 
   const sendResponses = (responses: unknown[]) => {
     if (!responses.length || socket.readyState !== WebSocket.OPEN) return;
@@ -800,20 +849,34 @@ export async function startGeminiSession(
         // screen that the learner is certain no voice ever said.
         firstTextAt = 0;
         pendingText = '';
-        // Whatever comes next answers the learner rather than repeating the
-        // tutor, so the prediction below has nothing left to catch.
+        // A cut-off turn buys no restart, and whatever comes next is a fresh
+        // answer, so the prediction below has nothing left to catch. This is
+        // the one thing other than the turn itself that spends the arming —
+        // the learner merely speaking no longer does. See the transcription
+        // branch below.
         echoArmed = false;
+        echoSubstantive = false;
       }
 
       if (content.inputTranscription?.text) {
         heardLearner = true;
-        // The learner has spoken, so the next model turn is a reply to them and
-        // not the restart a tool response bought. Disarmed on their speech
-        // rather than on a clock, and disarmed in the direction that is safe to
-        // be wrong in: dropping the prediction too early costs a doubled turn
-        // the learner hears, which is the behaviour this replaced. Holding it
-        // too long costs a real turn, which is a lesson.
-        echoArmed = false;
+        learnerSinceAudio = true;
+        /*
+         * THE LEARNER SPEAKING NO LONGER DISARMS THIS, and that reversal is the
+         * whole fix. The old rule read their speech as proof that the next
+         * model turn would answer them rather than repeat anyone — true on a
+         * surface where a tool response schedules nothing, and false here. The
+         * restart is bought at the moment the response goes out and is
+         * generated from the context that existed then; what the learner says
+         * afterwards does not reach it. On 2026-08-28 the tutor's turn at
+         * +0:14.0 opened 0.3s before the microphone even closed and commented
+         * on "amis musiciens", a phrase nowhere in the learner's answer —
+         * generation that predated a word of it, let through because they had
+         * started talking at +0:11.9 and disarmed the catch.
+         *
+         * So the arming is spent by the turn it predicted or by the clock, and
+         * never by them. See ECHO_WAIT_MS.
+         */
         handlers.onTranscript({ role: 'user', text: content.inputTranscription.text, done: false });
       }
 
@@ -832,11 +895,33 @@ export async function startGeminiSession(
        * it — and progress was reported off the original turn in any case.
        */
       if (echoArmed) {
-        if (content.turnComplete) {
+        /*
+         * AN EMPTY `turnComplete` IS NOT THE RESTART, and letting one count as
+         * it is how the duplicate got through at +0:13.7 on 2026-08-28: the
+         * arming was spent 100ms after the flush — far too soon for Vertex to
+         * have generated anything — by a trailing frame belonging to the turn
+         * that had just ended. So the prediction is only spent by a turn that
+         * actually said something, and a bare stamp passes through unspent.
+         */
+        if (Date.now() - echoAt > ECHO_WAIT_MS) {
+          // The restart never came. One genuine turn is worth more than a
+          // catch that has stopped catching anything, so this lets go.
           echoArmed = false;
-          handlers.onEchoTurn?.();
+          echoSubstantive = false;
+        } else {
+          if (
+            content.outputTranscription?.text ||
+            (content.modelTurn?.parts ?? []).some((part) => part.inlineData?.data)
+          ) {
+            echoSubstantive = true;
+          }
+          if (content.turnComplete && echoSubstantive) {
+            echoArmed = false;
+            echoSubstantive = false;
+            handlers.onEchoTurn?.();
+          }
+          return;
         }
-        return;
       }
 
       if (content.outputTranscription?.text) {
@@ -878,6 +963,9 @@ export async function startGeminiSession(
         answerBegins();
         if (!audioThisTurn) {
           audioThisTurn = true;
+          // The tutor has had its say on whatever they last told it, so from
+          // here nobody is owed a reply until they speak again.
+          learnerSinceAudio = false;
           // Before the enqueue, or the schedules read here are the time the
           // chunk *ends* rather than the time it starts.
           const tap = player.tap();
@@ -900,8 +988,6 @@ export async function startGeminiSession(
       if (content.generationComplete && !generatedAt) generatedAt = Date.now();
 
       if (content.turnComplete) {
-        // Read before the resets below clear it, for the arming further down.
-        const spokeThisTurn = audioThisTurn;
         /*
          * A turn that finished without making a sound, reported as a fact.
          *
@@ -949,13 +1035,18 @@ export async function startGeminiSession(
          * landing inside the turn it just closed.
          *
          * AND ON A RESTART SURFACE, THIS IS WHERE THE ECHO IS PREDICTED. The
-         * response about to go out will buy a turn; `spokeThisTurn` is the
-         * whole of what decides whether that turn is a duplicate of the one
-         * just finished or the tutor's only speech on this question. Read from
-         * the flag captured at the top of this block, because the resets above
-         * have already cleared it.
+         * response about to go out will buy a turn, and what decides whether
+         * that turn is surplus is whether anybody is owed a reply — see
+         * `learnerSinceAudio`, which is read rather than `audioThisTurn`
+         * because a bookkeeping-only turn arriving after the tutor has already
+         * asked its question buys a restart just as surplus as an audible
+         * one's.
          */
-        if (!silentResponses && heldResponses.length && spokeThisTurn) echoArmed = true;
+        if (!silentResponses && heldResponses.length && !learnerSinceAudio) {
+          echoArmed = true;
+          echoAt = Date.now();
+          echoSubstantive = false;
+        }
         flushResponses();
         // The queue is about to run dry because the agent has stopped talking,
         // not because anything failed to arrive. Saying so keeps the player's
