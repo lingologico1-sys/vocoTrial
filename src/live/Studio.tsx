@@ -1861,6 +1861,23 @@ export default function Studio() {
               Live on this page&rsquo;s own calls, and published with the tuning below. The voice
               is not among them — it belongs to the face a teacher picks, not to the house.
             </p>
+            {/*
+              SAID HERE BECAUSE THIS IS WHERE SOMEBODY WILL BE PUZZLED. These
+              are the deployment's settings and most of them are the last word,
+              but three are not: a lesson carries its own patience, and its own
+              answer to what a learner may do while the tutor is talking, and
+              either one wins at publish. An administrator who sets barge-in
+              here and then meets a lesson that ignores it should be able to
+              find out why on this page rather than in publish.ts. See
+              WHILE_TUTOR_SPEAKS in settings.ts for the pairing /teach offers
+              over the microphone and barge-in fields above.
+            */}
+            <p className="mt-1.5 text-[11px] leading-relaxed text-slate-500">
+              Three of these are a floor rather than a rule. A lesson written on /teach carries
+              its own waiting time, and its own answer to what the learner may do while the tutor
+              is speaking — which /teach offers as a single choice over the microphone and
+              barge-in fields here. A lesson that says nothing gets what is set above.
+            </p>
           </div>
         </details>
 

@@ -45,7 +45,12 @@ import {
   saveVocoSession,
 } from '../realtime/vocoSessionStore';
 import { listPublishedSetups, publishVocoSession, type PublishedRow } from '../realtime/sessionStore';
-import { PATIENCE, type Patience } from '../realtime/settings';
+import {
+  PATIENCE,
+  WHILE_TUTOR_SPEAKS,
+  type Patience,
+  type WhileTutorSpeaks,
+} from '../realtime/settings';
 import { PACE, type Pace } from '../realtime/tutorPrompt';
 import { defaultModelKey, teachableModels } from '../realtime/models';
 import type { PublishedSetup } from '../realtime/session';
@@ -68,13 +73,26 @@ import type { PublishedSetup } from '../realtime/session';
  * is: /eleve is French because a learner should be immersed, and that argument
  * says nothing about the person writing the questions.
  *
- * WHAT A TEACHER IS NOT ASKED. No prompt, no motion knobs, no turn-taking
- * beyond patience, and no voice. Those are an administrator's, and they reach a
- * student anyway — a tutor style, a house performance profile and the voice
- * written on the chosen face, all authored in the workshop and all spent
- * server-side at publish. See house.ts. What is left here is what a teacher
- * actually decides: the questions, the consigne, the language, the manner, the
- * face, the scale, and the two below.
+ * WHAT A TEACHER IS NOT ASKED. No prompt, no motion knobs, no voice, and no
+ * turn-taking beyond the two controls named below. Those are an
+ * administrator's, and they reach a student anyway — a tutor style, a house
+ * performance profile and the voice written on the chosen face, all authored
+ * in the workshop and all spent server-side at publish. See house.ts. What is
+ * left here is what a teacher actually decides: the questions, the consigne,
+ * the language, the manner, the face, the scale, and the three below.
+ *
+ * TURN-TAKING IS TWO OF THOSE THREE NOW, AND IT WAS ONE. `patience` is how
+ * long the tutor waits for a learner who is still assembling a clause;
+ * `whileTutorSpeaks` is what the learner may do while the tutor has the floor
+ * — not heard at all, heard and answered next turn, or able to stop it
+ * mid-sentence. Both are facts about the room rather than about the
+ * deployment, which is the test for whether a knob belongs on this page: a
+ * one-to-one lesson at a kitchen table and thirty Chromebooks in one hall want
+ * opposite answers, and only the person writing the questions knows which this
+ * is. Each spends two provider settings underneath and neither says so, for
+ * the reason `patience` gives: a teacher is choosing pedagogy, and the wiring
+ * that delivers it is not their problem. See PATIENCE and WHILE_TUTOR_SPEAKS
+ * in settings.ts.
  *
  * THE MODEL IS ASKED FOR NOW, and it did not use to be. That line read "no
  * prompt, no model" and meant it: the student page held the choice in a
@@ -138,6 +156,12 @@ function empty(): VocoSession {
     // of learners actually wants. An existing one shows whatever it was saved
     // with, and absent means 'standard' — see `patience` on VocoSession.
     patience: 'patient',
+    // 'house' and not a rung, unlike patience above it. A new lesson has no
+    // behaviour to preserve there, so it gets the one a class wants; here the
+    // house profile already gives a class what it wants, and pinning a rung
+    // would only put this teacher ahead of the next administrator. See
+    // `whileTutorSpeaks` on VocoSession.
+    whileTutorSpeaks: 'house',
     // Natural rather than the pair patience gets, and the asymmetry is
     // deliberate: waiting longer costs a beginner nothing, and talking in
     // six-word sentences costs an intermediate class the register they came
@@ -198,6 +222,7 @@ export default function Teach() {
   const [capMinutes, setCapMinutes] = useState(DEFAULT_CAP_MINUTES);
   const [patience, setPatience] = useState<Patience>('patient');
   const [pace, setPace] = useState<Pace>('natural');
+  const [whileTutorSpeaks, setWhileTutorSpeaks] = useState<WhileTutorSpeaks>('house');
   const [modelKey, setModelKey] = useState<string>(defaultModelKey);
 
   // The tutor.
@@ -304,6 +329,10 @@ export default function Teach() {
     // this control existed composed no pace block, and opening it must not
     // quietly start composing one.
     setPace(source.pace ?? 'natural');
+    // Absent reads as 'house' for the reason absent *means* 'house': a lesson
+    // written before this control existed pinned neither knob, and opening it
+    // here must not quietly pin one on the next save.
+    setWhileTutorSpeaks(source.whileTutorSpeaks ?? 'house');
     // Absent reads as the default here rather than as some third thing, and
     // unlike patience that is not a compromise: a lesson saved before this
     // control existed ran on the default model, so opening it shows what it
@@ -439,6 +468,7 @@ export default function Teach() {
     capMinutes,
     patience,
     pace,
+    whileTutorSpeaks,
     modelKey,
     language,
     styleId: style?.id ?? '',
@@ -899,6 +929,56 @@ export default function Teach() {
                   {PACE.find((entry) => entry.key === pace)?.hint}
                   {pace !== 'natural' &&
                     ' Asked for in the tutor’s instructions rather than set on the call, so it layers over the manner instead of replacing it.'}
+                </p>
+              </div>
+
+              {/*
+                THE THIRD CONTROL ABOUT THE SHAPE OF THE CONVERSATION, and the
+                only one of the three that is about the learner's half of it.
+                The two above are what the tutor does — how long it waits, how
+                fast it talks. This is what the learner is allowed to do while
+                it is talking, which is why it sits under them and not beside
+                the questions.
+
+                ONE CONTROL OVER TWO SETTINGS, WHICH THE NOTE UNDER IT DOES NOT
+                SAY, deliberately. A teacher choosing between three sentences
+                about a room does not need to know that two of them move a
+                microphone gate and the third also moves a barge-in flag; what
+                they need is that the sentences are true. The pairing, and why
+                it is a ladder rather than two switches, is in
+                WHILE_TUTOR_SPEAKS in settings.ts. An administrator who wants
+                the two knobs apart has them apart, on /studio.
+
+                THE EXTRA LINE ON THE TOP RUNG IS THE COST, and it is shown
+                rather than buried in the hint because it is the one thing that
+                will make a teacher change their mind. Closing the microphone
+                is the safe choice in a classroom and the wrong one for a
+                confident learner who answers over the question — they are
+                simply not heard, and the tutor waits. Finding that out from a
+                lesson is worse than reading it here, which is the same
+                argument the pace control's note above makes.
+              */}
+              <div className="flex flex-col gap-1.5">
+                <label className={label} htmlFor="voco-while-tutor">
+                  While the tutor is speaking
+                </label>
+                <select
+                  id="voco-while-tutor"
+                  value={whileTutorSpeaks}
+                  onChange={(event) =>
+                    setWhileTutorSpeaks(event.target.value as WhileTutorSpeaks)
+                  }
+                  disabled={busy}
+                  className={`${field} cursor-pointer`}
+                >
+                  {WHILE_TUTOR_SPEAKS.map((entry) => (
+                    <option key={entry.key} value={entry.key}>
+                      {entry.label}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-[11px] leading-relaxed text-lingo-muted">
+                  {WHILE_TUTOR_SPEAKS.find((entry) => entry.key === whileTutorSpeaks)?.hint}
                 </p>
               </div>
 

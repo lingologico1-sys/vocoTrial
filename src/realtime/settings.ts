@@ -574,6 +574,134 @@ export function withLearnerTurnTaking(
   return { ...base, ...settings };
 }
 
+/**
+ * What a learner's voice is allowed to do while the tutor is still talking.
+ *
+ * ONE TEACHER'S WORD OVER TWO KNOBS, the way `patience` is one word over two.
+ * The knobs are `micWhileTutorSpeaks` — whether the microphone reaches the
+ * provider at all — and `activityHandling`, whether what reaches it may cancel
+ * the turn in progress. They are not independent in any way a teacher should
+ * have to hold in their head: with the microphone shut there is nothing to
+ * interrupt with, so "closed" and "the learner may interrupt" together is a
+ * setting that reads like a choice and behaves like the first one alone.
+ *
+ * SO IT IS A LADDER RATHER THAN TWO SWITCHES, and the rungs are how much the
+ * learner's voice can do — nothing, be remembered, or take over:
+ *
+ *   closed     the microphone is withheld; nothing said over the tutor is
+ *              heard, and nothing said over it can become the answer
+ *   listening  heard and transcribed, answered on the next turn, but the
+ *              tutor finishes what it was saying
+ *   interrupt  speaking stops the tutor mid-sentence
+ *
+ * The four-way grid those two knobs really make is not offered anywhere a
+ * teacher can reach it. It is still there on /studio, where an administrator
+ * setting one knob at a time is the point of the page.
+ *
+ * `house` IS THE FOURTH WORD AND IT IS NOT A RUNG. It pins nothing and leaves
+ * the house profile's own two fields standing, which is what every lesson
+ * published before this control existed does and what a teacher who has no
+ * opinion should keep. Same bargain as `patience: 'standard'`: absent means
+ * "somebody else has decided this", and that somebody is /studio.
+ *
+ * WHAT THE STUDENT PAGE DOES UNDERNEATH ALL FOUR is fill `closed` in wherever
+ * nothing was pinned — see LEARNER_TURN_TAKING — so `house` on an untuned
+ * deployment resolves to the top rung anyway. The difference between choosing
+ * `house` and choosing `closed` is not what this week's lesson does; it is
+ * whether an administrator changing the house profile next term reaches it.
+ *
+ * ONLY THE FIRST RUNG IS FULLY EXPRESSIBLE ON BOTH PROVIDERS, and the gap is
+ * worth knowing before a bench run rather than after. `micWhileTutorSpeaks` is
+ * the browser's own gate and works identically on either, so `closed` — the
+ * rung that matters and the one a class gets by default — is exactly the same
+ * lesson on both. `activityHandling` is Gemini's, and OpenAI's realtime session
+ * has no field wired here that says "do not interrupt", so `listening` and
+ * `interrupt` are the same lesson on OpenAI today: both leave the microphone
+ * open and both get that provider's own behaviour, which is to interrupt. The
+ * field to wire if that distinction is ever wanted is `interrupt_response` on
+ * `turn_detection`, in openAiSession in functions/api/live/_setup.ts.
+ */
+export type WhileTutorSpeaks = 'house' | 'closed' | 'listening' | 'interrupt';
+
+/**
+ * The rungs, in the order a teacher should read them: most protective first.
+ *
+ * `house` leads because it is the one that pins nothing, and because it is what
+ * an untouched lesson already is — a list whose first entry is not the current
+ * value would make every existing lesson look like it had been changed.
+ *
+ * THE HINTS ARE WRITTEN FOR A TEACHER AND NOT FOR THIS FILE. They say what
+ * happens in the room — a sibling's voice, a learner who jumps in — because
+ * that is the evidence a teacher actually has. Neither knob is named in them.
+ */
+export const WHILE_TUTOR_SPEAKS: Array<{
+  key: WhileTutorSpeaks;
+  label: string;
+  hint: string;
+  /** Gemini: the gate, and whose speech may cancel a turn. */
+  settings: Pick<SessionSettings, 'micWhileTutorSpeaks' | 'activityHandling'>;
+  /** OpenAI: the gate only. See the note on WhileTutorSpeaks. */
+  openAi: Pick<SessionSettings, 'micWhileTutorSpeaks' | 'activityHandling'>;
+}> = [
+  {
+    key: 'house',
+    label: 'As the workshop has set it',
+    hint: 'Leaves the decision to the profile an administrator tunes for every lesson. Unless they have changed it, that is the microphone being off.',
+    settings: {},
+    openAi: {},
+  },
+  {
+    key: 'closed',
+    label: 'Microphone off while the tutor speaks',
+    hint: 'The learner is not heard until the tutor finishes. A stray word, a neighbour, or the tutor’s own voice off the speakers cannot be taken as their answer. The cost: someone who starts answering over the last few words is not heard and has to repeat themselves.',
+    /*
+     * NO_INTERRUPTION as well as the gate, which is belt to a brace rather than
+     * a second opinion. Almost nothing gets past a shut gate — but the gate
+     * closes on the arrival of the audio and a chunk already in flight from the
+     * worklet can still land, and one chunk is 128ms, which is enough for a
+     * detector set to interrupt. Pinning both means the top rung cannot be
+     * undermined by timing.
+     */
+    settings: { micWhileTutorSpeaks: 'closed', activityHandling: 'NO_INTERRUPTION' },
+    openAi: { micWhileTutorSpeaks: 'closed' },
+  },
+  {
+    key: 'listening',
+    label: 'Listening, but the tutor finishes',
+    hint: 'Everything the learner says is heard and answered on the next turn, and talking over the tutor does not stop it. What every lesson did before the microphone could be closed.',
+    settings: { micWhileTutorSpeaks: 'open', activityHandling: 'NO_INTERRUPTION' },
+    // Open explicitly rather than left absent, because absent is what the
+    // student page fills with 'closed'. A teacher choosing this rung is
+    // choosing against that default and has to say so out loud.
+    openAi: { micWhileTutorSpeaks: 'open' },
+  },
+  {
+    key: 'interrupt',
+    label: 'The learner can interrupt',
+    hint: 'Speaking stops the tutor mid-sentence. Natural with a confident learner in a quiet room; in a noisy one it is a question destroyed by a noise nobody made.',
+    settings: {
+      micWhileTutorSpeaks: 'open',
+      activityHandling: 'START_OF_ACTIVITY_INTERRUPTS',
+    },
+    openAi: { micWhileTutorSpeaks: 'open' },
+  },
+];
+
+/**
+ * The two knobs a lesson's rung asks for. Unknown, or absent, reads as `house`.
+ *
+ * Unknown reads as the do-nothing word for `patienceSettings`' reason: a word
+ * that no longer names a rung should leave the lesson on whatever the house
+ * decided, not fail the publish and not silently pick a rung of its own.
+ */
+export function whileTutorSpeaksSettings(
+  word: string | undefined,
+  model: ModelChoice,
+): Pick<SessionSettings, 'micWhileTutorSpeaks' | 'activityHandling'> {
+  const entry = WHILE_TUTOR_SPEAKS.find((item) => item.key === word) ?? WHILE_TUTOR_SPEAKS[0];
+  return isOpenAi(model) ? entry.openAi : entry.settings;
+}
+
 /** The turn-taking a lesson's patience asks for. Unknown reads as standard. */
 export function patienceSettings(
   patience: string | undefined,

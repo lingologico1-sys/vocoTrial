@@ -8,9 +8,11 @@ import {
   type VocoSession,
   looksLikeVocoSession,
 } from '../../../src/realtime/vocoSessions';
-import { PATIENCE } from '../../../src/realtime/settings';
+import { PATIENCE, WHILE_TUTOR_SPEAKS } from '../../../src/realtime/settings';
 import { findModel } from '../../../src/realtime/models';
-import type { Patience } from '../../../src/realtime/settings';
+import type { Patience, WhileTutorSpeaks } from '../../../src/realtime/settings';
+import { PACE } from '../../../src/realtime/tutorPrompt';
+import type { Pace } from '../../../src/realtime/tutorPrompt';
 import { type VocoSessionEnv, readVocoSessions, writeVocoSessions } from './_library';
 
 /**
@@ -108,6 +110,9 @@ export async function onRequestPost(
    * patience is spent as 'standard' — see patienceSettings.
    */
   const isPatience = (value: unknown) => PATIENCE.some((entry) => entry.key === value);
+  /* The same closed vocabulary, checked the same way. See WHILE_TUTOR_SPEAKS. */
+  const isWhileTutorSpeaks = (value: unknown) =>
+    WHILE_TUTOR_SPEAKS.some((entry) => entry.key === value);
   /*
    * Checked against the allowlist for patience's reason and one of its own: a
    * model key is the field that decides which meter a lesson spends. Carrying
@@ -116,6 +121,8 @@ export async function onRequestPost(
    * reads as the default at publish.
    */
   const isModelKey = (value: unknown) => typeof value === 'string' && !!findModel(value);
+  /* A closed vocabulary again, and the one this route used to drop. See PACE. */
+  const isPace = (value: unknown) => PACE.some((entry) => entry.key === value);
 
   const session: VocoSession = {
     id: incoming.id,
@@ -131,6 +138,16 @@ export async function onRequestPost(
     faceId: incoming.faceId === null ? null : carried<string>(incoming.faceId, isText),
     evaluatorId: carried<string>(incoming.evaluatorId, isText),
     patience: carried<Patience>(incoming.patience, isPatience),
+    /*
+     * WRITTEN DOWN, WHICH `pace` BESIDE IT WAS NOT UNTIL NOW. That field was
+     * on the type, on the page, in the publish body and nowhere in this list —
+     * so a teacher who slowed the tutor down, saved, and reopened the lesson
+     * found it back at 'natural', and only a publish from that same unreloaded
+     * tab ever carried the choice. The two are added together because a reader
+     * comparing them should not have to wonder which omission was deliberate.
+     */
+    pace: carried<Pace>(incoming.pace, isPace),
+    whileTutorSpeaks: carried<WhileTutorSpeaks>(incoming.whileTutorSpeaks, isWhileTutorSpeaks),
     modelKey: carried<string>(incoming.modelKey, isModelKey),
     // Clamped rather than carried, unlike the ids above it. Those name things
     // in other libraries and are resolved where they are spent; this one is a

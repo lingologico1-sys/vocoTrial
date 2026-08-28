@@ -69,7 +69,7 @@
  * lib, and the routes that read and write this are the ones that validate it.
  */
 
-import type { Patience } from './settings';
+import type { Patience, WhileTutorSpeaks } from './settings';
 import type { Pace } from './tutorPrompt';
 
 /** One prepared tutoring session. */
@@ -209,6 +209,32 @@ export interface VocoSession {
    * all and is what every lesson published before this existed composed.
    */
   pace?: Pace;
+
+  /**
+   * What the learner's voice may do while the tutor is still talking.
+   *
+   * THE THIRD PROVIDER SETTING A TEACHER GETS, and it belongs to the class for
+   * `patience`'s reason exactly: it is a fact about the room. A one-to-one
+   * lesson in a quiet house and a set of thirty on shared Chromebooks want
+   * opposite answers, and the person who knows which room this is, is the
+   * person writing the questions rather than the administrator who tuned the
+   * deployment last term.
+   *
+   * A WORD OVER TWO KNOBS, like `patience`. `WHILE_TUTOR_SPEAKS` in settings.ts
+   * owns the pair and explains why they are a ladder rather than two switches —
+   * with the microphone shut there is nothing left to interrupt with, so the
+   * combination that reads like a choice does not behave like one.
+   *
+   * Absent means 'house', which pins neither knob and leaves the house profile
+   * standing: the mechanism `patience: 'standard'` uses and session.ts
+   * documents on `tiltSettle`. That is what every lesson published before this
+   * control existed carries, and on a deployment nobody has retuned it resolves
+   * to the microphone being closed anyway — see LEARNER_TURN_TAKING. /teach
+   * opens a new lesson on 'house' rather than on a rung, because a new lesson
+   * has no opinion to preserve and pinning one would put this week's teacher
+   * ahead of next term's administrator for no reason either of them chose.
+   */
+  whileTutorSpeaks?: WhileTutorSpeaks;
 
   /**
    * Which live model runs the lesson. A key from models.ts, never an id.

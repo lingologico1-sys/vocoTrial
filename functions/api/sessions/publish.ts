@@ -9,6 +9,7 @@ import { PACE, composeTutorPrompt, paceSpeed } from '../../../src/realtime/tutor
 import {
   DEFAULT_OPENAI_VOICE,
   patienceSettings,
+  whileTutorSpeaksSettings,
 } from '../../../src/realtime/settings';
 import { FALLBACK_PERFORMANCE } from '../../../src/realtime/house';
 import { newLessonCode } from '../../../src/realtime/lessonCodes';
@@ -348,10 +349,29 @@ export async function onRequestPost(
    */
   const patience = model ? patienceSettings(incoming.patience, model) : {};
 
+  /*
+   * The lesson's rung, over the house profile's own two fields.
+   *
+   * Spread after `performance` for patience's reason and with one difference
+   * worth naming: this one can pin a field *back* to the permissive value. A
+   * lesson on 'listening' or 'interrupt' writes `micWhileTutorSpeaks: 'open'`
+   * rather than merely declining to write 'closed', because the student page
+   * fills an absent value with 'closed' — see LEARNER_TURN_TAKING. Leaving it
+   * absent there would publish a teacher's deliberate choice as silence and
+   * have the silence overruled at dial time, which is the one shape of bug
+   * this route exists to prevent.
+   *
+   * 'house' writes nothing at all and is the ordinary case.
+   */
+  const whileTutorSpeaks = model
+    ? whileTutorSpeaksSettings(incoming.whileTutorSpeaks, model)
+    : {};
+
 
   const setup: PublishedSetup = {
     ...performance,
     ...patience,
+    ...whileTutorSpeaks,
     code,
     label: label || undefined,
     updatedAt: Date.now(),
