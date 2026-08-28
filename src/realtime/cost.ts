@@ -57,10 +57,11 @@ export interface ModelRates {
  *
  * KEYED BY ModelChoice.id, NOT BY OUR KEY, and that is the part to be careful
  * with: a mismatch does not fail, it silently prices nothing. The native-audio
- * row spent time keyed to `gemini-2.5-flash-native-audio-latest` — the AI
- * Studio spelling — after models.ts moved that model to the Vertex GA alias,
- * and every call on it reported "no rates in the table" instead of a cost.
- * Renaming a model id means renaming it here too.
+ * row spent time holding the AI Studio spelling after models.ts moved that
+ * model to the Vertex GA alias, and every call on it reported "no rates in the
+ * table" instead of a cost. Renaming a model id means renaming it here too —
+ * which is why both spellings of the same 2.5 model appear below, one per
+ * surface.
  */
 export const RATES_VERIFIED_ON = '2026-08-05';
 
@@ -111,7 +112,7 @@ const RATES: Record<string, ModelRates> = {
   // against the AI Studio account — and nothing obliges them to agree. They
   // agreed when this was written. A divergence here shows up as a lesson
   // costed correctly on one surface and not the other, which no error reports.
-  'gemini-live-2.5-flash-preview-native-audio-09-2025': {
+  'gemini-2.5-flash-native-audio-latest': {
     textInput: 0.5,
     cachedTextInput: 0.5,
     audioInput: 3,
@@ -152,7 +153,7 @@ export const AUDIO_RATES_VERIFIED_ON = '2026-08-06';
 const AUDIO_TOKENS_PER_SECOND: Record<string, { input: number; output: number }> = {
   'gemini-3.1-flash-live-preview': { input: 32, output: 32 },
   'gemini-live-2.5-flash-native-audio': { input: 32, output: 32 },
-  'gemini-live-2.5-flash-preview-native-audio-09-2025': { input: 32, output: 32 },
+  'gemini-2.5-flash-native-audio-latest': { input: 32, output: 32 },
   /*
    * NOT VERIFIED AGAINST CURRENT DOCUMENTATION, and flagged rather than quietly
    * carried. These are the figures this file recorded for OpenAI Realtime

@@ -200,7 +200,7 @@ export const MODELS: ModelChoice[] = [
   {
     key: 'gemini-native-audio-studio',
     label: 'Gemini 2.5 Flash Native Audio (AI Studio)',
-    id: 'gemini-live-2.5-flash-preview-native-audio-09-2025',
+    id: 'gemini-2.5-flash-native-audio-latest',
     provider: 'google',
     surface: 'aistudio',
     unverified: true,
@@ -231,15 +231,27 @@ export const MODELS: ModelChoice[] = [
     // file. Confirm the key's project has billing enabled before a class runs
     // on this.
     //
-    // UNVERIFIED, AND THAT FLAG IS DOING ITS JOB HERE. This id reached
-    // setupComplete twelve times out of twelve against AI Studio before the
-    // move to Vertex, and that confirmation is old: it predates this build, and
-    // a dated preview retires 45 days after its replacement ships. A
-    // replacement exists (native-audio-preview-12-2025). The Vertex probe at
-    // /api/live/models cannot check this — it asks Vertex — so the flag comes
-    // off on a handshake and not before. If the socket closes at setup, the id
-    // is the first thing to suspect and AI Studio's own ListModels is the
-    // cheapest way to ask.
+    // THE ID HERE IS THE AI STUDIO SPELLING, WHICH IS NOT THE VERTEX ONE. This
+    // entry carried `gemini-live-2.5-flash-preview-native-audio-09-2025` — the
+    // id the entry above uses, in its dated form — and AI Studio answered every
+    // connection with "not found for API version v1alpha". The two surfaces
+    // name the same model differently: Vertex puts `live` after `gemini` and
+    // `native-audio` at the end, AI Studio does neither and has no `live` in
+    // the name at all. A `-latest` alias is only ever an AI Studio thing.
+    //
+    // Undated on purpose, for the reason spelled out on the entry above: the
+    // dated previews (native-audio-preview-09-2025, and its replacement
+    // native-audio-preview-12-2025) both exist on this surface today, and a
+    // dated preview retires 45 days after its replacement ships. `-latest`
+    // tracks whichever is current.
+    //
+    // UNVERIFIED, AND THAT FLAG IS DOING ITS JOB HERE. ListModels confirms this
+    // id exists and does bidiGenerateContent, which is what the 09-2025
+    // spelling could not do; it is not proof the socket reaches setupComplete.
+    // The Vertex probe at /api/live/models cannot check it either — it asks
+    // Vertex — so the flag comes off on a handshake and not before. The cheapest
+    // way to ask is AI Studio's own ListModels:
+    //   GET https://generativelanguage.googleapis.com/v1beta/models?key=…
   },
   {
     key: 'gpt-realtime-21',
