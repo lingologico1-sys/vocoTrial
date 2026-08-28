@@ -616,7 +616,7 @@ export const SETTING_FIELDS: SettingField[] = [
      * measured, not so it can be assumed — which is why nothing is pinned here
      * and an untouched control sends no field at all.
      */
-    hint: 'whisper-1 waits for the whole utterance. Only the two newest take the lesson's word list.',
+    hint: 'whisper-1 waits for the whole utterance. Only the two newest take the word list.',
     kind: 'select',
     applies: isOpenAi,
     /**
