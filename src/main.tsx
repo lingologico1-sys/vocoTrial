@@ -5,12 +5,13 @@ import TutorBench from './tutor/TutorBench';
 import Studio from './live/Studio';
 import FaceKit from './facekit/FaceKit';
 import Teach from './teach/Teach';
+import LipSync from './lipsync/LipSync';
 import Eleve from './eleve/Eleve';
 import PasswordGate from './PasswordGate';
 import './index.css';
 
 /**
- * Six pages, no router.
+ * Seven pages, no router.
  *
  * public/_redirects already serves index.html for every path, so a path is all
  * another page needs — and a router would be a dependency, a bundle and an
@@ -46,6 +47,10 @@ const PAGES: Record<string, () => JSX.Element> = {
   // a tutor style and the house performance profile. It no longer publishes to
   // students — that moved to /teach, where the person handing out a lesson is.
   '/studio': Studio,
+  // A recording plus the marks a forced aligner made for it. The only page here
+  // that does not play live audio, which is the whole of why it exists — see
+  // src/lipsync/LipSync.tsx.
+  '/lipsync': LipSync,
   // The one page here that is not the workshop. See src/eleve/Eleve.tsx.
   '/eleve': Eleve,
 };

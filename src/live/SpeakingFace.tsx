@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { AudioTap } from '../realtime/audio';
 import type { FaceKit } from '../facekit/kit';
 import Face from './Face';
+import { MarkMouth, type VisemeMark } from './polly';
 import type {
   HeadMotion,
   MotionCadence,
@@ -32,6 +33,25 @@ import {
 interface SpeakingFaceProps {
   /** Null between calls, when there is nothing to listen to. */
   tap: AudioTap | null;
+  /**
+   * Marks to wear instead of measuring anything. Supplying these and `audioTime`
+   * switches the mouth to MarkMouth and ignores `tap`, `driver` and `roundness`.
+   *
+   * Not a third entry in MouthDriver, deliberately. That union is mirrored into
+   * SessionMouthDriver and travels inside published session config, so a value
+   * added there is a value a teacher's saved lesson can request — and a live call
+   * has no marks to give it. Marks arrive with a particular recording, so the
+   * thing that has them passes them, and nothing that does not can ask for them.
+   */
+  marks?: readonly VisemeMark[] | null;
+  /**
+   * Seconds into that recording currently being *heard*, read fresh each frame.
+   *
+   * The caller owns it because only it knows how the audio is being played. See
+   * the note on MarkMouth's constructor: whatever produces this has to subtract
+   * output latency, or the mouth leads by however far the speakers are behind.
+   */
+  audioTime?: (() => number) | null;
   /** Which way of measuring the audio drives the mouth. Switchable mid-call. */
   driver: MouthDriver;
   /** How far ahead the scheduled driver runs, in milliseconds. Ignored by the other. */
@@ -94,6 +114,8 @@ const RESTING: { shape: LipShape; level: number; viseme: Viseme } = {
 
 export default function SpeakingFace({
   tap,
+  marks,
+  audioTime,
   driver,
   lookaheadMs,
   roundness,
@@ -151,27 +173,49 @@ export default function SpeakingFace({
   // smoothing — so what changes on screen is the timing under comparison and
   // not a second of the mouth settling in.
   useEffect(() => {
-    if (!tap) return;
+    // Marks do not have a source to swap; MarkMouth is rebuilt below instead.
+    if (!tap || marks) return;
     analyser.current?.setSource(
       driver === 'scheduled'
         ? scheduledFeatures(tap, () => lookahead.current / 1000)
         : reactiveFeatures(tap),
     );
-  }, [tap, driver]);
+  }, [tap, marks, driver]);
 
   useEffect(() => {
-    if (!tap) {
-      analyser.current = null;
-      setMouth(RESTING);
-      return;
+    /**
+     * One loop, two mouths, and the branch is only over which one it reads.
+     *
+     * MarkMouth was built as the counterpart to MouthAnalyser and shares its
+     * shape exactly — `read(dt)` returns a MouthFrame, `silence()` snaps it shut
+     * — which is what lets everything below the first few lines be common. What
+     * differs is only where the answer comes from: one measures a spectrum, the
+     * other looks up a decision something else already made.
+     */
+    if (!marks || !audioTime) {
+      if (!tap) {
+        analyser.current = null;
+        setMouth(RESTING);
+        return;
+      }
     }
 
-    const source =
-      driver === 'scheduled'
-        ? scheduledFeatures(tap, () => lookahead.current / 1000)
-        : reactiveFeatures(tap);
-    const mouthAnalyser = new MouthAnalyser(source);
-    analyser.current = mouthAnalyser;
+    const markMouth =
+      marks && audioTime
+        ? new MarkMouth(marks, audioTime, () => lookahead.current / 1000)
+        : null;
+
+    let mouthAnalyser: MouthAnalyser | null = null;
+    if (!markMouth && tap) {
+      const source =
+        driver === 'scheduled'
+          ? scheduledFeatures(tap, () => lookahead.current / 1000)
+          : reactiveFeatures(tap);
+      mouthAnalyser = new MouthAnalyser(source);
+      analyser.current = mouthAnalyser;
+    }
+
+    if (!markMouth && !mouthAnalyser) return;
 
     let frame = 0;
     let last = performance.now();
@@ -181,7 +225,9 @@ export default function SpeakingFace({
       // that in as one frame would snap every smoothed value to its target.
       const dt = Math.min(0.1, (time - last) / 1000);
       last = time;
-      const next = mouthAnalyser.read(dt, roundnessRef.current, languageRef.current);
+      const next = markMouth
+        ? markMouth.read(dt)
+        : mouthAnalyser!.read(dt, roundnessRef.current, languageRef.current);
       // A new object each frame on purpose — the analyser mutates its shape in
       // place, so passing it through unchanged would never re-render.
       // The viseme travels alongside the shape rather than instead of it: the
@@ -195,8 +241,12 @@ export default function SpeakingFace({
     return () => cancelAnimationFrame(frame);
     // The driver is deliberately absent: switching it is handled above, without
     // tearing down the analyser. Listing it here would defeat that.
+    //
+    // `marks` and `audioTime` are present because a new recording genuinely is a
+    // new timeline, and MarkMouth carries no running peak or smoothing state that
+    // rebuilding would cost anything to lose.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tap]);
+  }, [tap, marks, audioTime]);
 
   return (
     <Face

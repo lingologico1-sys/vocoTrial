@@ -1,4 +1,11 @@
-import { ClipboardPen, GraduationCap, Layers, Smile, SlidersHorizontal } from 'lucide-react';
+import {
+  AudioLines,
+  ClipboardPen,
+  GraduationCap,
+  Layers,
+  Smile,
+  SlidersHorizontal,
+} from 'lucide-react';
 import BuildBadge from '../BuildBadge';
 
 /**
@@ -52,6 +59,13 @@ const WORKSHOP: Place[] = [
     blurb:
       'Dress the tutor in a face, tune how it moves and how it takes turns, then save that as the house default and publish the manners teachers pick between.',
     Icon: Layers,
+  },
+  {
+    href: '/lipsync',
+    name: 'lipSync',
+    blurb:
+      'A recording, the marks a forced aligner made for it, and the face wearing them. For checking an alignment before a lesson trusts it — the only page here whose mouth is driven by a file rather than by listening.',
+    Icon: AudioLines,
   },
   {
     href: '/tutorbench',
