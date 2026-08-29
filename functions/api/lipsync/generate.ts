@@ -56,6 +56,7 @@ const MODELS = new Set<LipsyncModel>(['eleven_v3', 'eleven_multilingual_v2']);
 interface AlignResult {
   durationMs: number;
   oovCount: number;
+  oovWords?: Array<{ word: string; startMs: number; endMs: number; reason: string }>;
   marks: Array<{ timeMs: number; polly: string }>;
   words: Array<{ word: string; startMs: number; endMs: number }>;
 }
@@ -219,6 +220,7 @@ export async function onRequestPost(
     params,
     durationMs: result.durationMs,
     oovCount: result.oovCount,
+    oovWords: result.oovWords ?? [],
     reactionCount: spans.length,
     marks: overlayReactions(marks, spans),
     words: result.words ?? [],

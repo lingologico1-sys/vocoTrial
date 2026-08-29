@@ -319,6 +319,28 @@ def align(job):
             if w.text.strip()
         ]
 
+        # WHICH words were out of vocabulary, not merely how many.
+        #
+        # The count alone is the least useful true thing the aligner can say. It tells
+        # somebody a word will draw as a closed mouth without telling them which word,
+        # so the only way to act on it is to read the line back guessing. The tiers
+        # already hold the answer: MFA gives an unknown word the single phone `spn`, so
+        # a word is out of vocabulary exactly when its span contains one.
+        #
+        # Named here rather than by re-reading the dictionary because this is what
+        # actually happened during *this* alignment, which is not quite the same
+        # question as what the dictionary contains -- a word MFA declined for any other
+        # reason shows up here too, and would not show up in a lookup.
+        spn_at = [
+            (start, stop) for start, stop, text in intervals
+            if visemes.normalise(text) == "spn"
+        ]
+        oov_words = [
+            {**w, "reason": "not in the dictionary"}
+            for w in words
+            if any(w["startMs"] <= round(a * 1000) < w["endMs"] for a, _ in spn_at)
+        ]
+
         duration_ms = round(max((i[1] for i in intervals), default=0.0) * 1000)
 
         return {
@@ -327,6 +349,7 @@ def align(job):
             "model": model,
             "durationMs": duration_ms,
             "oovCount": oov,
+            "oovWords": oov_words,
             "phoneCount": len(intervals),
             "words": words,
             "alignedInSeconds": round(time.time() - started, 1),

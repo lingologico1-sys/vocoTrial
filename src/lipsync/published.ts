@@ -36,6 +36,14 @@ export const packageKey = (id: string) => `packages/${id}.json`;
  */
 export const alignmentKey = (id: string) => `alignment/${id}.json`;
 
+/** A word the aligner could not look up, and where it sits. */
+export interface OovWord {
+  word: string;
+  startMs: number;
+  endMs: number;
+  reason: string;
+}
+
 export type LipsyncModel = 'eleven_v3' | 'eleven_multilingual_v2';
 
 /** Straight through to ElevenLabs; none of these affect alignment. */
@@ -81,6 +89,14 @@ export interface LipsyncPackage {
   oovCount: number;
   /** How many reaction spans were overlaid rather than trusted to the aligner. */
   reactionCount: number;
+  /**
+   * Which words the aligner could not look up, not merely how many.
+   *
+   * The count on its own is the least useful true thing this can say: it warns that a
+   * word will draw as a closed mouth without saying which, so the only way to act on it
+   * is to reread the line guessing. With the spans, the page can point at the moment.
+   */
+  oovWords: OovWord[];
 
   marks: VisemeMark[];
   /** The aligner's word tier, for checking timing against the synthesiser's own. */

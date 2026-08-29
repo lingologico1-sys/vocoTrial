@@ -8,6 +8,7 @@ import type { VisemeMark } from '../live/polly';
 import { MARK_LOOKAHEAD_MS } from '../live/polly';
 import { MAX_LOOKAHEAD_MS } from '../live/visemes';
 import Compose from './Compose';
+import Diagnostics from './Diagnostics';
 import { audioUrl, saveLine, type Generated } from './library';
 import { loadBundledKit } from '../facekit/bundled';
 import { fetchPublished, listPublished } from '../facekit/library';
@@ -371,8 +372,30 @@ export default function LipSync() {
         {meta?.oovCount ? (
           <p className="flex items-start gap-2 rounded-lg border border-amber-900/60 bg-amber-950/30 px-3 py-2 text-sm text-amber-300">
             <AlertTriangle size={16} className="mt-0.5 shrink-0" />
-            {meta.oovCount} word{meta.oovCount === 1 ? '' : 's'} were not in the dictionary
-            and aligned as silence — the mouth will stay shut through {meta.oovCount === 1 ? 'it' : 'them'}.
+            <span>
+              {generated?.package.oovWords?.length
+                ? // Naming it is the whole point. The count alone left rereading the
+                  // line and guessing as the only available move.
+                  <>
+                    The aligner did not know{' '}
+                    {generated.package.oovWords.map((w, i) => (
+                      <span key={`${w.word}-${w.startMs}`}>
+                        {i > 0 && ', '}
+                        <span className="font-mono">{w.word}</span>{' '}
+                        <span className="text-amber-400/60">
+                          at {(w.startMs / 1000).toFixed(1)}s
+                        </span>
+                      </span>
+                    ))}
+                    . The mouth stays shut through {generated.package.oovWords.length === 1 ? 'it' : 'them'}.
+                  </>
+                : <>
+                    {meta.oovCount} word{meta.oovCount === 1 ? '' : 's'} the aligner could
+                    not look up. The mouth stays shut through{' '}
+                    {meta.oovCount === 1 ? 'it' : 'them'}.
+                  </>}
+              {generated && ' See the panel below for where.'}
+            </span>
           </p>
         ) : null}
 
@@ -452,6 +475,8 @@ export default function LipSync() {
             </span>
           </label>
         </section>
+
+        {generated && <Diagnostics pkg={generated.package} />}
 
         {generated && (
           <div className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-800 px-4 py-3">
