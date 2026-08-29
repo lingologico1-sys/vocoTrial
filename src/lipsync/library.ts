@@ -1,3 +1,4 @@
+import type { Quota } from './cost';
 import type {
   LipsyncModel,
   LipsyncPackage,
@@ -96,6 +97,21 @@ export function fetchLine(
   id: string,
 ): Promise<{ package: LipsyncPackage; audioBase64?: string }> {
   return post<{ package: LipsyncPackage; audioBase64?: string }>('get', { id });
+}
+
+/**
+ * What ElevenLabs says is left this month.
+ *
+ * Resolves to null rather than throwing: the quota is context, not a precondition. A
+ * page that refused to let anyone generate because a usage endpoint was slow would be
+ * worse than one that shows a character count on its own.
+ */
+export async function fetchQuota(): Promise<Quota | null> {
+  try {
+    return await post<Quota>('quota');
+  } catch {
+    return null;
+  }
 }
 
 export function deleteLine(id: string): Promise<unknown> {

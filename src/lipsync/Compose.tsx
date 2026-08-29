@@ -1,6 +1,7 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, Loader2, Sparkles } from 'lucide-react';
-import { generate, LipsyncError, type Generated } from './library';
+import { fetchQuota, generate, LipsyncError, type Generated } from './library';
+import { costOf, estimateUsd, formatQuota, linesLeft, type Quota } from './cost';
 import {
   DEFAULT_PARAMS,
   type LipsyncModel,
@@ -64,8 +65,16 @@ export default function Compose({ onGenerated, busy, setBusy }: ComposeProps) {
   const [params, setParams] = useState<VoiceParams>(DEFAULT_PARAMS);
   const [problem, setProblem] = useState<string | null>(null);
   const box = useRef<HTMLTextAreaElement | null>(null);
+  const [quota, setQuota] = useState<Quota | null>(null);
+
+  // Read once on mount and again after each generation, since generating is the only
+  // thing on this page that spends any of it.
+  useEffect(() => {
+    void fetchQuota().then(setQuota);
+  }, []);
 
   const tagsAllowed = model === 'eleven_v3';
+  const cost = useMemo(() => costOf(text), [text]);
   const script = useMemo(() => stripTags(text), [text]);
   const reactions = useMemo(() => (tagsAllowed ? reactionsIn(text) : []), [text, tagsAllowed]);
 
@@ -98,15 +107,16 @@ export default function Compose({ onGenerated, busy, setBusy }: ComposeProps) {
     }
     setBusy(true);
     try {
-      onGenerated(
-        await generate({
-          text,
-          language,
-          voiceId: voiceId.trim(),
-          model,
-          params,
-        }),
-      );
+      const result = await generate({
+        text,
+        language,
+        voiceId: voiceId.trim(),
+        model,
+        params,
+      });
+      onGenerated(result);
+      // The count just changed, so the panel should stop showing the old one.
+      void fetchQuota().then(setQuota);
     } catch (error) {
       const message =
         error instanceof LipsyncError
@@ -135,6 +145,44 @@ export default function Compose({ onGenerated, busy, setBusy }: ComposeProps) {
         placeholder="Bonjour. Aujourd'hui, nous allons travailler les sons qui posent le plus de difficulté."
         className="w-full resize-y rounded-lg border border-slate-800 bg-slate-900 px-3 py-2 font-mono text-sm text-slate-200 placeholder:text-slate-700"
       />
+
+      {/* What this line costs, in the unit ElevenLabs bills in.
+          Beneath the box rather than beside the button, because the number that
+          changes a decision is the one visible while the decision is being made. */}
+      <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 text-[11px] text-slate-600">
+        <span>
+          <span className="font-mono text-slate-300">{cost.total.toLocaleString()}</span>{' '}
+          characters
+          {cost.tagChars > 0 && (
+            <>
+              {' — '}
+              <span className="font-mono text-amber-400/80">{cost.tagChars}</span> of them
+              tags, billed but never spoken
+            </>
+          )}
+        </span>
+        <span>≈ ${estimateUsd(cost.total).toFixed(3)}</span>
+        {quota && (
+          <>
+            <span className="h-3 w-px bg-slate-800" />
+            <span>
+              {formatQuota(quota)} used this month
+              {quota.resetsAt && (
+                <> · resets {new Date(quota.resetsAt * 1000).toLocaleDateString()}</>
+              )}
+            </span>
+            {cost.total > 0 && (
+              <span>
+                room for{' '}
+                <span className="font-mono text-slate-400">
+                  {linesLeft(quota, cost.total)?.toLocaleString()}
+                </span>{' '}
+                more like it
+              </span>
+            )}
+          </>
+        )}
+      </div>
 
       <div className="grid gap-3 sm:grid-cols-3">
         <label className="flex flex-col gap-1.5">
@@ -267,6 +315,15 @@ export default function Compose({ onGenerated, busy, setBusy }: ComposeProps) {
           that is a consequence of the audio rather than of the setting.
         </p>
       </details>
+
+      {cost.unknownTags.length > 0 && (
+        <p className="flex items-start gap-2 rounded-lg border border-amber-900/60 bg-amber-950/30 px-3 py-2 text-xs text-amber-300">
+          <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+          {cost.unknownTags.join(' ')} — not a tag this build knows. It will be stripped
+          from the transcript either way, but ElevenLabs may well speak it aloud, and you
+          are billed for the characters regardless.
+        </p>
+      )}
 
       {reactions.length > 0 && (
         <p className="flex items-start gap-2 rounded-lg border border-amber-900/60 bg-amber-950/30 px-3 py-2 text-xs text-amber-300">
