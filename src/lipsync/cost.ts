@@ -5,7 +5,7 @@ import { TAGS } from './tags';
  *
  * CHARACTERS, NOT WORDS OR SECONDS. That distinction is the whole reason this file is
  * worth having, because it makes one thing true that nobody expects: **audio tags are
- * billed**. `[warmly]` is nine characters of quota spent on something that is never
+ * billed**. `[warmly]` is eight characters of quota spent on something that is never
  * spoken and appears in no transcript. On a plan measured in tens of thousands of
  * characters a month, a habit of opening every line with two directives is a few percent
  * of the month spent on stage directions.
@@ -68,9 +68,25 @@ export function estimateUsd(chars: number): number {
   return (chars / 1000) * USD_PER_1K_CHARS;
 }
 
-/** "2,328 of 88,736" — the numbers this account actually has. */
+/** What is left, which is the number worth leading with. */
+export function remaining(q: Quota): number {
+  return Math.max(0, q.limit - q.used);
+}
+
+/**
+ * "86,408 left of 88,736".
+ *
+ * Remaining first, spent second. The panel used to lead with what had been used, which
+ * is the same information and the wrong way round: nobody writing a line wants to know
+ * how much of the month is gone, they want to know whether there is room for this one.
+ */
 export function formatQuota(q: Quota): string {
-  return `${q.used.toLocaleString()} of ${q.limit.toLocaleString()}`;
+  return `${remaining(q).toLocaleString()} left of ${q.limit.toLocaleString()}`;
+}
+
+/** How much of the allowance is gone, 0 to 1, for the bar. */
+export function spentFraction(q: Quota): number {
+  return q.limit > 0 ? Math.min(1, q.used / q.limit) : 0;
 }
 
 /** How many more lines like this one the remaining quota affords. */

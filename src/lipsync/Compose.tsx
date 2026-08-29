@@ -1,7 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, Loader2, Sparkles } from 'lucide-react';
 import { fetchQuota, generate, LipsyncError, type Generated } from './library';
-import { costOf, estimateUsd, formatQuota, linesLeft, type Quota } from './cost';
+import {
+  costOf,
+  estimateUsd,
+  formatQuota,
+  linesLeft,
+  remaining,
+  spentFraction,
+  type Quota,
+} from './cost';
 import {
   DEFAULT_PARAMS,
   type LipsyncModel,
@@ -166,10 +174,10 @@ export default function Compose({ onGenerated, busy, setBusy }: ComposeProps) {
           <>
             <span className="h-3 w-px bg-slate-800" />
             <span>
-              {formatQuota(quota)} used this month
-              {quota.resetsAt && (
-                <> · resets {new Date(quota.resetsAt * 1000).toLocaleDateString()}</>
-              )}
+              <span className="font-mono text-slate-300">
+                {remaining(quota).toLocaleString()}
+              </span>{' '}
+              credits left
             </span>
             {cost.total > 0 && (
               <span>
@@ -183,6 +191,36 @@ export default function Compose({ onGenerated, busy, setBusy }: ComposeProps) {
           </>
         )}
       </div>
+
+      {/* The allowance at a glance. A bar rather than only a number because the useful
+          question while writing is "am I near the end of the month", which is a
+          proportion, and a proportion is faster to see than to read. */}
+      {quota && (
+        <div className="flex flex-col gap-1">
+          <div className="h-1 w-full overflow-hidden rounded-full bg-slate-900">
+            <div
+              className={`h-full rounded-full transition-all ${
+                spentFraction(quota) > 0.9 ? 'bg-rose-500/70' : 'bg-slate-600'
+              }`}
+              style={{ width: `${Math.max(1, spentFraction(quota) * 100)}%` }}
+            />
+          </div>
+          <div className="flex flex-wrap justify-between gap-x-4 text-[11px] text-slate-600">
+            <span>
+              {quota.tier} · {formatQuota(quota)} characters
+            </span>
+            {quota.resetsAt && (
+              <span>
+                resets{' '}
+                {new Date(quota.resetsAt * 1000).toLocaleDateString(undefined, {
+                  day: 'numeric',
+                  month: 'short',
+                })}
+              </span>
+            )}
+          </div>
+        </div>
+      )}
 
       <div className="grid gap-3 sm:grid-cols-3">
         <label className="flex flex-col gap-1.5">
