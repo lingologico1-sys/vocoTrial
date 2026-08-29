@@ -86,6 +86,22 @@ export default function LipSync() {
    * makes the comparison below fire exactly once, when there is something to compare.
    */
   const [duration, setDuration] = useState(0);
+  /**
+   * Whether this clip has ever started playing.
+   *
+   * Without it the face pre-forms into the first pose the moment a marks file is
+   * chosen, and sits there. The cause is subtle and worth writing down: `audioTime`
+   * reads 0 while the element is paused, the mouth is read MARK_LOOKAHEAD_MS ahead,
+   * and the mark 50ms into this clip is the rounded vowel of "Bonjour" -- so a face
+   * that has been asked to say nothing yet holds a rounded mouth, indefinitely,
+   * before anyone presses play.
+   *
+   * Gating on the first `play` event rather than on `paused` is deliberate. Pausing
+   * mid-sentence should leave the mouth where it is, because that is what a paused
+   * video looks like; it is only the state *before the first frame of audio* that has
+   * no honest pose but rest.
+   */
+  const [started, setStarted] = useState(false);
 
   /**
    * The clock the mouth reads, and the one thing on this page that is subtle.
@@ -132,7 +148,10 @@ export default function LipSync() {
    * per frame and keeps the face component free of a debugging concern.
    */
   useEffect(() => {
-    if (!marks) return;
+    if (!marks || !started) {
+      setPose('rest');
+      return;
+    }
     let frame = 0;
     const step = () => {
       const at = (audioTime() + lookaheadMs / 1000) * 1000;
@@ -153,12 +172,14 @@ export default function LipSync() {
     };
     frame = requestAnimationFrame(step);
     return () => cancelAnimationFrame(frame);
-  }, [marks, lookaheadMs, audioTime]);
+  }, [marks, started, lookaheadMs, audioTime]);
 
   function takeAudio(file: File | undefined) {
     if (!file) return;
     if (audio) URL.revokeObjectURL(audio.url);
     setAudio({ name: file.name, url: URL.createObjectURL(file) });
+    setStarted(false);
+    setDuration(0);
   }
 
   async function takeMarks(file: File | undefined) {
@@ -223,6 +244,9 @@ export default function LipSync() {
   }, [meta, duration]);
 
   const ready = Boolean(audio && marks);
+  // Marks only once the audio is genuinely running. Before that the face has
+  // nothing to say and rest is the only truthful pose.
+  const driving = ready && started;
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-200">
@@ -304,12 +328,12 @@ export default function LipSync() {
           <div className="w-[320px]">
             <SpeakingFace
               tap={null}
-              marks={ready ? marks : null}
-              audioTime={ready ? audioTime : null}
+              marks={driving ? marks : null}
+              audioTime={driving ? audioTime : null}
               driver="scheduled"
               lookaheadMs={lookaheadMs}
               kit={kit}
-              speaking={ready}
+              speaking={driving}
             />
           </div>
 
@@ -320,6 +344,7 @@ export default function LipSync() {
               controls
               className="w-full max-w-md"
               onLoadedMetadata={(event) => setDuration(event.currentTarget.duration)}
+              onPlay={() => setStarted(true)}
             />
           )}
 
