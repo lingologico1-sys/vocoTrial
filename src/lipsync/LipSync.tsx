@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, AudioLines, Upload } from 'lucide-react';
+import { AlertTriangle, AudioLines, Check, Save, Upload } from 'lucide-react';
 import BuildBadge from '../BuildBadge';
 import ReturnButton from '../ReturnButton';
 import SpeakingFace from '../live/SpeakingFace';
@@ -7,6 +7,8 @@ import { parseMfaMarks, type MfaMarkFile } from '../live/mfa';
 import type { VisemeMark } from '../live/polly';
 import { MARK_LOOKAHEAD_MS } from '../live/polly';
 import { MAX_LOOKAHEAD_MS } from '../live/visemes';
+import Compose from './Compose';
+import { audioUrl, saveLine, type Generated } from './library';
 import { loadBundledKit } from '../facekit/bundled';
 import { fetchPublished, listPublished } from '../facekit/library';
 import type { PublishedFace } from '../facekit/published';
@@ -86,6 +88,16 @@ export default function LipSync() {
    * makes the comparison below fire exactly once, when there is something to compare.
    */
   const [duration, setDuration] = useState(0);
+  /**
+   * The last generated package, held so it can be saved.
+   *
+   * Null after a file was picked by hand rather than generated: those marks came
+   * from somewhere this page cannot vouch for, and there is nothing coherent to
+   * store. Saving is offered only for what this page made itself.
+   */
+  const [generated, setGenerated] = useState<Generated | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [saved, setSaved] = useState(false);
   /**
    * Whether this clip has ever started playing.
    *
@@ -180,6 +192,8 @@ export default function LipSync() {
     setAudio({ name: file.name, url: URL.createObjectURL(file) });
     setStarted(false);
     setDuration(0);
+    setGenerated(null);
+    setSaved(false);
   }
 
   async function takeMarks(file: File | undefined) {
@@ -209,6 +223,44 @@ export default function LipSync() {
       setProblem(error instanceof Error ? error.message : 'could not read that file');
       setMarks(null);
       setMeta(null);
+    }
+  }
+
+  /**
+   * Puts a freshly generated package into the player.
+   *
+   * Everything below this point already knew how to play marks against audio, so a
+   * generation is fed in through exactly the same two pieces of state a file would set.
+   * The package is kept alongside only so Save has something to send.
+   */
+  function takeGenerated(result: Generated) {
+    if (audio) URL.revokeObjectURL(audio.url);
+    const pkg = result.package;
+    setAudio({ name: `${pkg.name}.mp3`, url: audioUrl(result.audioBase64) });
+    setMarks(parseMfaMarks({ marks: pkg.marks }));
+    setMeta({
+      language: pkg.language,
+      model: pkg.model,
+      durationMs: pkg.durationMs,
+      oovCount: pkg.oovCount,
+    });
+    setGenerated(result);
+    setSaved(false);
+    setStarted(false);
+    setDuration(0);
+    setProblem(null);
+  }
+
+  async function keep() {
+    if (!generated) return;
+    setBusy(true);
+    try {
+      await saveLine(generated);
+      setSaved(true);
+    } catch (error) {
+      setProblem(error instanceof Error ? error.message : 'Could not save that.');
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -264,6 +316,13 @@ export default function LipSync() {
           </div>
           <ReturnButton look="workshop" />
         </header>
+
+        <Compose onGenerated={takeGenerated} busy={busy} setBusy={setBusy} />
+
+        <div className="flex items-center gap-3">
+          <span className="text-xs uppercase tracking-wide text-slate-600">or open files</span>
+          <span className="h-px flex-1 bg-slate-900" />
+        </div>
 
         <section className="grid gap-3 sm:grid-cols-2">
           <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-slate-800 px-4 py-3 transition-colors hover:border-slate-700">
@@ -393,6 +452,31 @@ export default function LipSync() {
             </span>
           </label>
         </section>
+
+        {generated && (
+          <div className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-800 px-4 py-3">
+            <button
+              type="button"
+              onClick={() => void keep()}
+              disabled={busy || saved}
+              className="inline-flex items-center gap-2 rounded-lg border border-slate-700 px-3 py-1.5 text-sm text-slate-200 transition-colors hover:border-slate-500 disabled:cursor-not-allowed disabled:border-slate-900 disabled:text-slate-700"
+            >
+              {saved ? <Check size={15} /> : <Save size={15} />}
+              {saved ? 'Saved' : 'Save this line'}
+            </button>
+            <span className="text-xs text-slate-600">
+              {saved
+                ? 'In the library, with its audio and the timings it was aligned from.'
+                : 'Nothing is stored until you say so — tuning a voice should not fill a bucket.'}
+            </span>
+            {generated.package.reactionCount > 0 && (
+              <span className="text-xs text-amber-400/80">
+                {generated.package.reactionCount} reaction span
+                {generated.package.reactionCount === 1 ? '' : 's'} marked from the timings
+              </span>
+            )}
+          </div>
+        )}
 
         {meta && (
           <p className="font-mono text-[11px] text-slate-600">

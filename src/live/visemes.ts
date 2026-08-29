@@ -38,7 +38,11 @@ import { ROUNDING_SPLIT_HZ, SPEECH_BAND, type AudioTap } from '../realtime/audio
  * made again for the sake of one pose.
  */
 
-export type Viseme = 'rest' | 'mbp' | 'fv' | 'ee' | 'uh' | 'aa' | 'oh';
+// The union moved to visemeTable.ts, which nothing imports, so that a Worker and a
+// Python script can read it without dragging this file's AudioContext in with it.
+// Re-exported here because every existing importer expects it from this module.
+export type { Viseme } from './visemeTable';
+import type { Viseme } from './visemeTable';
 
 /**
  * A mouth as three numbers, in the coordinate space of MOUTH_BOX.

@@ -153,3 +153,15 @@ bucket_name = "vocotrial-house"
 [[r2_buckets]]
 binding = "PROMPTS"
 bucket_name = "vocotrial-prompts"
+
+# Generated speech and the marks that go with it.
+#
+# Its own bucket rather than a prefix inside another, for the reason every block above
+# gives: Pages validates bindings at build time, and a binding named for one thing
+# holding another is a lie the next reader has to discover. It holds three kinds of
+# object per line -- the audio, the package, and the raw ElevenLabs alignment -- under
+# the key helpers in src/lipsync/published.ts, which both sides import so neither can
+# invent a path the other does not look at.
+[[r2_buckets]]
+binding = "LIPSYNC"
+bucket_name = "vocotrial-lipsync"

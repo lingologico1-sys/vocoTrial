@@ -215,7 +215,14 @@ def _phone_tier(textgrid):
     return tier
 
 
-@app.function(timeout=900, cpu=4.0, memory=8192)
+# scaledown_window keeps a container alive between requests, and the number is chosen
+# for a person rather than for a machine. The page now calls this through a Cloudflare
+# function while someone waits, and a cold start is 30-60s of MFA loading Kaldi and the
+# acoustic model -- long enough that the honest reading of the screen is "it broke".
+# Five minutes covers the way this is actually used, which is a burst of takes while
+# tuning a voice, and costs nothing outside one, since an idle container scales to zero
+# on its own after it.
+@app.function(timeout=900, cpu=4.0, memory=8192, scaledown_window=300)
 def align(job):
     """
     One clip aligned, as viseme marks.
@@ -440,6 +447,7 @@ def bake(inputs: str, outputs: str = "", lang: str = "", force: bool = False):
     timeout=900,
     cpu=4.0,
     memory=8192,
+    scaledown_window=300,
     secrets=[modal.Secret.from_name("lipsync-api-key", required_keys=["API_KEY"])],
 )
 @modal.fastapi_endpoint(method="POST")

@@ -19,6 +19,13 @@ than the mirror it replaced, because a mirror at least fails visibly when someon
 it. So a missing file, an unfindable block, or a pose outside the seven the artwork
 actually has all raise on import.
 
+WHY visemeTable.ts AND NOT polly.ts, which is where a reader would look for the table
+and where it used to be. Because a Cloudflare Worker needs it too, and polly.ts reaches
+AudioContext through visemes.ts -- so the words were extracted into a leaf that imports
+nothing. Three unrelated things now read the same file: this parser, the browser page,
+and functions/api/lipsync running in a Worker with no DOM at all. polly.ts re-exports it
+unchanged, so nothing that used to import from there had to move.
+
 NOT SHIPPED TO THE CONTAINER. The Modal image carries visemes.py and lip_sync_api.py;
 neither imports this, because nothing running remotely needs to know what a phone *draws*
 -- that is the client's half of the arrangement. Only the local test entrypoints read it.
@@ -27,7 +34,7 @@ neither imports this, because nothing running remotely needs to know what a phon
 import re
 from pathlib import Path
 
-SOURCE = Path(__file__).resolve().parent.parent / "src" / "live" / "polly.ts"
+SOURCE = Path(__file__).resolve().parent.parent / "src" / "live" / "visemeTable.ts"
 
 # The seven the artwork has. facekit/slots.ts keys its slots on this exact union, so a
 # pose outside it is a pose no kit was ever generated for.
