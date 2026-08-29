@@ -104,7 +104,49 @@ The web endpoint reads an `API_KEY` from a Modal secret:
 python -m modal secret create lipsync-api-key API_KEY=<something long and random>
 ```
 
-## Baking marks (the main path)
+## Authoring on /lipsync (the main path)
+
+Type a line, pick a voice and a face, press Generate. ElevenLabs synthesises it and
+returns its own character timings; those bytes go straight to the aligner here; the marks
+come back and the face says it. Save keeps the package in R2.
+
+**Why it is one request.** The four things a talking face needs — the text, the audio, the
+synthesiser's timings and the aligner's marks — used to be four files carried between two
+tools by hand, and the pairing went wrong twice in one afternoon. It is a silent failure:
+a transcript that does not match its audio still aligns, and still returns confident
+marks. Nothing downstream can detect it, because nothing is inconsistent — the marks are
+a correct alignment of the wrong text. Generating and aligning in one request removes the
+possibility instead of guarding against it. See `functions/api/lipsync/generate.ts`.
+
+### Audio tags
+
+v3 only, and sorted by what they do to an aligner rather than by how they read:
+
+| kind | examples | effect |
+|---|---|---|
+| directive | `[happy]` `[whispering]` `[slowly]` | none — no audio of their own. Free. |
+| pause | `[pause]` `[long pause]` | silence, which MFA leaves as a gap and `to_marks` turns into `sil`. Helps. |
+| reaction | `[laughs]` `[sighs]` `[gasps]` | **audio with no words.** The hazard. |
+
+A reaction makes sound the transcript cannot account for, so MFA stretches the
+surrounding words across it and the mouth is wrong on both sides as well as during. The
+fix uses ElevenLabs' own character timings, which cover the tag's brackets: the span is
+known exactly, so it is marked with a pose chosen for the reaction and the measured words
+either side are left alone. See `src/lipsync/tags.ts`.
+
+It is a heuristic — a laugh is not one pose held — but the span is measured rather than
+guessed, and the alternative is words smeared across a laugh.
+
+### What it needs configured
+
+- R2 bucket **`vocotrial-lipsync`**, bound `LIPSYNC` in `wrangler.toml`. Pages validates
+  bindings at build time, so a missing bucket fails the deploy rather than the request.
+- **`ELEVENLABS_API_KEY`**, and **`LIPSYNC_URL`** / **`LIPSYNC_API_KEY`** for the aligner's
+  own `X-API-Key` gate. In `.dev.vars` to run locally, in the Pages dashboard for the
+  deployed site — and in the Preview environment too, or preview branches fail with
+  `no_key`.
+
+## Baking marks from files
 
 Put each audio file next to a `.txt` of what is said in it, and name the language into
 the file:
