@@ -299,20 +299,37 @@ export function reactionSpans(
  * the right pose rather than inheriting the reaction's.
  */
 /**
- * How long a lead-in smile this span gets, or zero.
+ * The lead-in each span gets, in order, most of them zero.
  *
- * Shared by performSpan, which stamps the smile, and overlayReactions, which has to
- * clear the window that smile occupies. Two places deriving the same number
- * independently is how they drift apart, and a drift here is a speech mark surviving
- * inside the lead-in and overwriting it.
+ * Derived once for the whole utterance and handed to everything that needs it, rather
+ * than recomputed per span. performSpan stamps the smile and overlayReactions clears the
+ * window it occupies; two places deriving the same number independently is how they
+ * drift, and a drift here is a speech mark surviving inside the lead-in and simply
+ * overwriting it.
  *
- * Clamped so the beat cannot start before the recording does. A laugh in the first
- * 130ms of an utterance gets a shorter run-up rather than a mark at a negative time.
+ * IT NEEDS ROOM THAT IS NOT ALREADY A REACTION, which is the whole reason this takes
+ * the list rather than one span. A beat spent before the laugh has to come out of
+ * something, and the only thing it can come out of is quiet: "[giggles] [giggles]"
+ * puts two spans back to back, and a second giggle that anticipates itself reaches
+ * backwards into the first one and drops a closed mouth into the middle of a laugh
+ * already in progress. Nothing about that is anticipation. The face is laughing; there
+ * is nothing left to anticipate.
+ *
+ * ALL OF IT OR NONE OF IT. A beat with only part of its room available is not a
+ * shortened gesture, it is a flicker — the patch fades in over SMILE_MARK_IN_MS and a
+ * lead-in shorter than that never finishes arriving before it is told to leave. So the
+ * room is a threshold and not a clamp, which also covers the utterance that opens on a
+ * laugh: no quiet in front of it, no lead-in, rather than a smile crushed into whatever
+ * milliseconds happen to precede it.
  */
-function leadInMs(span: Span, options: ReactionOptions): number {
-  if (!span.laughing || !options.smileLeadIn) return 0;
-  if (span.endMs - span.startMs < SMILE_LEAD_MIN_MS) return 0;
-  return Math.min(SMILE_LEAD_MS, span.startMs);
+function leadIns(spans: readonly Span[], options: ReactionOptions): number[] {
+  return spans.map((span, i) => {
+    if (!span.laughing || !options.smileLeadIn) return 0;
+    if (span.endMs - span.startMs < SMILE_LEAD_MIN_MS) return 0;
+    // Start of the recording counts as quiet, so span 0 measures against zero.
+    const quiet = span.startMs - (i > 0 ? spans[i - 1].endMs : 0);
+    return quiet >= SMILE_LEAD_MS ? SMILE_LEAD_MS : 0;
+  });
 }
 
 /**
@@ -324,17 +341,16 @@ function leadInMs(span: Span, options: ReactionOptions): number {
  * easing means neither extreme is fully reached anyway, so the visible result is a jaw
  * moving rather than a shape flickering.
  */
-function performSpan(span: Span, options: ReactionOptions): VisemeMark[] {
+function performSpan(span: Span, leadMs: number): VisemeMark[] {
   const marks: VisemeMark[] = [];
   // Not const: the pulse loop below walks it to the end of the span.
   let at = span.startMs;
 
-  // A smile before a laugh, on a span long enough to carry one. Nothing else is
+  // A smile before a laugh, on a span leadIns judged has room for one. Nothing else is
   // preceded by an expression, because nothing else is anticipated the way a laugh is.
   // It is stamped ahead of the span and `at` does not move: the beat comes out of the
-  // silence in front of the laugh, never out of the laugh. See SMILE_LEAD_MS.
-  const lead = leadInMs(span, options);
-  if (lead > 0) marks.push({ timeMs: at - lead, viseme: 'smile' });
+  // quiet in front of the laugh, never out of the laugh. See SMILE_LEAD_MS.
+  if (leadMs > 0) marks.push({ timeMs: at - leadMs, viseme: 'smile' });
 
   const length = span.endMs - at;
 
@@ -396,12 +412,13 @@ export function overlayReactions(
   // the speech before the tag — real, but about to be overruled by an expression. A word
   // mark left standing there sorts after the smile and simply overwrites it, which is
   // the lead-in silently not happening rather than the lead-in looking wrong.
-  const gesture = spans.map((s) => ({ from: s.startMs - leadInMs(s, options), to: s.endMs }));
+  const leads = leadIns(spans, options);
+  const gesture = spans.map((s, i) => ({ from: s.startMs - leads[i], to: s.endMs }));
   const inside = (ms: number) => gesture.some((g) => ms >= g.from && ms < g.to);
   const out: VisemeMark[] = marks.filter((m) => !inside(m.timeMs));
 
-  for (const span of spans) {
-    out.push(...performSpan(span, options));
+  for (const [i, span] of spans.entries()) {
+    out.push(...performSpan(span, leads[i]));
 
     // What was in force when the reaction began is what the mouth returns to, unless a
     // real mark already lands at that instant. The last mark before the GESTURE started
@@ -409,8 +426,7 @@ export function overlayReactions(
     // anything later is one of the marks just dropped, and resuming into a pose that was
     // suppressed for being about to be overruled puts it back after the fact.
     if (!marks.some((m) => m.timeMs === span.endMs)) {
-      const from = span.startMs - leadInMs(span, options);
-      const before = [...marks].reverse().find((m) => m.timeMs <= from);
+      const before = [...marks].reverse().find((m) => m.timeMs <= gesture[i].from);
       out.push({
         timeMs: span.endMs,
         polly: before?.polly,
