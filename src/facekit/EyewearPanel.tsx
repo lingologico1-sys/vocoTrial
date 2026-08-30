@@ -204,7 +204,7 @@ function MatteEditor({ candidate, frame, restoreFrame, onChange }: {
           {radius}px
         </label>
       </div>
-      <div className="relative aspect-square overflow-hidden rounded-xl border border-slate-800 bg-slate-950">
+      <div className="relative mx-auto aspect-square w-full max-w-md overflow-hidden rounded-xl border border-slate-800 bg-slate-950">
         <img
           src={view === 'original' ? candidate.source : candidate.bare}
           alt=""
