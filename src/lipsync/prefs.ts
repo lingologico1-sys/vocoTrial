@@ -39,6 +39,39 @@ export interface LipsyncPrefs {
 
 const PREFS_KEY = 'lipsync.prefs.v1';
 
+/**
+ * Which build's opinions the stored blob carries, kept inside it rather than in the key.
+ *
+ * A default that changes is not a problem — a stored value simply wins, which is the
+ * whole point of remembering it. It is a problem when the stored value was never chosen:
+ * `reactions.nod` defaulted to false and had no control on the page for as long as it
+ * was unwired, so every visit wrote a `false` nobody meant. Shipping the new default
+ * against those blobs would mean the laugh's bob is off for everyone who has ever opened
+ * this page, and off in the one way that looks like the feature not working.
+ *
+ * The key is not bumped for it. Bumping the key throws away the voice ID and the script
+ * as well, which is the one thing the note above says this file exists to avoid, to
+ * repair one checkbox nobody set. So the version rides inside the blob and `migrate`
+ * takes back only the field that was never a choice.
+ */
+const PREFS_VERSION = 2;
+
+/**
+ * The fields an older blob is not allowed to speak for.
+ *
+ * One field and one version so far, and deliberately written as a general step rather
+ * than as a special case: the next unwired default to be finished will want the same
+ * treatment, and the shape is easier to copy than to rediscover.
+ */
+function migrate(saved: Partial<LipsyncPrefs> & { version?: number }): Partial<LipsyncPrefs> {
+  if (saved.version === PREFS_VERSION) return saved;
+  // Deleted from a copy rather than destructured around, because the name that would
+  // have to be bound and ignored is exactly what the lint forbids.
+  const reactions = { ...(saved.reactions ?? {}) } as Partial<ReactionOptions>;
+  delete reactions.nod;
+  return { ...saved, reactions: reactions as ReactionOptions };
+}
+
 const LANGUAGES: readonly LipsyncPackage['language'][] = ['en', 'fr', 'es'];
 const MODELS: readonly LipsyncModel[] = ['eleven_v3', 'eleven_multilingual_v2'];
 
@@ -135,7 +168,7 @@ export function loadPrefs(): LipsyncPrefs {
     const raw = window.localStorage.getItem(PREFS_KEY);
     const parsed: unknown = raw ? JSON.parse(raw) : null;
     if (!parsed || typeof parsed !== 'object') return DEFAULT_PREFS;
-    return validate(parsed as Partial<LipsyncPrefs>);
+    return validate(migrate(parsed as Partial<LipsyncPrefs> & { version?: number }));
   } catch {
     return DEFAULT_PREFS;
   }
@@ -145,7 +178,10 @@ export function savePrefs(prefs: Partial<LipsyncPrefs>): void {
   try {
     window.localStorage.setItem(
       PREFS_KEY,
-      JSON.stringify(validate({ ...loadPrefs(), ...prefs })),
+      // Stamped on the way out, so the blob this build writes is the blob this build
+      // trusts in full. Everything that reads prefs goes through validate(), which
+      // drops the field again on the way in.
+      JSON.stringify({ ...validate({ ...loadPrefs(), ...prefs }), version: PREFS_VERSION }),
     );
   } catch {
     // Private browsing, or a full quota. Losing the cache is not worth an error.

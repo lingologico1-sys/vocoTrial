@@ -402,6 +402,16 @@ export default function Compose({ onGenerated, busy, setBusy }: ComposeProps) {
                 <span className="text-xs text-slate-300">Smile before a laugh</span>
               </label>
             )}
+            {reactions.some((r) => r.laughing) && (
+              <label className="flex items-center gap-2" title="The mouth holds the laugh pose and the head bobs through it — which is what makes it read as laughing rather than as an open mouth">
+                <input
+                  type="checkbox"
+                  checked={reactions_.nod}
+                  onChange={(e) => setReactions((r) => ({ ...r, nod: e.target.checked }))}
+                />
+                <span className="text-xs text-slate-300">Head bobs through a laugh</span>
+              </label>
+            )}
           </div>
           {/* What each tag does is not a preference, so it is shown rather than offered. */}
           <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-slate-600">
@@ -410,18 +420,25 @@ export default function Compose({ onGenerated, busy, setBusy }: ComposeProps) {
                 {r.tag}
                 <span className="text-slate-700">
                   {' '}
-                  {r.perform === 'pulse' ? 'pulses' : r.perform === 'arc' ? 'opens and closes' : 'holds'}
+                  {r.perform === 'pulse'
+                    ? 'pulses'
+                    : r.perform === 'arc'
+                      ? 'opens and closes'
+                      : r.laughing
+                        ? 'holds, head bobs'
+                        : 'holds'}
                   {r.eyes === 'closed' ? ', eyes shut' : r.eyes === 'blink' ? ', blinks' : ''}
                 </span>
               </span>
             ))}
           </div>
           <p className="text-[11px] leading-snug text-slate-600">
-            What each reaction does is anatomy, not preference — a laugh pulses because
-            one held shape reads as a scream, a gasp keeps its eyes open because a gasp
-            widens them and no kit has wide-eye artwork. The switch is there because
-            whether that suits a particular drawing is a different question. A nod is
-            carried in the package but not yet wired to the head.
+            What each reaction does is anatomy, not preference — a gasp keeps its eyes
+            open because a gasp widens them and no kit has wide-eye artwork. The switches
+            are there because whether that suits a particular drawing is a different
+            question. A laugh holds its pose and takes its rhythm from the head: drawn
+            artwork swaps whole mouths rather than opening a jaw, so a pulsing laugh
+            flapped between two pictures.
           </p>
         </div>
       )}

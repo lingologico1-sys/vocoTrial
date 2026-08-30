@@ -3,6 +3,7 @@ import type { AudioTap } from '../realtime/audio';
 import type { FaceKit } from '../facekit/kit';
 import Face from './Face';
 import { MarkMouth, type VisemeMark } from './polly';
+import { laughBob } from './headMotion';
 import type {
   HeadMotion,
   MotionCadence,
@@ -58,7 +59,12 @@ interface SpeakingFaceProps {
    * A second channel rather than a field on each mark, because Viseme is a vocabulary
    * about lips and eyes are not lips. See ExpressionSpan in lipsync/published.ts.
    */
-  expressions?: ReadonlyArray<{ startMs: number; endMs: number; eyesClosed?: boolean }> | null;
+  expressions?: ReadonlyArray<{
+    startMs: number;
+    endMs: number;
+    eyesClosed?: boolean;
+    nod?: boolean;
+  }> | null;
   /** Which way of measuring the audio drives the mouth. Switchable mid-call. */
   driver: MouthDriver;
   /** How far ahead the scheduled driver runs, in milliseconds. Ignored by the other. */
@@ -154,6 +160,16 @@ export default function SpeakingFace({
 }: SpeakingFaceProps) {
   const [mouth, setMouth] = useState(RESTING);
   const [eyesShut, setEyesShut] = useState(false);
+  /**
+   * How far the head is dipped for a laugh, this frame.
+   *
+   * Kept beside `eyesShut` because it is the same kind of value — something an
+   * expression span says about a moment in the clip — and computed in the same
+   * place for the reason that matters: both have to be read off the instant the
+   * mouth was asked about, or the head bobs against a pose it is meant to be
+   * carrying. See the note where they are set.
+   */
+  const [laughNod, setLaughNod] = useState(0);
   const analyser = useRef<MouthAnalyser | null>(null);
   /**
    * Read by the scheduled source on every frame rather than captured when it is
@@ -251,6 +267,17 @@ export default function SpeakingFace({
         setEyesShut(
           expressions.some((e) => e.eyesClosed && at >= e.startMs && at < e.endMs),
         );
+        // The laugh's rhythm. The mouth holds one pose across a laugh — see the
+        // laugh entries in tags.ts, where the pulse used to live — so this is the
+        // whole of what makes it read as laughter rather than as a held grin.
+        // Phase comes from where in the span the clip is, so a scrub or a pause
+        // lands the head exactly where the audio says it should be.
+        const bobbing = expressions.find(
+          (e) => e.nod && at >= e.startMs && at < e.endMs,
+        );
+        setLaughNod(
+          bobbing ? laughBob(at - bobbing.startMs, bobbing.endMs - bobbing.startMs) : 0,
+        );
       }
       frame = requestAnimationFrame(step);
     };
@@ -273,6 +300,7 @@ export default function SpeakingFace({
       level={mouth.level}
       kit={kit}
       eyesShut={eyesShut}
+      laughNod={laughNod}
       motion={motion}
       cadence={cadence}
       browBlink={browBlink}

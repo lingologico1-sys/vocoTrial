@@ -100,14 +100,30 @@ export const TAGS: Tag[] = [
   // Reactions. Each carries how it is played and what the eyes do, both chosen from
   // what the body actually does rather than from what is convenient.
   //
-  // A laugh: rhythmic, eyes screwed up, and the only one a smile precedes.
+  // A laugh: eyes screwed up, the only one a smile precedes, and the only one whose
+  // rhythm is carried by the head instead of the mouth.
+  //
+  // HELD, AND IT USED TO PULSE. The pulse alternated `laugh` with a half-open `uh` at
+  // LAUGH_PULSE_MS, on the argument that a laugh is a jaw bouncing rather than one
+  // shape held — which is true of a face and false of a facekit. A kit does not open a
+  // jaw, it swaps one whole drawn mouth for another, and `laugh` and `uh` differ in
+  // width, in curve and in whether the lower teeth show. Alternating them eight times a
+  // second is not a jaw, it is two pictures flapping, and it got worse rather than
+  // better the harder the pulse was driven.
+  //
+  // The rhythm was right; the channel was wrong. It is on the head now — the pose is
+  // held and `laughBob` dips the head through the span. See LAUGH_NOD_GAIN in
+  // headMotion.ts, and `nod` below, which is what turns it on.
   { tag: '[laughs]', kind: 'reaction', group: 'Reactions', viseme: 'laugh',
-    perform: 'pulse', rebound: 'uh', eyes: 'closed', laughing: true },
+    perform: 'hold', eyes: 'closed', laughing: true },
   { tag: '[giggles]', kind: 'reaction', group: 'Reactions', viseme: 'laugh',
-    perform: 'pulse', rebound: 'uh', eyes: 'closed', laughing: true },
+    perform: 'hold', eyes: 'closed', laughing: true },
 
-  // Panting is the other rhythmic one, and quicker: breaths, not syllables. Held open
-  // it is the same frozen scream a held laugh was.
+  // Panting keeps the pulse, and is the only thing left that has one. It survives the
+  // argument above because it alternates between two poses that differ only in how far
+  // the mouth is open — `aa` and `uh` are the same mouth at two sizes, where `laugh` and
+  // `uh` are two different mouths — so the swap reads as breathing rather than as a
+  // switch of picture. Quicker than a laugh was, too: breaths, not syllables.
   { tag: '[panting]', kind: 'reaction', group: 'Reactions', viseme: 'aa',
     perform: 'pulse', rebound: 'uh', pulseMs: 85, eyes: 'none' },
 
@@ -198,15 +214,15 @@ export interface Span {
 }
 
 /**
- * How a laugh is performed, rather than held.
+ * Half a pulse, for a reaction that does not say otherwise.
  *
- * A laugh is not one shape for a second. It is a jaw pulsing at roughly the rate of
- * speech syllables, and holding a single open pose across the whole span looks less like
- * laughter than a scream that will not end. These are the two numbers that make the
- * difference, and neither is tuned to a particular clip.
+ * ~4.5Hz, which is where a laugh sits and a little under speech. It was measured for the
+ * laugh and outlived it: the laugh holds its pose now and bobs its head instead (see the
+ * tag entries above), so the only thing still pulsing is panting, which sets its own.
+ * Kept as the fallback because a rate near speech is the right default for any rhythmic
+ * reaction added later, and because it is where the laugh's own bob got its rate.
  */
-/** Half a pulse. ~4.5Hz, which is where a laugh sits and a little under speech. */
-const LAUGH_PULSE_MS = 110;
+const PULSE_MS = 110;
 /**
  * How long an arc spends arriving and leaving.
  *
@@ -277,7 +293,7 @@ export function reactionSpans(
           perform: tag.perform ?? 'hold',
           rebound: tag.rebound ?? 'uh',
           edge: tag.edge ?? 'rest',
-          pulseMs: tag.pulseMs ?? LAUGH_PULSE_MS,
+          pulseMs: tag.pulseMs ?? PULSE_MS,
           eyes: tag.eyes ?? 'none',
           laughing: tag.laughing === true,
         });
@@ -335,11 +351,11 @@ function leadIns(spans: readonly Span[], options: ReactionOptions): number[] {
 /**
  * The marks one span is performed with.
  *
- * A laugh pulses; everything else is a single held shape, because a sigh or a swallow
- * genuinely is one. The pulse alternates the laugh pose with a half-open rebound rather
- * than a closed one — a laugh does not shut the mouth between syllables, and MarkMouth's
- * easing means neither extreme is fully reached anyway, so the visible result is a jaw
- * moving rather than a shape flickering.
+ * Most reactions are a single held shape, because a sigh, a swallow — or a laugh, on
+ * drawn artwork — genuinely is one. The pulse is left for panting, which alternates its
+ * pose with a half-open rebound rather than a closed one: nothing here shuts the mouth
+ * between beats, and MarkMouth's easing means neither extreme is fully reached anyway,
+ * so the visible result is a jaw moving rather than a shape flickering.
  */
 function performSpan(span: Span, leadMs: number): VisemeMark[] {
   const marks: VisemeMark[] = [];
@@ -376,29 +392,45 @@ function performSpan(span: Span, leadMs: number): VisemeMark[] {
   return marks;
 }
 
-/** Where the eyes and head do something, given what the author asked for. */
+/**
+ * Where the eyes and head do something, given what the author asked for.
+ *
+ * TWO CHANNELS, ONE LIST, AND NEITHER GATES THE OTHER. It used to return nothing at all
+ * when `eyes` was off, which was harmless while the eyes were the only thing here and a
+ * silent bug the moment they were not: a laugh's bob is carried on the same span, so
+ * switching the eyes off switched the head off with them and a laugh went perfectly
+ * still. A span is emitted if either channel has something to say about it, and each
+ * flag is left undefined when its own switch is off.
+ */
 export function expressionSpans(
   spans: readonly Span[],
   options: ReactionOptions,
 ): ExpressionSpan[] {
-  if (!options.eyes) return [];
-
   return spans
-    .filter((s) => s.eyes !== 'none')
-    .map((s) => ({
-      startMs: s.startMs,
-      // A blink is the same flag over a short span. Clamped to the span so a blink on a
-      // reaction shorter than a blink does not outlast the thing that caused it.
-      endMs:
-        s.eyes === 'blink'
-          ? Math.min(s.endMs, s.startMs + BLINK_MS)
-          : s.endMs,
-      eyesClosed: true,
-      // Recorded rather than derived later, because by playback time the tag that
-      // caused the span is gone and only its timings remain.
-      laughing: s.laughing ? true : undefined,
-      nod: options.nod && s.laughing ? true : undefined,
-    }));
+    .map((s) => {
+      const shuts = options.eyes && s.eyes !== 'none';
+      return {
+        startMs: s.startMs,
+        // A blink is the same flag over a short span. Clamped to the span so a blink on
+        // a reaction shorter than a blink does not outlast the thing that caused it.
+        // Only the eyes ever shorten a span: nothing that blinks laughs, so there is no
+        // case where this would cut a bob short.
+        endMs:
+          shuts && s.eyes === 'blink'
+            ? Math.min(s.endMs, s.startMs + BLINK_MS)
+            : s.endMs,
+        eyesClosed: shuts ? true : undefined,
+        // Recorded rather than derived later, because by playback time the tag that
+        // caused the span is gone and only its timings remain.
+        laughing: s.laughing ? true : undefined,
+        // The laugh's rhythm, and no longer a decoration on top of a pulsing mouth:
+        // the mouth holds its pose now, so with this off a laugh is a still open
+        // mouth. Which is a legitimate thing to want on a portrait whose head reads
+        // badly in motion, and the reason it is still a switch rather than anatomy.
+        nod: options.nod && s.laughing ? true : undefined,
+      };
+    })
+    .filter((e) => e.eyesClosed || e.nod);
 }
 
 /**

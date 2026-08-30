@@ -19,7 +19,9 @@ import {
   DEFAULT_TILT_SETTLE,
   DEFAULT_TILT_TRIGGERS,
   HeadPerformer,
+  LAUGH_NOD_GAIN,
   MOTION,
+  NOD_DEPTH_MAX,
   OVERSCAN,
   PIVOT_X,
   PIVOT_Y,
@@ -165,6 +167,20 @@ interface FaceProps {
    * schedule: there is no cadence here to be caught keeping.
    */
   nodChance?: number;
+  /**
+   * How far the head is dipped for a laugh this frame, 0 to 1, and 0 otherwise.
+   *
+   * Driven from outside rather than by the performer, because it is the only head
+   * movement here that is not a response to a live loudness: a laugh's rhythm has
+   * to sit on the recorded clip's own clock or it drifts against the mouth pose it
+   * accompanies. See `laughBob` in headMotion.ts, and SpeakingFace, which reads it
+   * off the same instant it asks MarkMouth about.
+   *
+   * Scaled by `nodDepth` times LAUGH_NOD_GAIN, so the panel's one depth setting
+   * governs both gestures and a laugh stays the deeper of the two whatever it is
+   * set to. Capped at NOD_DEPTH_MAX, which is the dip the overscan is paid for.
+   */
+  laughNod?: number;
   /**
    * How far the brows travel at full lift, in head units. See DEFAULT_BROW_LIFT.
    *
@@ -471,6 +487,7 @@ export default function Face({
   listenNod = DEFAULT_LISTEN_NOD,
   nodDepth = DEFAULT_NOD_DEPTH,
   nodChance = DEFAULT_NOD_CHANCE,
+  laughNod = 0,
   browLift = DEFAULT_BROW_LIFT,
   browFlashChance = DEFAULT_BROW_FLASH_CHANCE,
   tilt = DEFAULT_TILT_TRIGGERS,
@@ -773,11 +790,22 @@ export default function Face({
     disjointness a second time, in the one place it would fail silently if it
     ever stopped holding.
 
+    `laughNod` is the third, and it is the one that genuinely can land on top of
+    another: a laugh is played back from a recording, so `head` is reading the
+    laugh's own loudness at the same moment. That is why it is summed rather than
+    switched — a laugh that cancelled the swing would go oddly still at its peak,
+    and the two together are a head bobbing while the shoulders are already moving,
+    which is what laughing looks like. Its own cap plus the nod's fits the margin,
+    since the nod is silent for the whole of any playback.
+
     The signs differ because the channels do. A positive `head` lifts, so it is
     negated into SVG's downward y; `nod` spent its sign at definition and is
     always a dip, so it is not. See the nod block in headMotion.ts.
   */
-  const lift = perf.nod * nodDepth - perf.head * travel.rise;
+  const lift =
+    perf.nod * nodDepth
+    + laughNod * Math.min(nodDepth * LAUGH_NOD_GAIN, NOD_DEPTH_MAX)
+    - perf.head * travel.rise;
   const move = `translate(0 ${lift}) rotate(${roll} ${PIVOT_X} ${PIVOT_Y})`;
   /**
    * The two channels `hold` takes over, resolved once for both faces below.

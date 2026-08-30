@@ -511,6 +511,65 @@ const NOD_MIN_SPEECH = 0.8;
 export const DEFAULT_NOD_CHANCE = 0.35;
 
 /**
+ * The laugh's bob — the nod's shape, borrowed by the only gesture that needs it
+ * more than the nod does.
+ *
+ * A laugh used to be performed by the mouth: the pose alternated with a half-open
+ * rebound at LAUGH_PULSE_MS, on the argument that a laugh is a jaw pulsing rather
+ * than one shape held. The argument is right about the body and wrong about the
+ * artwork. A drawn kit switches between two whole mouths — a laugh with its lower
+ * teeth bared and an `uh` without them — so the pulse does not read as a jaw
+ * bouncing, it reads as two pictures flapping, and the harder the pulse worked the
+ * more it flapped. What the eye actually reads laughter from, once the mouth is
+ * open and staying open, is the head.
+ *
+ * So the rhythm moved off the mouth and onto the neck, where a still image can
+ * carry it: the pose is held for the whole span and the head bobs through it.
+ *
+ * The numbers, and why they are not the listener's:
+ *
+ *   rate   quicker than a nod. LAUGH_PULSE_MS put a laugh at ~4.5Hz, which was
+ *          measured against real laughter rather than against the artwork that
+ *          could not draw it, so the rate survives its own mechanism. NOD_BOB is
+ *          a considered dip at a third of that.
+ *   depth  deeper. A listener's nod is deliberately shallow because it is a claim
+ *          about having understood something (see DEFAULT_NOD_DEPTH); a laugh
+ *          claims nothing and is not being polite. The gain multiplies whatever
+ *          depth the panel is set to, so the two stay in proportion, and it is
+ *          capped at NOD_DEPTH_MAX because that cap is what the overscan pays for.
+ *   edges  a laugh does not arrive at full throw or stop dead. The ramp is under
+ *          one bob at each end, so a short giggle still reaches most of its depth.
+ */
+const LAUGH_BOB = 0.22;
+export const LAUGH_NOD_GAIN = 2.2;
+const LAUGH_BOB_EDGE = 0.14;
+
+/**
+ * How far the head is dipped for a laugh this far into it, 0 to 1.
+ *
+ * A pure function of where the clip is rather than a channel with state, and
+ * that is the point: the mouth pose it accompanies is stamped at a measured time
+ * in the audio, so the head has to be readable from the same clock. A stateful
+ * channel would drift against it across a scrub, a pause, or a tab that went to
+ * the background — the three things playback does constantly.
+ *
+ * The same raised cosine NodChannel draws, for the same reason: it leaves rest
+ * and returns to it with zero slope and never crosses it, so the bobs are dips
+ * from neutral rather than a bounce either side of it.
+ */
+export function laughBob(intoMs: number, spanMs: number): number {
+  const into = intoMs / 1000;
+  const span = spanMs / 1000;
+  if (into < 0 || into >= span) return 0;
+  // All of it or none of it, as everywhere else here: a span with no room for
+  // both ramps gets the shape scaled to whatever room it has, so a very short
+  // giggle is shallower rather than clipped.
+  const edge = Math.min(LAUGH_BOB_EDGE, span / 2);
+  const ramp = Math.min(1, into / edge, (span - into) / edge);
+  return (ramp * (1 - Math.cos((2 * Math.PI * into) / LAUGH_BOB))) / 2;
+}
+
+/**
  * Where the picture turns.
  *
  * Low and centred — down at the base of the neck, which is where a real head is

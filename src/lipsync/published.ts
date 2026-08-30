@@ -82,13 +82,20 @@ export interface ExpressionSpan {
    */
   laughing?: boolean;
   /**
-   * A single deliberate nod through the span.
+   * The head bobbing through the span, which in practice means a laugh.
    *
-   * CARRIED BUT NOT YET HONOURED. The head is driven by headMotion, whose nod fires on
-   * turn edges from loudness and turn-taking; accepting a second master is a real change
-   * and its own comments discuss the difficulty of nodding at the right *place* in a
-   * sentence rather than at the right time. Kept in the format because the design is
-   * settled, and out of the UI because a control that does nothing is worse than none.
+   * HONOURED NOW, and what changed is that it stopped being an extra. It was carried
+   * unwired for as long as the mouth performed a laugh by pulsing between two poses;
+   * that pulse read as flapping artwork rather than as a jaw, so the laugh's rhythm
+   * moved onto the head and this is the channel it moved to. See the laugh entries in
+   * tags.ts and `laughBob` in live/headMotion.ts.
+   *
+   * The objection that kept it unwired is answered rather than ignored. It was that the
+   * head already has a master — headMotion's nod, which fires on turn edges from
+   * loudness — and that nodding at the right *place* in a sentence is hard. Neither
+   * applies here: this span is not in a sentence, it is a measured window of audio that
+   * is not speech, and headMotion's own nod fires only while the microphone hears a
+   * voice, so it is silent for the whole of any playback. The two never contend.
    */
   nod?: boolean;
 }
@@ -118,14 +125,21 @@ export interface ReactionOptions {
    * something already over reads as a twitch. See SMILE_LEAD_MIN_MS in tags.ts.
    */
   smileLeadIn: boolean;
-  /** Not honoured yet — see ExpressionSpan.nod. */
+  /**
+   * Whether a laugh bobs the head.
+   *
+   * On by default, and the least optional of the three: the mouth holds one pose across
+   * a laugh, so this is what distinguishes laughing from an open mouth that has stopped.
+   * Off is still worth being able to ask for — a portrait can read badly in motion, and
+   * that is a judgement about a drawing, which is what all three of these are for.
+   */
   nod: boolean;
 }
 
 export const DEFAULT_REACTIONS: ReactionOptions = {
   eyes: true,
   smileLeadIn: true,
-  nod: false,
+  nod: true,
 };
 
 export type LipsyncModel = 'eleven_v3' | 'eleven_multilingual_v2';
