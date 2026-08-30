@@ -202,6 +202,35 @@ export function report(pkg: LipsyncPackage): string {
     L.push('');
   }
 
+  // The audio's own account of itself, first among the sections that can show a fault,
+  // because it is the only one that can show the audio being shorter than the marks —
+  // which is what a splice that threw bytes away looks like from the outside.
+  const audio = pkg.audio;
+  if (audio) {
+    L.push('AUDIO AS BUILT');
+    L.push(`  format     ${audio.format}`);
+    L.push(
+      `  speech     ${audio.speech.frames} frames  ${secs(audio.speech.durationMs)}  ` +
+        `${audio.speech.bytes} bytes`,
+    );
+    L.push(
+      `  final      ${audio.final.frames} frames  ${secs(audio.final.durationMs)}  ` +
+        `${audio.final.bytes} bytes`,
+    );
+    L.push(
+      `  drift      ${audio.driftMs}ms  (package duration minus real audio)` +
+        (Math.abs(audio.driftMs) > 250 ? '   <-- SOMETHING LOST AUDIO' : ''),
+    );
+    for (const clip of audio.clips) {
+      L.push(
+        `  clip       ${clip.used ? 'used   ' : 'SKIPPED'} ${secs(clip.durationMs).padStart(7)}  ` +
+          `${String(clip.frames).padStart(4)} frames  ${clip.format}  "${clip.label}"` +
+          (clip.skipped ? `  — ${clip.skipped}` : ''),
+      );
+    }
+    L.push('');
+  }
+
   if (spliced.length > 0) {
     L.push(`LAUGHS SPLICED FROM THE LIBRARY (${spliced.length})`);
     for (const laugh of spliced) {

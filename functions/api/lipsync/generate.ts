@@ -5,6 +5,7 @@ import {
   DEFAULT_PARAMS,
   type ReactionOptions,
   type LipsyncModel,
+  type AudioReport,
   type LipsyncPackage,
   type VoiceParams,
   nameFrom,
@@ -30,7 +31,7 @@ import {
   type LaughKind,
   type SplicedLaugh,
 } from '../../../src/lipsync/laughs';
-import { concat, sameFormat, scanMp3, splitAt } from './_mp3';
+import { concat, framesOf, sameFormat, scanMp3, splitAt, type Mp3Format } from './_mp3';
 import { SPLICE_FORMAT } from './laughs/_convert';
 import {
   POLLY_VISEMES,
@@ -111,6 +112,11 @@ interface ElevenAlignment {
   character_end_times_seconds: number[];
 }
 
+/** A format as a person would read it out, for the diagnostics panel. */
+const describe = (f: Mp3Format) =>
+  `${(f.sampleRate / 1000).toFixed(1)}kHz ${f.bitrateKbps}kbps ` +
+  `${f.channelMode === 3 ? 'mono' : 'stereo'} mpeg${f.version === 3 ? '1' : '2'}`;
+
 /** Bytes as base64, the way get.ts does it. */
 function toBase64(bytes: Uint8Array): string {
   let binary = '';
@@ -150,9 +156,15 @@ async function spliceLaughs(
   spliced: Uint8Array;
   placed: SplicedLaugh[];
   insertions: Array<{ atMs: number; durationMs: number }>;
+  clips: AudioReport['clips'];
 }> {
   const placed: SplicedLaugh[] = [];
   const insertions: Array<{ atMs: number; durationMs: number }> = [];
+  // Every clip considered, used or not. A clip that was skipped is the single most useful
+  // thing to know when a laugh does not appear, and it used to be the one thing nothing
+  // recorded — the skip is deliberately silent so a generation is not lost, which also
+  // made it invisible.
+  const clips: AudioReport['clips'] = [];
   let spliced = audio;
   // How much longer the buffer is than the timeline `wanted` was measured against.
   let grown = 0;
@@ -161,13 +173,49 @@ async function spliceLaughs(
     const scan = scanMp3(spliced);
     if (!scan) break;
 
+    const note = (used: boolean, skipped?: string, sc?: ReturnType<typeof scanMp3>,
+                  inserted = 0) =>
+      clips.push({
+        clipId: clip.id,
+        label: clip.label,
+        frames: sc?.frames.length ?? 0,
+        durationMs: sc?.durationMs ?? 0,
+        bytes: inserted,
+        format: sc ? describe(sc.format) : '—',
+        used,
+        skipped,
+      });
+
     const bytes = await load(clip.id);
-    if (!bytes) continue;
+    if (!bytes) {
+      note(false, 'the stored audio is missing');
+      continue;
+    }
     const clipScan = scanMp3(bytes);
-    if (!clipScan || !sameFormat(scan.format, clipScan.format)) continue;
+    if (!clipScan) {
+      note(false, 'not an mp3 this can read');
+      continue;
+    }
+    if (!sameFormat(scan.format, clipScan.format)) {
+      note(false, `format differs from the speech (${describe(clipScan.format)})`, clipScan);
+      continue;
+    }
+
+    // THE CLIP'S AUDIO FRAMES, NOT THE CLIP'S BYTES, and the difference was a bug that
+    // truncated every line it touched. A file off a provider carries more than audio: an
+    // ID3 tag at the front, a Xing header in the first frame, sometimes an ID3v1 trailer.
+    // At the head of a file a decoder skips all of it; dropped into the middle of one it is
+    // garbage sitting immediately after the laugh, and both this scanner and a browser's
+    // decoder stop there. The laugh played and the rest of the sentence did not.
+    //
+    // `framesOf` returns exactly the frames the scan accepted, which is also exactly what
+    // `clipScan.durationMs` measured — so the audio inserted and the length everything is
+    // shifted by are now the same thing, which they were not before either.
+    const audioOnly = framesOf(bytes, clipScan, 0, clipScan.frames.length);
 
     const { head, tail, atMs: cutAt } = splitAt(spliced, scan, atMs + grown);
-    spliced = concat([head, bytes, tail]);
+    spliced = concat([head, audioOnly, tail]);
+    note(true, undefined, clipScan, audioOnly.length);
 
     placed.push({
       clipId: clip.id,
@@ -181,7 +229,7 @@ async function spliceLaughs(
     grown += clipScan.durationMs;
   }
 
-  return { spliced, placed, insertions };
+  return { spliced, placed, insertions, clips };
 }
 
 export async function onRequestPost(
@@ -376,10 +424,33 @@ export async function onRequestPost(
     .filter((w): w is { clip: LaughRender; atMs: number } => w.clip !== null)
     .sort((a, b) => a.atMs - b.atMs);
 
-  const { spliced, placed, insertions } = await spliceLaughs(audio, wanted, async (id) => {
+  const speechScan = scanMp3(audio);
+  const { spliced, placed, insertions, clips: clipReport } = await spliceLaughs(audio, wanted, async (id) => {
     const object = env.LIPSYNC ? await env.LIPSYNC.get(laughRenderKey(id)) : null;
     return object ? new Uint8Array(await object.arrayBuffer()) : null;
   });
+
+  // The finished bytes, rescanned rather than assumed. This is the check that was missing
+  // when a truncating splice went unnoticed: the package's own duration against what the
+  // audio really contains. Cheap — one pass over a few thousand frame headers.
+  const finalScan = scanMp3(spliced);
+  const audioReport: AudioReport | undefined = speechScan
+    ? {
+        format: describe(speechScan.format),
+        speech: {
+          frames: speechScan.frames.length,
+          durationMs: speechScan.durationMs,
+          bytes: audio.length,
+        },
+        clips: clipReport,
+        final: {
+          frames: finalScan?.frames.length ?? 0,
+          durationMs: finalScan?.durationMs ?? 0,
+          bytes: spliced.length,
+        },
+        driftMs: 0,
+      }
+    : undefined;
 
   // --- 5. Move everything the splice pushed along -----------------------------------
   const shift = shiftPast(insertions);
@@ -422,6 +493,7 @@ export async function onRequestPost(
     oovWords: result.oovWords ?? [],
     reactionCount: all.length,
     laughs: placed,
+    audio: audioReport,
     marks: overlayReactions(
       marks.map((m) => ({ ...m, timeMs: shift(m.timeMs) })),
       all,
@@ -431,6 +503,10 @@ export async function onRequestPost(
     expressions: expressionSpans(all, reactions),
     words,
   };
+
+  // Filled once the package's own duration exists, so the two numbers being compared are
+  // literally the ones a reader sees rather than a recomputation of one of them.
+  if (audioReport) audioReport.driftMs = pkg.durationMs - audioReport.final.durationMs;
 
   return json({
     package: pkg,

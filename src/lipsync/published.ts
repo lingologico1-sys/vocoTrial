@@ -37,6 +37,47 @@ export const packageKey = (id: string) => `packages/${id}.json`;
  */
 export const alignmentKey = (id: string) => `alignment/${id}.json`;
 
+/**
+ * What the audio actually turned out to be, as opposed to what it was meant to be.
+ *
+ * ADDED AFTER A BUG THAT NOTHING COULD SEE. A splice rebuilt the file out of a truncated
+ * scan and silently discarded the rest of the sentence: the package still described a full
+ * line, the marks still ran to the end, and the only symptom was a clip that stopped. Every
+ * number needed to spot it existed for a moment inside one function and was thrown away.
+ *
+ * `driftMs` is the one that matters — the package's own duration against what the finished
+ * bytes actually contain. Nothing else here is a judgement: they are counts, and counts
+ * that disagree are the whole point.
+ */
+export interface AudioReport {
+  /** Version, rate, bitrate and channels of the synthesised speech, as scanned. */
+  format: string;
+  /** The speech before anything was spliced into it. */
+  speech: { frames: number; durationMs: number; bytes: number };
+  /** Every clip considered, including the ones that were not used and why. */
+  clips: Array<{
+    clipId: string;
+    label: string;
+    frames: number;
+    durationMs: number;
+    /** Bytes of audio frames actually inserted — not the stored file's size. */
+    bytes: number;
+    format: string;
+    used: boolean;
+    skipped?: string;
+  }>;
+  /** The finished audio, rescanned rather than assumed. */
+  final: { frames: number; durationMs: number; bytes: number };
+  /**
+   * `durationMs` on this package minus what the audio really contains.
+   *
+   * Positive means the marks outlast the sound, which is what a truncation looks like.
+   * A few tens of milliseconds is the aligner and the frame grid disagreeing and is
+   * normal; hundreds means something threw audio away.
+   */
+  driftMs: number;
+}
+
 /** A word the aligner could not look up, and where it sits. */
 export interface OovWord {
   word: string;
@@ -249,6 +290,13 @@ export interface LipsyncPackage {
    * because the library had nothing for this voice or because the package predates it.
    */
   laughs?: SplicedLaugh[];
+  /**
+   * What the finished audio actually is. See AudioReport.
+   *
+   * Optional because packages made before it existed do not carry one, and because a
+   * deployment with no bucket never scans anything.
+   */
+  audio?: AudioReport;
   /** How the reactions in this line were performed. */
   reactions: ReactionOptions;
   /** What the eyes and head do, and when. Empty unless something asked. */

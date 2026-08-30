@@ -97,6 +97,55 @@ export default function Diagnostics({ pkg }: { pkg: LipsyncPackage }) {
       </button>
 
       <div className="mt-4 flex flex-col gap-4 text-xs">
+        {/* First, because it is the only row that can say the audio is shorter than the
+            marks — which is what a splice that threw bytes away looks like from outside,
+            and which nothing on this page could see until it had happened once. */}
+        {pkg.audio && (
+          <div className="flex flex-col gap-1.5">
+            <div
+              className={`flex items-center gap-2 font-medium ${
+                Math.abs(pkg.audio.driftMs) > 250 ? 'text-rose-300' : 'text-slate-300'
+              }`}
+            >
+              {Math.abs(pkg.audio.driftMs) > 250 && <AlertTriangle size={14} />}
+              Audio as built
+            </div>
+            <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-0.5 font-mono text-[11px] text-slate-500">
+              <span>format</span>
+              <span className="text-slate-400">{pkg.audio.format}</span>
+              <span>speech</span>
+              <span className="text-slate-400">
+                {pkg.audio.speech.frames} frames · {secs(pkg.audio.speech.durationMs)} ·{' '}
+                {pkg.audio.speech.bytes.toLocaleString()} bytes
+              </span>
+              <span>final</span>
+              <span className="text-slate-400">
+                {pkg.audio.final.frames} frames · {secs(pkg.audio.final.durationMs)} ·{' '}
+                {pkg.audio.final.bytes.toLocaleString()} bytes
+              </span>
+              <span>drift</span>
+              <span
+                className={
+                  Math.abs(pkg.audio.driftMs) > 250 ? 'text-rose-300' : 'text-slate-400'
+                }
+              >
+                {pkg.audio.driftMs}ms
+                {Math.abs(pkg.audio.driftMs) > 250 && ' — audio is missing, the marks outlast it'}
+              </span>
+            </div>
+            {pkg.audio.clips.map((clip) => (
+              <div
+                key={clip.clipId}
+                className={`font-mono text-[11px] ${clip.used ? 'text-slate-500' : 'text-amber-400/80'}`}
+              >
+                {clip.used ? 'used' : 'SKIPPED'} · {secs(clip.durationMs)} · {clip.frames}{' '}
+                frames · {clip.format} · &ldquo;{clip.label}&rdquo;
+                {clip.skipped ? ` — ${clip.skipped}` : ''}
+              </div>
+            ))}
+          </div>
+        )}
+
         {pkg.oovWords.length > 0 && (
           <div className="flex flex-col gap-2">
             <div className="flex items-center gap-2 font-medium text-amber-300">

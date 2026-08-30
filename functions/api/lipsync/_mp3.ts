@@ -115,13 +115,30 @@ function readHeader(bytes: Uint8Array, at: number): Header | null {
   return { format: { version, layer, sampleRate, bitrateKbps, channelMode }, length, samplesPerFrame };
 }
 
-/** Whether two streams can be joined. Every field, because every field must match. */
+/**
+ * Whether two frames belong to the same joinable stream.
+ *
+ * BITRATE IS DELIBERATELY NOT COMPARED, and it used to be, and that was a bug bad enough
+ * to be worth the paragraph. Every frame carries its own bitrate in its own header and a
+ * decoder reads it per frame — that is what variable bitrate *is*, and a bitrate change at
+ * a frame boundary is legal, ordinary, and handled by everything that plays MP3s. Even a
+ * nominally constant-bitrate encoder can emit an odd frame.
+ *
+ * Requiring it to match meant `scanMp3` stopped at the first frame whose bitrate differed
+ * from the first frame's, and reported the truncated prefix as the whole stream. The
+ * splice then rebuilt the file out of that prefix and silently discarded everything after
+ * it: a laugh spliced near the change point played, and the rest of the sentence did not
+ * exist any more. One odd frame fifty frames in cost three quarters of the audio.
+ *
+ * What actually has to match for two frames to sit in one stream is what a decoder cannot
+ * change halfway through without an audible break: MPEG version and layer (which set the
+ * frame's sample count), the sample rate, and the channel mode.
+ */
 export function sameFormat(a: Mp3Format, b: Mp3Format): boolean {
   return (
     a.version === b.version &&
     a.layer === b.layer &&
     a.sampleRate === b.sampleRate &&
-    a.bitrateKbps === b.bitrateKbps &&
     a.channelMode === b.channelMode
   );
 }
@@ -167,23 +184,45 @@ function audioEnd(bytes: Uint8Array): number {
  * anything is spliced. Dropped from clips for the first reason and from joins for the
  * second.
  *
- * The tag sits after the side information, whose length depends on version and channel
- * mode; rather than encode that table, this looks across the whole frame, which cannot
- * false-positive on compressed audio at a fixed offset from the header.
+ * LOOKED FOR AT ITS OWN OFFSET, not searched for across the frame. The first version swept
+ * the whole frame body on the argument that four ASCII bytes cannot appear in compressed
+ * audio by chance — which is true per position and false across a few hundred positions per
+ * frame times a few thousand frames. That mattered once descriptor frames were dropped
+ * wherever they appear rather than only at the head: a false positive there deletes 26ms of
+ * real audio and shifts everything after it against its marks.
+ *
+ * The tag's position is fixed by the side information length, which is decided by version
+ * and channel mode, plus the two CRC bytes when the protection bit says they are there.
+ * VBRI is the exception and sits at a fixed 32 bytes past the header regardless.
  */
 function isDescriptorFrame(bytes: Uint8Array, at: number, length: number): boolean {
-  const stop = Math.min(at + length, bytes.length) - 4;
-  for (let i = at + 4; i <= stop; i++) {
-    const a = bytes[i];
-    const b = bytes[i + 1];
-    const c = bytes[i + 2];
-    const d = bytes[i + 3];
-    // "Xing", "Info", "VBRI"
-    if (a === 0x58 && b === 0x69 && c === 0x6e && d === 0x67) return true;
-    if (a === 0x49 && b === 0x6e && c === 0x66 && d === 0x6f) return true;
-    if (a === 0x56 && b === 0x42 && c === 0x52 && d === 0x49) return true;
+  const version = (bytes[at + 1] >> 3) & 0x03;
+  const channelMode = (bytes[at + 3] >> 6) & 0x03;
+  const mono = channelMode === 3;
+  const sideInfo = version === 3 ? (mono ? 17 : 32) : mono ? 9 : 17;
+  // Protection bit low means a 16-bit CRC follows the four header bytes.
+  const crc = (bytes[at + 1] & 0x01) === 0 ? 2 : 0;
+
+  const tagAt = (offset: number, a: number, b: number, c: number, d: number) => {
+    const i = at + offset;
+    if (i + 4 > Math.min(at + length, bytes.length)) return false;
+    return bytes[i] === a && bytes[i + 1] === b && bytes[i + 2] === c && bytes[i + 3] === d;
+  };
+
+  // The computed offset first, then the other three the side-info table can produce, with
+  // and without the CRC. Six positions rather than one costs nothing and cannot plausibly
+  // false-positive — the sweep this replaced looked at four hundred — while a side-info
+  // table that is subtly wrong for one combination would otherwise silently leave a Xing
+  // frame in the stream, which is the failure being fixed here in the first place.
+  const offsets = new Set([4 + crc + sideInfo, 4 + sideInfo, 21, 23, 36, 38, 13, 15]);
+
+  for (const offset of offsets) {
+    // "Xing", "Info"
+    if (tagAt(offset, 0x58, 0x69, 0x6e, 0x67)) return true;
+    if (tagAt(offset, 0x49, 0x6e, 0x66, 0x6f)) return true;
   }
-  return false;
+  // "VBRI", Fraunhofer's equivalent, always 32 bytes past the header.
+  return tagAt(36, 0x56, 0x42, 0x52, 0x49);
 }
 
 /**
@@ -194,11 +233,20 @@ function isDescriptorFrame(bytes: Uint8Array, at: number, length: number): boole
  * two consecutive, agreeing, correctly spaced headers effectively cannot, and the cost is
  * being unable to scan a single-frame file, which is not audio anybody would splice.
  *
- * A frame whose successor does not line up ends the scan rather than triggering a
- * resynchronisation hunt. Everything reaching this came from one encoder in one pass, so
- * a broken chain means the assumption is wrong somewhere and stopping reports that; a
- * hunt would paper over it and hand back a stream with a hole in the middle.
+ * A BROKEN CHAIN IS RESYNCHRONISED, not treated as the end. This used to stop, on the
+ * argument that everything reaching it came from one encoder in one pass so a break meant
+ * a wrong assumption worth reporting. That argument was wrong twice over. Real files carry
+ * things that are not frames — an ID3 tag written between takes, a stray byte — and, worse,
+ * stopping is not a report: nothing upstream distinguished a short scan from a short file,
+ * so a stream that broke halfway was silently rebuilt as its first half and the rest was
+ * thrown away. A hunt forward finds the next real frame and keeps the audio; a hunt that
+ * fails still ends the scan, so nothing is papered over that was not already lost.
+ *
+ * The hunt is bounded so a file that stops being audio does not cost a linear scan of
+ * however many megabytes follow.
  */
+const RESYNC_LIMIT = 1 << 16;
+
 export function scanMp3(bytes: Uint8Array): Mp3Scan | null {
   const from = audioStart(bytes);
   const limit = audioEnd(bytes);
@@ -221,11 +269,34 @@ export function scanMp3(bytes: Uint8Array): Mp3Scan | null {
 
   while (at + 4 <= limit) {
     const frame = readHeader(bytes, at);
-    if (!frame || !sameFormat(frame.format, format)) break;
-    if (at + frame.length > limit) break;
-    if (!(frames.length === 0 && isDescriptorFrame(bytes, at, frame.length))) {
-      frames.push(at);
+
+    if (!frame || !sameFormat(frame.format, format) || at + frame.length > limit) {
+      // Two agreeing headers before believing it again, the same evidence the first sync
+      // demanded — one header can appear by chance inside whatever the junk is.
+      let found = -1;
+      const stop = Math.min(limit, at + RESYNC_LIMIT);
+      for (let seek = at + 1; seek + 4 <= stop; seek++) {
+        const candidate = readHeader(bytes, seek);
+        if (
+          candidate &&
+          sameFormat(candidate.format, format) &&
+          seek + candidate.length <= limit &&
+          continues(bytes, seek + candidate.length, format)
+        ) {
+          found = seek;
+          break;
+        }
+      }
+      if (found < 0) break;
+      at = found;
+      continue;
     }
+
+    // Descriptor frames are dropped wherever they appear, not only at the head. A stream
+    // being scanned here may already be a join of two others, and the second one's Xing
+    // header would sit in the middle carrying a frame count that is no longer true of
+    // anything.
+    if (!isDescriptorFrame(bytes, at, frame.length)) frames.push(at);
     at += frame.length;
   }
 
