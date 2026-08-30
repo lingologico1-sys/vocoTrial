@@ -15,7 +15,10 @@ import { isMergedWord } from './warnings';
  * the metadata, the script as the aligner received it, every word it could not look up,
  * every quiet stretch with its cause, and what the mouth wore for each word. Deliberately
  * not the raw mark array: several hundred entries that say the same thing as the per-word
- * summary, at ten times the length.
+ * summary, at ten times the length. The per-word summary now carries each mark's
+ * provenance, which is the one thing the array had that the summary did not — grouped by
+ * word and stripped of timestamps, so it stays a line per word rather than a line per
+ * mark. See phonesDuring for the question that needed it.
  */
 
 /** Shorter than this is easing, not stillness. SHAPE_TAU is 35ms; this is four of them. */
@@ -78,6 +81,34 @@ export function quietStretches(pkg: LipsyncPackage): Quiet[] {
     });
   }
   return out;
+}
+
+/** Stands in for a mark with no phone behind it: a laugh or its lead-in smile. */
+const TAG_MARK = '·';
+
+/**
+ * Every mark's provenance across one word, in order and WITHOUT collapsing repeats.
+ *
+ * The uncollapsing is the entire point, and it is why this cannot just be posesDuring
+ * with a different field. That function answers "what did the mouth look like", so
+ * folding a run of identical poses into one is a kindness — nothing happened, and
+ * printing it six times says nothing six times. This answers "how much did the aligner
+ * actually give us", and there a run of six is the answer.
+ *
+ * The distinction has already earned itself once. "distance" reported a single `ee`
+ * across 550ms, which has two possible causes that the pose column cannot tell apart:
+ * every phone in the word is alveolar and maps to `ee` — the word really is articulated
+ * behind the teeth and the lips really do hold still — or marks went missing. One line
+ * of provenance separates them: six identifiers is the first, one is the second.
+ *
+ * No carry-in, unlike posesDuring. The mark in force when a word began is what the mouth
+ * was wearing, so that function is right to keep it; but it was produced by the word
+ * before, and counting it here would credit this word with a phone it never had.
+ */
+export function phonesDuring(pkg: LipsyncPackage, startMs: number, endMs: number): string[] {
+  return pkg.marks
+    .filter((m) => m.timeMs >= startMs && m.timeMs < endMs)
+    .map((m) => m.polly ?? TAG_MARK);
 }
 
 /** What the mouth wore across one word, in order, without repeats. */
@@ -177,12 +208,17 @@ export function report(pkg: LipsyncPackage): string {
   );
   L.push('');
 
-  L.push('WORD BY WORD — what the mouth wore');
+  L.push('WORD BY WORD — what the mouth wore, and what it was made from');
+  L.push(`  poses are collapsed; phones are not, so a run of one pose over many phones`);
+  L.push(`  is a word the lips hold still through and a lone phone is a thin alignment.`);
+  L.push(`  “${TAG_MARK}” is a mark from a tag rather than a sound.`);
   for (const w of pkg.words) {
     const poses = posesDuring(pkg, w.startMs, w.endMs).join(' ');
+    const phones = phonesDuring(pkg, w.startMs, w.endMs).join(' ');
     const flag = oov.some((o) => o.startMs === w.startMs) ? '  <-- UNKNOWN' : '';
     L.push(
-      `  ${w.word.padEnd(16)} ${secs(w.startMs).padStart(7)}–${secs(w.endMs).padEnd(7)} ${poses}${flag}`,
+      `  ${w.word.padEnd(16)} ${secs(w.startMs).padStart(7)}–${secs(w.endMs).padEnd(7)} ` +
+        `${poses.padEnd(30)} ${phones}${flag}`,
     );
   }
 
