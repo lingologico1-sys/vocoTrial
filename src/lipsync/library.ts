@@ -1,5 +1,10 @@
 import type { Quota } from './cost';
-import type { LaughClip, LaughKind } from './laughs';
+import type {
+  LaughKind,
+  LaughLibraryIndex,
+  LaughRender,
+  LaughSource,
+} from './laughs';
 import type {
   ReactionOptions,
   LipsyncModel,
@@ -72,17 +77,6 @@ export interface GenerateRequest {
   model: LipsyncModel;
   params: VoiceParams;
   reactions: ReactionOptions;
-  /**
-   * Leave the laugh tags in the prompt and let ElevenLabs try, rather than splicing.
-   *
-   * This is how the library gets its first clip, and it is not an alternative mode. Once
-   * a voice has laughs kept for it, `[laughs]` never reaches the model again — so without
-   * a way to ask for one deliberately, the library could never grow past whatever
-   * happened to be in it, and a voice with a single mediocre giggle would be stuck with
-   * it forever. Off by default: the unreliability is the thing being fixed, and this is
-   * the switch that goes looking for it on purpose.
-   */
-  harvest?: boolean;
 }
 
 /**
@@ -135,44 +129,75 @@ export function deleteLine(id: string): Promise<unknown> {
 /**
  * The laugh library.
  *
- * Four calls rather than one because they are asked at four different moments: the
- * listing on mount, a cut when something worth keeping has just been heard, the audio
- * only when a clip is auditioned, and a delete rarely. See src/lipsync/laughs.ts for
- * what a clip is and functions/api/lipsync/laughs for what each route does.
+ * Split in two the way the store is: a laugh you provided is a `LaughSource` and belongs to
+ * no voice, while a `LaughRender` is that laugh converted into one particular voice and is
+ * the thing the splice actually uses. Importing does both at once; `renderClip` is how an
+ * existing laugh reaches a second voice. See src/lipsync/laughs.ts.
  */
-export async function listClips(): Promise<LaughClip[]> {
-  const { clips } = await post<{ clips: LaughClip[] }>('laughs/list');
-  return clips;
+export function listClips(): Promise<LaughLibraryIndex> {
+  return post<LaughLibraryIndex>('laughs/list');
 }
 
-export interface CutRequest {
-  /** A SAVED line. A clip is cut from R2, so an unsaved take has nothing to cut from. */
-  sourceId: string;
+export interface ImportRequest {
+  /** The trimmed selection as 16-bit mono PCM WAV, base64. See audioTrim.ts. */
+  audioBase64: string;
   kind: LaughKind;
-  startMs: number;
-  endMs: number;
   label?: string;
+  /** The voice to render into first — whichever the page has loaded. */
+  voiceId: string;
+  voiceName?: string;
+  durationMs: number;
+  removeBackgroundNoise?: boolean;
 }
 
 /**
- * Keeps part of a saved line as a laugh.
+ * Keeps a laugh you provided, and renders it into one voice.
  *
- * The times that come back are the times the cut actually landed on, which are up to
- * half a frame from the ones asked for — the caller should show those rather than its
- * own, so that what the panel says matches what the clip contains.
+ * Slow: it is a round trip to ElevenLabs' voice changer, on audio that has to go up first.
+ * The converted audio comes straight back so it can be auditioned without a second call —
+ * whether the conversion did something strange to the laugh is the only question that
+ * matters at this moment, and it should be answerable the instant the button stops.
  */
-export function cutClip(
-  request: CutRequest,
-): Promise<{ clip: LaughClip; audioBase64: string; cutFromMs: number; cutToMs: number }> {
-  return post('laughs/cut', request);
+export function importClip(
+  request: ImportRequest,
+): Promise<{ source: LaughSource; render: LaughRender; audioBase64: string }> {
+  return post('laughs/import', request);
 }
 
-export function fetchClip(id: string): Promise<{ audioBase64: string }> {
-  return post<{ audioBase64: string }>('laughs/get', { id });
+/** The same laugh, performed by another voice. One call, one charge. */
+export function renderClip(request: {
+  sourceId: string;
+  voiceId: string;
+  voiceName?: string;
+  removeBackgroundNoise?: boolean;
+}): Promise<{ render: LaughRender; audioBase64: string }> {
+  return post('laughs/render', request);
 }
 
-export function deleteClip(id: string): Promise<unknown> {
-  return post('laughs/delete', { id });
+/**
+ * A clip's audio, for auditioning.
+ *
+ * `of` decides which half: the render is what gets spliced, the source is what it was made
+ * from. Hearing the two back to back is how you judge the conversion rather than the laugh.
+ */
+export function fetchClip(
+  id: string,
+  of: 'render' | 'source' = 'render',
+): Promise<{ audioBase64: string; contentType: string }> {
+  return post('laughs/get', { id, of });
+}
+
+/**
+ * Drops one render, or a laugh and every render made from it.
+ *
+ * Two scopes because there are two regrets: this laugh does not suit this voice, versus
+ * this is not a good laugh. See functions/api/lipsync/laughs/delete.ts.
+ */
+export function deleteClip(
+  id: string,
+  of: 'render' | 'source' = 'render',
+): Promise<{ removedRenders: number }> {
+  return post('laughs/delete', { id, of });
 }
 
 /**

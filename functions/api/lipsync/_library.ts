@@ -1,5 +1,8 @@
 import { INDEX_KEY, type PublishedLine } from '../../../src/lipsync/published';
-import { LAUGHS_INDEX_KEY, type LaughClip } from '../../../src/lipsync/laughs';
+import {
+  LAUGHS_INDEX_KEY,
+  type LaughLibraryIndex,
+} from '../../../src/lipsync/laughs';
 
 /**
  * The R2 side of the saved-line library, and the keys the generator needs.
@@ -61,23 +64,51 @@ export function writeIndex(bucket: R2Bucket, lines: PublishedLine[]): Promise<un
  * request and the line index on none of them: merging them would mean fetching every
  * saved line's summary to find out which laughs exist, on the hot path, forever.
  *
- * The same one-writer caveat applies and matters less here — clips are cut occasionally
- * and by one person, where lines are saved in bursts while tuning a voice.
+ * The same one-writer caveat applies and matters less here — laughs are imported
+ * occasionally and by one person, where lines are saved in bursts while tuning a voice.
+ *
+ * BOTH HALVES IN ONE OBJECT, because they are always wanted together: the panel draws
+ * sources annotated by which voices they have been rendered into, and no caller has ever
+ * wanted one list without the other. Two objects would be two round trips and a window in
+ * which they disagree.
+ *
+ * `clips` is read as `renders` when it is all that is there. The first version of this
+ * feature stored a flat `{ clips: [...] }` of harvested takes; those are renders that
+ * happen to have no recording behind them, so reading them under the new name is the whole
+ * of the migration. Nothing rewrites them — an untouched library keeps working, and the
+ * next import writes the new shape around it.
  */
-export async function readClips(bucket: R2Bucket): Promise<LaughClip[]> {
+export async function readClips(bucket: R2Bucket): Promise<LaughLibraryIndex> {
   const object = await bucket.get(LAUGHS_INDEX_KEY);
-  if (!object) return [];
+  if (!object) return { sources: [], renders: [] };
 
   try {
-    const parsed = (await object.json()) as { clips?: unknown };
-    return Array.isArray(parsed.clips) ? (parsed.clips as LaughClip[]) : [];
+    const parsed = (await object.json()) as {
+      sources?: unknown;
+      renders?: unknown;
+      clips?: unknown;
+    };
+    const renders = Array.isArray(parsed.renders)
+      ? parsed.renders
+      : Array.isArray(parsed.clips)
+        ? parsed.clips
+        : [];
+    return {
+      sources: Array.isArray(parsed.sources)
+        ? (parsed.sources as LaughLibraryIndex['sources'])
+        : [],
+      renders: renders as LaughLibraryIndex['renders'],
+    };
   } catch {
-    return [];
+    return { sources: [], renders: [] };
   }
 }
 
-export function writeClips(bucket: R2Bucket, clips: LaughClip[]): Promise<unknown> {
-  return bucket.put(LAUGHS_INDEX_KEY, JSON.stringify({ clips }), {
+export function writeClips(
+  bucket: R2Bucket,
+  library: LaughLibraryIndex,
+): Promise<unknown> {
+  return bucket.put(LAUGHS_INDEX_KEY, JSON.stringify(library), {
     httpMetadata: { contentType: 'application/json' },
   });
 }

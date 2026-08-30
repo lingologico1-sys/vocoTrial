@@ -23,14 +23,15 @@ import {
 import {
   LAUGH_KINDS,
   eligible,
-  laughClipKey,
+  laughRenderKey,
   pick,
   shiftPast,
-  type LaughClip,
+  type LaughRender,
   type LaughKind,
   type SplicedLaugh,
 } from '../../../src/lipsync/laughs';
 import { concat, sameFormat, scanMp3, splitAt } from './_mp3';
+import { SPLICE_FORMAT } from './laughs/_convert';
 import {
   POLLY_VISEMES,
   type PollyViseme,
@@ -66,9 +67,12 @@ import {
  * `[giggles]` are v3 audio tags, and audio tags are advisory: the model decides per
  * generation whether to render one, so the same line laughed on one take and did not on
  * the next, with nothing downstream able to tell the difference. Those two tags are
- * therefore lifted out of the prompt entirely and replaced afterwards with a clip cut
- * from a take where the laugh came out well — same voice, same encoder, joined frame to
- * frame without a codec (see _mp3.ts and laughs.ts).
+ * therefore lifted out of the prompt entirely and replaced afterwards with a laugh the
+ * author provided and ElevenLabs re-performed in this voice — same format, joined frame to
+ * frame without a codec (see _mp3.ts, laughs.ts and laughs/_convert.ts).
+ *
+ * On `eleven_multilingual_v2` the tags are lifted whether or not there is a clip, because
+ * that model ignores audio tags and is liable to read one aloud as a word. See below.
  *
  * The ordering below is the part worth reading carefully. Synthesis and alignment both
  * happen on the UNSPLICED speech, because that is the audio whose words MFA can align and
@@ -87,8 +91,6 @@ interface GenerateBody {
   params?: Partial<VoiceParams>;
   /** How reactions are performed. See ReactionOptions. */
   reactions?: Partial<ReactionOptions>;
-  /** Ask the model for the laughs instead of splicing ours. See GenerateRequest. */
-  harvest?: boolean;
 }
 
 const LANGUAGES = new Set(['en', 'fr', 'es']);
@@ -142,7 +144,7 @@ function toBase64(bytes: Uint8Array): string {
  */
 async function spliceLaughs(
   audio: Uint8Array,
-  wanted: ReadonlyArray<{ clip: LaughClip; atMs: number }>,
+  wanted: ReadonlyArray<{ clip: LaughRender; atMs: number }>,
   load: (id: string) => Promise<Uint8Array | null>,
 ): Promise<{
   spliced: Uint8Array;
@@ -242,14 +244,25 @@ export async function onRequestPost(
   // Deciding per kind rather than per tag keeps the prompt coherent: every `[giggles]` in
   // a line is treated the same way, so the model is not asked to giggle in one clause and
   // silently expected to skip it in the next.
-  //
-  // A harvesting run covers nothing on purpose — see GenerateRequest.harvest. It is how
-  // a library that has taken every laugh out of the prompt can still be given a new one.
-  const clips: LaughClip[] = env.LIPSYNC && !body.harvest ? await readClips(env.LIPSYNC) : [];
+  const library = env.LIPSYNC
+    ? await readClips(env.LIPSYNC)
+    : { sources: [], renders: [] };
   const covered: LaughKind[] = LAUGH_KINDS.filter(
-    (kind) => eligible(clips, kind, voiceId).length > 0,
+    (kind) => eligible(library.renders, kind, voiceId).length > 0,
   );
-  const { spoken, laughs: lifted } = splitLaughs(text, covered);
+
+  // WHAT AN UNCOVERED LAUGH DOES DEPENDS ON THE MODEL, and this is the one place the two
+  // models are told apart. On v3 a laugh tag is at least *attempted*, so a voice nobody has
+  // rendered a laugh into yet keeps whatever the model gives it — unreliable, but strictly
+  // better than nothing, and exactly what this route did before any of this existed.
+  //
+  // `eleven_multilingual_v2` ignores audio tags entirely. It cannot laugh, and the tag does
+  // not vanish politely: it is text, and text is liable to be read aloud, so the failure is
+  // a voice saying the word "laughs" in the middle of a lesson. Silence is unambiguously
+  // better than that, so the tag is lifted whether or not there is a clip to put in its
+  // place — an uncovered laugh becomes nothing rather than an embarrassment.
+  const lift: LaughKind[] = model === 'eleven_multilingual_v2' ? LAUGH_KINDS : covered;
+  const { spoken, laughs: lifted } = splitLaughs(text, lift);
 
   // Everything that was going to be said is now a laugh we removed. There is no audio to
   // align and nothing for a clip to be spliced into, so this is refused for the same
@@ -260,7 +273,8 @@ export async function onRequestPost(
 
   // --- 1. Synthesise, keeping the timings the synthesiser stamped -------------------
   const speech = await fetch(
-    `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}/with-timestamps`,
+    `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}` +
+      `/with-timestamps?output_format=${SPLICE_FORMAT}`,
     {
       method: 'POST',
       headers: {
@@ -356,14 +370,14 @@ export async function onRequestPost(
   // --- 4. Splice our own laughs into the speech -------------------------------------
   const wanted = lifted
     .map((laugh) => ({
-      clip: pick(clips, laugh.kind, voiceId),
+      clip: pick(library.renders, laugh.kind, voiceId),
       atMs: laughTimeMs(laugh, wordCount(script), result.words ?? [], result.durationMs),
     }))
-    .filter((w): w is { clip: LaughClip; atMs: number } => w.clip !== null)
+    .filter((w): w is { clip: LaughRender; atMs: number } => w.clip !== null)
     .sort((a, b) => a.atMs - b.atMs);
 
   const { spliced, placed, insertions } = await spliceLaughs(audio, wanted, async (id) => {
-    const object = env.LIPSYNC ? await env.LIPSYNC.get(laughClipKey(id)) : null;
+    const object = env.LIPSYNC ? await env.LIPSYNC.get(laughRenderKey(id)) : null;
     return object ? new Uint8Array(await object.arrayBuffer()) : null;
   });
 

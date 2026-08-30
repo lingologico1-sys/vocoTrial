@@ -2,11 +2,12 @@ import { json } from '../../_middleware';
 import { type LipsyncEnv, readClips } from '../_library';
 
 /**
- * Every kept laugh, without its audio.
+ * The whole library, without any audio: the laughs you provided and every voice each has
+ * been rendered into.
  *
- * One R2 read. The audio is fetched by `laughs/get` and only when something is going to
- * be played, the same split list.ts makes for lines — except that a clip's whole record
- * is small enough that this listing is genuinely everything a picker needs.
+ * One R2 read, and both halves together because the panel needs both to draw a single row —
+ * a laugh, and whether this voice has it yet. Audio is fetched by `laughs/get` and only
+ * when something is going to be played.
  */
 export async function onRequestPost(
   context: EventContext<LipsyncEnv, string, Record<string, unknown>>,
@@ -15,5 +16,5 @@ export async function onRequestPost(
   if (!env.LIPSYNC) {
     return json({ error: 'No lip-sync library is configured', code: 'no_bucket' }, 500);
   }
-  return json({ clips: await readClips(env.LIPSYNC) });
+  return json(await readClips(env.LIPSYNC));
 }

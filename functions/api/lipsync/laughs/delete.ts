@@ -1,18 +1,23 @@
 import { json } from '../../_middleware';
 import { type LipsyncEnv, readClips, writeClips } from '../_library';
-import { laughClipKey } from '../../../../src/lipsync/laughs';
+import { laughRenderKey, laughSourceKey } from '../../../../src/lipsync/laughs';
 
 /**
- * Drops a clip from the library.
+ * Drops one render, or a laugh and every render made from it.
  *
- * The index first, then the object — the reverse of cut.ts, and for the reason delete.ts
- * gives: whichever end is interrupted, what survives is an object nobody lists rather
- * than a listing that points at nothing.
+ * TWO SCOPES BECAUSE THERE ARE TWO REGRETS. "This laugh does not suit this voice" removes
+ * one render and leaves the recording — the next voice may well want it. "This laugh is not
+ * a good laugh" removes the recording and everything rendered from it, because leaving the
+ * renders would leave clips in the splice pool that nothing can explain the origin of.
  *
- * Packages that already spliced this clip are untouched and stay playable. Their audio
- * contains the laugh, not a reference to it; what they lose is only the ability to trace
- * the recorded `clipId` back to something that still exists, which is why `SplicedLaugh`
- * carries the label as well as the id.
+ * The index goes first, then the objects — the reverse of import.ts, and for the reason
+ * delete.ts gives: whichever end is interrupted, what survives is an object nobody lists
+ * rather than a listing that points at nothing.
+ *
+ * Packages that already spliced a deleted clip are untouched and stay playable. Their audio
+ * contains the laugh, not a reference to it; what they lose is only the ability to trace the
+ * recorded `clipId` back to something that still exists, which is why `SplicedLaugh` carries
+ * the label as well as the id.
  */
 export async function onRequestPost(
   context: EventContext<LipsyncEnv, string, Record<string, unknown>>,
@@ -23,16 +28,37 @@ export async function onRequestPost(
   }
 
   let id = '';
+  let of: 'render' | 'source' = 'render';
   try {
-    ({ id } = (await request.json()) as { id: string });
+    ({ id, of = 'render' } = (await request.json()) as {
+      id: string;
+      of?: 'render' | 'source';
+    });
   } catch {
     return json({ error: 'Expected a JSON body', code: 'bad_body' }, 400);
   }
   if (!id) return json({ error: 'No id', code: 'no_id' }, 400);
 
-  const clips = await readClips(env.LIPSYNC);
-  await writeClips(env.LIPSYNC, clips.filter((c) => c.id !== id));
-  await env.LIPSYNC.delete(laughClipKey(id));
+  const library = await readClips(env.LIPSYNC);
 
-  return json({ ok: true });
+  if (of === 'source') {
+    const doomed = library.renders.filter((r) => r.sourceId === id);
+    await writeClips(env.LIPSYNC, {
+      sources: library.sources.filter((s) => s.id !== id),
+      renders: library.renders.filter((r) => r.sourceId !== id),
+    });
+    await Promise.all([
+      env.LIPSYNC.delete(laughSourceKey(id)),
+      ...doomed.map((r) => env.LIPSYNC!.delete(laughRenderKey(r.id))),
+    ]);
+    return json({ ok: true, removedRenders: doomed.length });
+  }
+
+  await writeClips(env.LIPSYNC, {
+    sources: library.sources,
+    renders: library.renders.filter((r) => r.id !== id),
+  });
+  await env.LIPSYNC.delete(laughRenderKey(id));
+
+  return json({ ok: true, removedRenders: 1 });
 }

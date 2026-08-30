@@ -659,13 +659,11 @@ export default function LipSync() {
         )}
 
         <LaughLibrary
-          // Only a saved line can be cut from: the clip is taken out of the audio in R2
-          // so that it is provably the same bytes, and an unsaved take is a blob in this
-          // tab that the server has never seen.
-          sourceId={saved && pkg ? pkg.id : null}
-          sourceName={pkg?.name ?? null}
+          // The voice of the loaded take, which is the voice a laugh would be converted
+          // into. Empty before anything has been generated, which the panel reads as
+          // "show the library, but there is nothing to render for yet".
           voiceId={pkg?.voiceId ?? ''}
-          audioTime={audioTime}
+          voiceName={pkg?.voiceName}
           busy={busy}
           setBusy={setBusy}
         />

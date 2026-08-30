@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, Loader2, Sparkles } from 'lucide-react';
 import { fetchQuota, generate, listClips, LipsyncError, type Generated } from './library';
-import { LAUGH_KINDS, eligible, laughKindOf, type LaughClip } from './laughs';
+import { LAUGH_KINDS, eligible, laughKindOf, type LaughRender } from './laughs';
 import {
   costOf,
   estimateUsd,
@@ -90,17 +90,6 @@ export default function Compose({ onGenerated, busy, setBusy }: ComposeProps) {
   const [params, setParams] = useState<VoiceParams>(remembered.params);
   const [reactions_, setReactions] = useState<ReactionOptions>(remembered.reactions);
   const [problem, setProblem] = useState<string | null>(null);
-  /**
-   * Ask ElevenLabs for the laughs on this run, instead of splicing ours.
-   *
-   * NOT REMEMBERED, unlike everything else on this panel, and that is the point of it
-   * rather than an oversight. Once a voice has laughs kept for it the tags stop being
-   * sent at all, so this is the only way to get a fresh one to cut — and it is a thing
-   * somebody does deliberately, once, when the library needs a new laugh. Persisted, it
-   * would quietly turn the unreliability back on for every line thereafter, which is
-   * exactly the bug the library exists to fix.
-   */
-  const [harvest, setHarvest] = useState(false);
   const box = useRef<HTMLTextAreaElement | null>(null);
   const [quota, setQuota] = useState<Quota | null>(null);
 
@@ -122,12 +111,6 @@ export default function Compose({ onGenerated, busy, setBusy }: ComposeProps) {
   const script = useMemo(() => stripTags(text), [text]);
   const reactions = useMemo(() => (tagsAllowed ? reactionsIn(text) : []), [text, tagsAllowed]);
   const warnings = useMemo(() => scriptWarnings(script), [script]);
-  /** Whether this line has a laugh or a giggle in it — the two the library covers. */
-  const laughing = useMemo(
-    () => reactions.some((r) => r.laughing || r.giggling),
-    [reactions],
-  );
-
   /**
    * Which of this line's tags the library will take over, and which the model still gets.
    *
@@ -136,26 +119,42 @@ export default function Compose({ onGenerated, busy, setBusy }: ComposeProps) {
    * keeps the two in step is that both ask `eligible` from laughs.ts rather than each
    * deciding for itself what "covered" means.
    */
-  const [clips, setClips] = useState<LaughClip[]>([]);
+  const [renders, setRenders] = useState<LaughRender[]>([]);
   useEffect(() => {
-    void listClips().then(setClips).catch(() => undefined);
+    void listClips()
+      .then((library) => setRenders(library.renders))
+      .catch(() => undefined);
   }, []);
 
-  const [fromLibrary, fromTimings] = useMemo(() => {
+  const { fromLibrary, fromTimings, dropped } = useMemo(() => {
     const covered = new Set(
-      harvest || !voiceId.trim()
-        ? []
-        : LAUGH_KINDS.filter((k) => eligible(clips, k, voiceId.trim()).length > 0),
+      voiceId.trim()
+        ? LAUGH_KINDS.filter((k) => eligible(renders, k, voiceId.trim()).length > 0)
+        : [],
     );
+    // Read off the raw text rather than off `reactions`, which is empty on v2 because
+    // that model ignores audio tags. Laugh tags are the exception to that rule now: v2
+    // still cannot perform one, but generate.ts lifts them out either way, so on v2 a
+    // laugh tag genuinely does something and the panel has to be able to say what.
+    const laughs = reactionsIn(text).filter((t) => laughKindOf(t.tag));
     const spliced: string[] = [];
     const timed: string[] = [];
-    for (const tag of reactions) {
+    const gone: string[] = [];
+
+    for (const tag of laughs) {
       const kind = laughKindOf(tag.tag);
       if (kind && covered.has(kind)) spliced.push(tag.tag);
-      else timed.push(tag.tag);
+      else if (tagsAllowed) timed.push(tag.tag);
+      // v2, no clip: lifted out and nothing put back. Silence, which is the point —
+      // left in, the model is liable to read the tag aloud as a word.
+      else gone.push(tag.tag);
     }
-    return [spliced, timed];
-  }, [reactions, clips, voiceId, harvest]);
+    // Everything else keeps the old rule, and on v2 there is nothing else to report.
+    for (const tag of reactions) {
+      if (!laughKindOf(tag.tag)) timed.push(tag.tag);
+    }
+    return { fromLibrary: spliced, fromTimings: timed, dropped: gone };
+  }, [reactions, renders, voiceId, text, tagsAllowed]);
 
   /** Inserts at the cursor rather than appending — a tag placed mid-line is the point. */
   function insert(tag: string) {
@@ -193,7 +192,6 @@ export default function Compose({ onGenerated, busy, setBusy }: ComposeProps) {
         model,
         params,
         reactions: reactions_,
-        harvest,
       });
       onGenerated(result);
       // The count just changed, so the panel should stop showing the old one.
@@ -503,30 +501,6 @@ export default function Compose({ onGenerated, busy, setBusy }: ComposeProps) {
         </div>
       )}
 
-      {/* Only when there is a laugh in the line for it to apply to. Elsewhere it would be
-          a switch with no observable effect, which reads as broken rather than as inert. */}
-      {laughing && (
-        <label className="flex items-start gap-2 rounded-lg border border-slate-800 px-3 py-2">
-          <input
-            type="checkbox"
-            className="mt-0.5"
-            checked={harvest}
-            onChange={(event) => setHarvest(event.target.checked)}
-          />
-          <span className="flex flex-col gap-0.5">
-            <span className="text-xs text-slate-300">
-              Let ElevenLabs try the laughs on this take
-            </span>
-            <span className="text-[11px] leading-snug text-slate-600">
-              For cutting a new clip. A laugh kept for this voice is normally spliced in
-              from the library and the tag never reaches the model — which is what makes
-              it reliable, and also what stops a better laugh ever turning up. Tick this to
-              ask for one, save the take, and cut it out below. Not remembered.
-            </span>
-          </span>
-        </label>
-      )}
-
       {warnings.map((w) => (
         <p
           key={w.found}
@@ -556,6 +530,15 @@ export default function Compose({ onGenerated, busy, setBusy }: ComposeProps) {
           <Sparkles size={14} className="mt-0.5 shrink-0" />
           {fromLibrary.join(' ')} will be spliced in from the laugh library and never sent
           to ElevenLabs, so the span is exactly as long as the clip.
+        </p>
+      )}
+
+      {dropped.length > 0 && (
+        <p className="flex items-start gap-2 rounded-lg border border-slate-800 px-3 py-2 text-xs text-slate-400">
+          <AlertTriangle size={14} className="mt-0.5 shrink-0 text-slate-600" />
+          {dropped.join(' ')} will be removed and nothing put in its place — multilingual v2
+          cannot perform a tag, and leaving one in risks the word being read aloud. Add a
+          laugh for this voice below and it will be spliced in instead.
         </p>
       )}
 
