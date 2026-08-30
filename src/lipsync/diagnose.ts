@@ -1,4 +1,3 @@
-import { POLLY_VISEMES } from '../live/visemeTable';
 import type { LipsyncPackage } from './published';
 import { isMergedWord } from './warnings';
 
@@ -39,7 +38,7 @@ export function quietStretches(pkg: LipsyncPackage): Quiet[] {
   const oov = pkg.oovWords ?? [];
 
   for (let i = 0; i < marks.length; i++) {
-    if (POLLY_VISEMES[marks[i].polly] !== 'rest') continue;
+    if (marks[i].viseme !== 'rest') continue;
     const startMs = marks[i].timeMs;
     const endMs = i + 1 < marks.length ? marks[i + 1].timeMs : pkg.durationMs;
 
@@ -90,10 +89,10 @@ export function posesDuring(pkg: LipsyncPackage, startMs: number, endMs: number)
       // The mark in force when the word began still counts, so keep the latest one
       // before it rather than skipping to the first one inside.
       seen.length = 0;
-      seen.push(POLLY_VISEMES[m.polly]);
+      seen.push(m.viseme);
       continue;
     }
-    const pose = POLLY_VISEMES[m.polly];
+    const pose = m.viseme;
     if (seen[seen.length - 1] !== pose) seen.push(pose);
   }
   return seen;

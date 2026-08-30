@@ -79,6 +79,17 @@ const POSE_LEVEL: Record<Viseme, number> = {
   uh: 0.5,
   aa: 0.95,
   oh: 0.8,
+  /** Loud, like the open vowel it is built from. */
+  laugh: 0.95,
+  /**
+   * Low, but deliberately above SILENCE (0.12).
+   *
+   * Zero would be the honest reading of a silent expression, and it would break the
+   * invariant the lip press is gated on — that `level < SILENCE` and `viseme === 'rest'`
+   * are the same test. A smiling face would then be treated as a silent one and pressed
+   * its lips, which is the opposite of what it is doing.
+   */
+  smile: 0.16,
 };
 
 

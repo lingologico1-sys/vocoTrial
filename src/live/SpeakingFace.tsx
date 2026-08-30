@@ -52,6 +52,13 @@ interface SpeakingFaceProps {
    * output latency, or the mouth leads by however far the speakers are behind.
    */
   audioTime?: (() => number) | null;
+  /**
+   * What the rest of the face does, and when. Read on the mouth's clock.
+   *
+   * A second channel rather than a field on each mark, because Viseme is a vocabulary
+   * about lips and eyes are not lips. See ExpressionSpan in lipsync/published.ts.
+   */
+  expressions?: ReadonlyArray<{ startMs: number; endMs: number; eyesClosed?: boolean }> | null;
   /** Which way of measuring the audio drives the mouth. Switchable mid-call. */
   driver: MouthDriver;
   /** How far ahead the scheduled driver runs, in milliseconds. Ignored by the other. */
@@ -116,6 +123,7 @@ export default function SpeakingFace({
   tap,
   marks,
   audioTime,
+  expressions,
   driver,
   lookaheadMs,
   roundness,
@@ -145,6 +153,7 @@ export default function SpeakingFace({
   mouthRef,
 }: SpeakingFaceProps) {
   const [mouth, setMouth] = useState(RESTING);
+  const [eyesShut, setEyesShut] = useState(false);
   const analyser = useRef<MouthAnalyser | null>(null);
   /**
    * Read by the scheduled source on every frame rather than captured when it is
@@ -234,6 +243,15 @@ export default function SpeakingFace({
       // drawn face interpolates the shape, drawn artwork switches on the
       // viseme, and which of the two is on screen is not this loop's business.
       setMouth({ shape: { ...next.shape }, level: next.level, viseme: next.viseme });
+
+      // The same instant the mouth was asked about, so the two cannot disagree about
+      // where in the clip they are.
+      if (expressions && expressions.length > 0 && audioTime) {
+        const at = audioTime() * 1000;
+        setEyesShut(
+          expressions.some((e) => e.eyesClosed && at >= e.startMs && at < e.endMs),
+        );
+      }
       frame = requestAnimationFrame(step);
     };
 
@@ -246,7 +264,7 @@ export default function SpeakingFace({
     // new timeline, and MarkMouth carries no running peak or smoothing state that
     // rebuilding would cost anything to lose.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tap, marks, audioTime]);
+  }, [tap, marks, audioTime, expressions]);
 
   return (
     <Face
@@ -254,6 +272,7 @@ export default function SpeakingFace({
       viseme={mouth.viseme}
       level={mouth.level}
       kit={kit}
+      eyesShut={eyesShut}
       motion={motion}
       cadence={cadence}
       browBlink={browBlink}

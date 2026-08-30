@@ -248,6 +248,19 @@ interface FaceProps {
    */
   hold?: boolean;
   /**
+   * Lids shut, and nothing else touched.
+   *
+   * `hold` above does this too, but it also pins the brows at their ceiling, because it
+   * exists to freeze a frame for inspection on the kit page. This is for a face that is
+   * doing something — laughing, with its eyes screwed up — where the brows should carry
+   * on with whatever the performer had planned for them.
+   *
+   * Overrides the blink schedule rather than driving it, exactly as `hold` does: the
+   * schedule keeps running underneath and the face is handed back to it, mid-cycle,
+   * with nothing to resynchronise.
+   */
+  eyesShut?: boolean;
+  /**
    * Whether the face is at the edges of a conversation rather than inside one.
    *
    * IT SAYS A SMILE IS WARRANTED, NOT THAT ONE IS WORN. The difference is
@@ -350,7 +363,38 @@ const toHead = (value: number) => (value / CANVAS_EDGE) * 200;
  * analyser cannot select it, so today it sits at opacity 0 for the whole of
  * every call, waiting for a driver that can.
  */
-const VISEME_ORDER: SlotId[] = ['rest', 'mbp', 'fv', 'ee', 'uh', 'aa', 'oh', 'smile'];
+/**
+ * How much of each mouth patch shows.
+ *
+ * Three things overlap here and each is a separate reason:
+ *
+ *   smile   worn on its own schedule for idle moments, AND selectable as a pose now that
+ *           a laugh wants a beat of it first. Whichever asks for it more strongly wins,
+ *           so a mark-driven smile is not dimmed by an idle timer that is not running.
+ *   mbp     carries the lip press as well as the phoneme, which is why it has never
+ *           simply been "1 when selected".
+ *   laugh   falls back to `aa` on a kit that has no laugh patch. Every face published
+ *           before the pose existed is such a kit, and the alternative to falling back
+ *           is a laugh painting nothing and the base portrait's own mouth showing
+ *           through — a still, closed mouth in the middle of laughter.
+ */
+function patchOpacity(
+  id: SlotId,
+  viseme: Viseme,
+  smiled: number,
+  pressed: number,
+  noLaughPatch: boolean,
+): number {
+  if (id === 'smile') return Math.max(smiled, viseme === 'smile' ? 1 : 0);
+  if (id === 'aa' && viseme === 'laugh' && noLaughPatch) return 1;
+  if (viseme === id) return 1;
+  if (id === 'mbp') return pressed;
+  return 0;
+}
+
+const VISEME_ORDER: SlotId[] = [
+  'rest', 'mbp', 'fv', 'ee', 'uh', 'aa', 'oh', 'laugh', 'smile',
+];
 
 /**
  * How long the smile takes to arrive and to leave, in milliseconds.
@@ -391,6 +435,7 @@ export default function Face({
   tiltCue,
   speaking = false,
   hold = false,
+  eyesShut = false,
   smiling = false,
   smileSustain = false,
   smileHold = DEFAULT_SMILE_HOLD,
@@ -698,7 +743,7 @@ export default function Face({
    * held still to be judged at. Anything less would be judging the setting.
    */
   const brow = hold ? 1 : perf.brow;
-  const shut = hold || blinking;
+  const shut = hold || eyesShut || blinking;
   // Bolder than a kit's, and following the same setting. See
   // PLACEHOLDER_BROW_BOLDNESS.
   const drawnBrowRise = brow * browLift * PLACEHOLDER_BROW_BOLDNESS;
@@ -1053,7 +1098,7 @@ export default function Face({
                   y={toHead(mouth.y)}
                   width={toHead(mouth.width)}
                   height={toHead(mouth.height)}
-                  opacity={id === 'smile' ? smiled : viseme === id ? 1 : id === 'mbp' ? pressed : 0}
+                  opacity={patchOpacity(id, viseme, smiled, pressed, !kit.patches.laugh)}
                   style={
                     id === 'smile'
                       ? {

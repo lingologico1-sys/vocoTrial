@@ -11,12 +11,14 @@ import {
   type Quota,
 } from './cost';
 import {
+  DEFAULT_LAUGH,
   DEFAULT_PARAMS,
+  type LaughOptions,
   type LipsyncModel,
   type LipsyncPackage,
   type VoiceParams,
 } from './published';
-import { TAGS, reactionsIn, stripTags, type Tag } from './tags';
+import { SMILE_LEAD_MIN_MS, TAGS, reactionsIn, stripTags, type Tag } from './tags';
 import { scriptWarnings } from './warnings';
 
 /**
@@ -72,6 +74,7 @@ export default function Compose({ onGenerated, busy, setBusy }: ComposeProps) {
   const [voiceId, setVoiceId] = useState('');
   const [model, setModel] = useState<LipsyncModel>('eleven_v3');
   const [params, setParams] = useState<VoiceParams>(DEFAULT_PARAMS);
+  const [laugh, setLaugh] = useState<LaughOptions>(DEFAULT_LAUGH);
   const [problem, setProblem] = useState<string | null>(null);
   const box = useRef<HTMLTextAreaElement | null>(null);
   const [quota, setQuota] = useState<Quota | null>(null);
@@ -123,6 +126,7 @@ export default function Compose({ onGenerated, busy, setBusy }: ComposeProps) {
         voiceId: voiceId.trim(),
         model,
         params,
+        laugh,
       });
       onGenerated(result);
       // The count just changed, so the panel should stop showing the old one.
@@ -355,6 +359,37 @@ export default function Compose({ onGenerated, busy, setBusy }: ComposeProps) {
           that is a consequence of the audio rather than of the setting.
         </p>
       </details>
+
+      {reactions.some((r) => r.laughing) && (
+        <div className="flex flex-col gap-2 rounded-lg border border-slate-800 px-3 py-2">
+          <span className="text-xs font-medium text-slate-400">How the laugh is performed</span>
+          <div className="flex flex-wrap gap-x-5 gap-y-2">
+            {([
+              ['smileLeadIn', 'Smile first', `A beat of smile before it opens, on laughs over ${SMILE_LEAD_MIN_MS}ms`],
+              ['closeEyes', 'Close the eyes', 'Both lids down through the laugh'],
+            ] as const).map(([key, label, hint]) => (
+              <label key={key} className="flex items-center gap-2" title={hint}>
+                <input
+                  type="checkbox"
+                  checked={laugh[key]}
+                  onChange={(event) =>
+                    setLaugh((l) => ({ ...l, [key]: event.target.checked }))
+                  }
+                />
+                <span className="text-xs text-slate-300">{label}</span>
+              </label>
+            ))}
+          </div>
+          {/* Worth saying, because it is the part that is not a preference. */}
+          <p className="text-[11px] leading-snug text-slate-600">
+            The mouth pulses either way — a laugh held as one shape reads as a scream.
+            These are judgements about a particular face rather than about phonetics,
+            which is why they are yours rather than fixed. A nod is designed and carried
+            in the package but not yet wired: the head is driven by turn-taking and
+            loudness, and teaching it a second master is its own change.
+          </p>
+        </div>
+      )}
 
       {warnings.map((w) => (
         <p

@@ -392,6 +392,29 @@ const SMILE_SPREADS = [
   'add no dimples or creases.',
 ].join(' ');
 
+/**
+ * The one pose that drops the jaw AND lifts the corners.
+ *
+ * Every other note forbids one or the other, and for good reasons that both stop
+ * applying here. CORNERS_FIXED exists because a mouth that grows wider between speech
+ * poses reads as inflating; SMILE_SPREADS grants the corners but assumes lips that stay
+ * shut. A laugh is the case neither anticipated: the jaw is as open as `aa` and the
+ * corners are as lifted as `smile`, at the same time, and holding either half still is
+ * what makes a drawn laugh look like a scream.
+ *
+ * The chin is allowed to travel for JAW_DROPS' reason exactly — a dropped jaw moves it,
+ * and a face that refuses has a hole cut in it.
+ */
+const LAUGH_OPENS = [
+  'The corners of the mouth lift and travel outward as the jaw drops, so the opening is',
+  'both wide and clearly curved upward at each end rather than level.',
+  'Keep the lips the same colour and line weight as the original, and keep the mouth',
+  'centred where it is: it does not slide or tilt.',
+  'The chin and the skin between the lower lip and the chin travel downward with the jaw,',
+  'as far as the jaw opens and no further.',
+  'Do not change the nose or the cheeks, and do not move the outer edges of the jaw.',
+].join(' ');
+
 const MOUTH_NOTE = [CORNERS_FIXED, MOUTH_STYLE, FACE_FIXED].join(' ');
 const SMILE_NOTE = [SMILE_SPREADS, MOUTH_STYLE].join(' ');
 const MBP_NOTE = [MBP_COMPRESSES, MOUTH_STYLE, FACE_FIXED].join(' ');
@@ -399,6 +422,7 @@ const TEETH_NOTE = [CORNERS_FIXED, MOUTH_STYLE, TEETH_BAND, FACE_FIXED].join(' '
 /** The one pose that both shows teeth and thins a lip. */
 const FV_NOTE = [MBP_COMPRESSES, MOUTH_STYLE, TEETH_BAND, FACE_FIXED].join(' ');
 const OPEN_NOTE = [CORNERS_FIXED, MOUTH_STYLE, TEETH_BAND, JAW_DROPS].join(' ');
+const LAUGH_NOTE = [LAUGH_OPENS, MOUTH_STYLE, TEETH_BAND].join(' ');
 
 const mouth =
   (shape: string, note: string = MOUTH_NOTE) =>
@@ -547,6 +571,32 @@ export const SLOTS: Slot[] = [
    * higher, seam curved along its length — because "smile" alone is exactly the
    * kind of instruction a face already faintly upturned can claim to have met.
    */
+  /*
+   * The pose no phone can select, and the second one generated for a driver rather
+   * than for a sound. `fv` was the first; the note above it explains why carrying a
+   * slot early is cheaper than adding it later, and this is that argument used again.
+   *
+   * WRITTEN AGAINST ITS TWO NEIGHBOURS, because they are what it will collapse into if
+   * the prompt is loose, and they are neighbours in different directions:
+   *
+   *   aa     the same jaw, corners level. An open mouth with level corners is alarm,
+   *          not delight, and an `aa` returned for this slot makes a laughing face
+   *          look like a screaming one.
+   *   smile  the same corners, lips shut. A closed-mouth laugh is a stifled one, and
+   *          slots.ts keeps smile closed on purpose — see the note on that slot.
+   *
+   * So both halves are asked for explicitly and neither is left to be inferred, which
+   * is the same fix rest and mbp needed when they came back as the same picture.
+   */
+  {
+    id: 'laugh',
+    label: 'Laugh',
+    region: 'mouth',
+    prompt: mouth(
+      'Open the mouth into a broad laugh. Drop the jaw as far as a wide open mouth, and at the same time lift both corners clearly upward and outward, so the opening is a wide curved shape rising at each end rather than a level oval. Show the upper teeth as one simple white band along the top and a plain dark interior below. The result has to be plainly distinguishable from a wide open mouth, because the corners are lifted rather than level; and from a closed smile, because the jaw is genuinely dropped and the teeth and the dark interior are visible. No dimples and no creases.',
+      LAUGH_NOTE,
+    ),
+  },
   {
     id: 'smile',
     label: 'Smile',

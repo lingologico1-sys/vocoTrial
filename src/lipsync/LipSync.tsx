@@ -238,7 +238,9 @@ export default function LipSync() {
     if (audio) URL.revokeObjectURL(audio.url);
     const pkg = result.package;
     setAudio({ name: `${pkg.name}.mp3`, url: audioUrl(result.audioBase64) });
-    setMarks(parseMfaMarks({ marks: pkg.marks }));
+    // Already VisemeMarks, built by the function that made them. parseMfaMarks is
+    // for the file pickers below, where the marks arrive as untrusted JSON.
+    setMarks(pkg.marks);
     setMeta({
       language: pkg.language,
       model: pkg.model,
@@ -412,6 +414,7 @@ export default function LipSync() {
               tap={null}
               marks={driving ? marks : null}
               audioTime={driving ? audioTime : null}
+              expressions={driving ? (generated?.package.expressions ?? null) : null}
               driver="scheduled"
               lookaheadMs={lookaheadMs}
               kit={kit}

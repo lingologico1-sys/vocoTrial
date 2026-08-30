@@ -19,8 +19,35 @@
  * polly.ts re-exports all of it, so nothing that used to import from there had to change.
  */
 
-/** The seven poses a facekit contains. facekit/slots.ts keys its slots on this. */
-export type Viseme = 'rest' | 'mbp' | 'fv' | 'ee' | 'uh' | 'aa' | 'oh';
+/**
+ * The poses a facekit contains. facekit/slots.ts keys its slots on this.
+ *
+ * `laugh` is the one no phone ever selects, and the only member POLLY_VISEMES never
+ * produces. It exists because a laugh is not a speech sound: nothing in a transcript
+ * says it, no dictionary lists it, and the aligner has no phone for it. It is chosen
+ * from an audio tag instead, which is why a mark can carry a pose without carrying a
+ * Polly identifier — see VisemeMark below.
+ *
+ * It is `aa` with the corners lifted. `aa` alone is a dropped jaw with corners level,
+ * which reads as alarm rather than delight; `smile` has the corners but is closed-lipped
+ * by design, and a closed-mouth laugh is a stifled one. Neither existing pose is this.
+ *
+ * `smile` joins for a different reason and at no cost. It was always a slot in
+ * facekit/slots.ts — every published kit already has the artwork — but it was reachable
+ * only through a boolean on Face, scheduled for idle moments. Naming it here lets a mark
+ * select it, which is what a laugh needs: a face smiles a beat before it laughs, and an
+ * expression that arrives at the same instant as the sound reads as a flinch.
+ */
+export type Viseme =
+  | 'rest'
+  | 'mbp'
+  | 'fv'
+  | 'ee'
+  | 'uh'
+  | 'aa'
+  | 'oh'
+  | 'laugh'
+  | 'smile';
 
 /**
  * The twenty viseme identifiers Polly emits, exactly as they appear in the
@@ -182,8 +209,15 @@ export const POLLY_VISEMES: Record<PollyViseme, Viseme> = {
 export interface VisemeMark {
   /** Milliseconds from the start of the utterance's audio, as Polly stamps it. */
   timeMs: number;
-  /** What Polly said. Kept so a log can name the phoneme, not just the pose. */
-  polly: PollyViseme;
+  /**
+   * What Polly said, when anything did.
+   *
+   * Optional because not every mark comes from a sound. A laugh is chosen from an audio
+   * tag: no phone produced it, no dictionary lists it, and inventing an identifier to
+   * satisfy the field would be a lie a log would later repeat. `viseme` is what the
+   * mouth actually reads; this is provenance.
+   */
+  polly?: PollyViseme;
   /** What the face wears for it. */
   viseme: Viseme;
 }

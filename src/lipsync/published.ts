@@ -44,6 +44,56 @@ export interface OovWord {
   reason: string;
 }
 
+/**
+ * What the rest of the face does over a stretch of time.
+ *
+ * A second channel beside the marks, and it has to be second rather than folded in
+ * because the marks are a vocabulary about lips. `Viseme` describes a mouth; eyes and a
+ * head are not mouths, and giving a mark an `eyesClosed` field would make every mark
+ * carry a question only a handful can answer.
+ *
+ * Only laughter fills this today. Whether it does at all is the author's choice — see
+ * LaughOptions — because a laugh with the eyes screwed shut is delightful on one face
+ * and unsettling on another, and that is a judgement about artwork rather than about
+ * phonetics.
+ */
+export interface ExpressionSpan {
+  startMs: number;
+  endMs: number;
+  /** Both lids down, using the artwork every kit already carries for blinking. */
+  eyesClosed?: boolean;
+  /**
+   * A single deliberate nod through the span.
+   *
+   * CARRIED BUT NOT YET HONOURED. The head is driven by headMotion, whose nod fires on
+   * turn edges from loudness and turn-taking; accepting a second master is a real change
+   * and its own comments discuss the difficulty of nodding at the right *place* in a
+   * sentence rather than at the right time. Kept in the format because the design is
+   * settled, and out of the UI because a control that does nothing is worse than none.
+   */
+  nod?: boolean;
+}
+
+/** How a laugh should be performed. Set per generation, stored with the package. */
+export interface LaughOptions {
+  closeEyes: boolean;
+  nod: boolean;
+  /**
+   * A brief smile before the laugh opens.
+   *
+   * Only on a span long enough to carry one — a short giggle that smiled first would
+   * spend most of itself arriving. See SMILE_LEAD_MIN_MS in tags.ts.
+   */
+  smileLeadIn: boolean;
+}
+
+export const DEFAULT_LAUGH: LaughOptions = {
+  closeEyes: true,
+  // Not honoured yet — see ExpressionSpan.nod.
+  nod: false,
+  smileLeadIn: true,
+};
+
 export type LipsyncModel = 'eleven_v3' | 'eleven_multilingual_v2';
 
 /** Straight through to ElevenLabs; none of these affect alignment. */
@@ -89,6 +139,10 @@ export interface LipsyncPackage {
   oovCount: number;
   /** How many reaction spans were overlaid rather than trusted to the aligner. */
   reactionCount: number;
+  /** How the laughs in this line were performed. */
+  laugh: LaughOptions;
+  /** What the eyes and head do, and when. Empty unless something asked. */
+  expressions: ExpressionSpan[];
   /**
    * Which words the aligner could not look up, not merely how many.
    *

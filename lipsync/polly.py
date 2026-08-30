@@ -38,7 +38,9 @@ SOURCE = Path(__file__).resolve().parent.parent / "src" / "live" / "visemeTable.
 
 # The seven the artwork has. facekit/slots.ts keys its slots on this exact union, so a
 # pose outside it is a pose no kit was ever generated for.
-POSES = {"rest", "mbp", "fv", "ee", "uh", "aa", "oh"}
+# `laugh` is here for completeness and is never produced by POLLY_VISEMES: no phone
+# selects it, because a laugh is not a speech sound. It comes from an audio tag.
+POSES = {"rest", "mbp", "fv", "ee", "uh", "aa", "oh", "laugh"}
 
 _BLOCK = re.compile(
     r"export const POLLY_VISEMES\s*:\s*Record<[^>]+>\s*=\s*\{(.*?)^\};",

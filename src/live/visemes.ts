@@ -97,6 +97,24 @@ export const VISEMES: Record<Viseme, LipShape> = {
   aa: { w: 23, up: 10, down: 14 },
   /** Rounded and wide: "oh", "oo". */
   oh: { w: 12, up: 12, down: 15 },
+  /**
+   * A laugh: wider than `aa` and open as far, because the corners pull back as well
+   * as the jaw dropping.
+   *
+   * The drawn fallback can only widen — it has no way to curve the corners upward,
+   * which is the half that makes a laugh read as delight rather than alarm. On a kit
+   * the artwork carries that; here the extra width is the nearest a two-arc mouth
+   * gets, and the drawing is only what shows when a face has no artwork at all.
+   */
+  laugh: { w: 27, up: 10, down: 14 },
+  /**
+   * A closed, gentle smile — wider than rest and no more open than it.
+   *
+   * The drawn fallback cannot curve the seam upward any more than it can for `laugh`,
+   * so width is again all it has. On a kit this is the smile patch slots.ts has always
+   * generated, which does carry the curve.
+   */
+  smile: { w: 24, up: 1.4, down: 2.6 },
 };
 
 /** Magic constant for approximating a quarter ellipse with a cubic Bézier. */
@@ -621,7 +639,9 @@ export class MouthAnalyser {
     // `fv` sits with mbp because it is the same openness — near shut — even
     // though nothing here can classify into it. Ranked rather than excluded so
     // that the table stays a complete statement about the shapes.
-    const rank: Record<Viseme, number> = { rest: 0, mbp: 1, fv: 1, ee: 2, uh: 2, aa: 3, oh: 3 };
+    const rank: Record<Viseme, number> = {
+      rest: 0, smile: 0, mbp: 1, fv: 1, ee: 2, uh: 2, aa: 3, oh: 3, laugh: 3,
+    };
     return Math.abs(rank[next] - rank[this.viseme]) >= 2;
   }
 }
