@@ -8,6 +8,7 @@ import {
 } from './published';
 import { MARK_LOOKAHEAD_MS } from '../live/polly';
 import { MAX_LOOKAHEAD_MS } from '../live/visemes';
+import type { VoiceGender } from './laughs';
 
 /**
  * What this page remembers between visits.
@@ -29,6 +30,8 @@ export interface LipsyncPrefs {
   text: string;
   language: LipsyncPackage['language'];
   voiceId: string;
+  voiceName?: string;
+  voiceGender?: VoiceGender;
   model: LipsyncModel;
   params: VoiceParams;
   reactions: ReactionOptions;
@@ -38,6 +41,7 @@ export interface LipsyncPrefs {
 }
 
 const PREFS_KEY = 'lipsync.prefs.v1';
+const VOICE_GENDERS_KEY = 'lipsync.voice-genders.v1';
 
 /**
  * Which build's opinions the stored blob carries, kept inside it rather than in the key.
@@ -101,6 +105,7 @@ export const DEFAULT_PREFS: LipsyncPrefs = {
   text: '',
   language: 'fr',
   voiceId: '',
+  voiceName: '',
   model: 'eleven_v3',
   params: DEFAULT_PARAMS,
   reactions: DEFAULT_REACTIONS,
@@ -150,6 +155,11 @@ function validate(saved: Partial<LipsyncPrefs>): LipsyncPrefs {
     text: str(saved.text, DEFAULT_PREFS.text),
     language: oneOf(saved.language, LANGUAGES, DEFAULT_PREFS.language),
     voiceId: str(saved.voiceId, DEFAULT_PREFS.voiceId),
+    voiceName: str(saved.voiceName, DEFAULT_PREFS.voiceName ?? ''),
+    voiceGender:
+      saved.voiceGender === 'male' || saved.voiceGender === 'female'
+        ? saved.voiceGender
+        : undefined,
     model: oneOf(saved.model, MODELS, DEFAULT_PREFS.model),
     params: {
       stability: bounded(params.stability, 0, 1, DEFAULT_PARAMS.stability),
@@ -199,5 +209,31 @@ export function clearPrefs(): void {
     window.localStorage.removeItem(PREFS_KEY);
   } catch {
     // As above: nothing here is worth failing over.
+  }
+}
+
+/** Manual/provider classifications survive switching away from a voice and back. */
+export function loadVoiceGender(voiceId: string): VoiceGender | undefined {
+  const id = voiceId.trim();
+  if (!id) return undefined;
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(VOICE_GENDERS_KEY) ?? '{}') as unknown;
+    if (!parsed || typeof parsed !== 'object') return undefined;
+    const value = (parsed as Record<string, unknown>)[id];
+    return value === 'male' || value === 'female' ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function saveVoiceGender(voiceId: string, gender: VoiceGender): void {
+  const id = voiceId.trim();
+  if (!id) return;
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(VOICE_GENDERS_KEY) ?? '{}') as unknown;
+    const saved = parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : {};
+    window.localStorage.setItem(VOICE_GENDERS_KEY, JSON.stringify({ ...saved, [id]: gender }));
+  } catch {
+    // A convenience cache, like the preferences above. Failure changes no generated data.
   }
 }

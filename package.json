@@ -12,9 +12,11 @@
     "probe": "esbuild scripts/probe.ts --bundle --platform=node --format=esm --outfile=node_modules/.cache/voco-probe.mjs --log-level=warning && node node_modules/.cache/voco-probe.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.app.json",
     "typecheck:functions": "tsc --noEmit -p tsconfig.functions.json",
-    "anchors": "esbuild scripts/anchors.ts --bundle --platform=node --format=esm --outfile=node_modules/.cache/voco-anchors.mjs --log-level=warning && node node_modules/.cache/voco-anchors.mjs"
+    "anchors": "esbuild scripts/anchors.ts --bundle --platform=node --format=esm --outfile=node_modules/.cache/voco-anchors.mjs --log-level=warning && node node_modules/.cache/voco-anchors.mjs",
+    "check:laughs": "node --experimental-strip-types scripts/laughs.ts"
   },
   "dependencies": {
+    "@breezystack/lamejs": "1.2.7",
     "lucide-react": "^0.344.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"

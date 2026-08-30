@@ -165,6 +165,72 @@ export function toWav(buffer: AudioBuffer, startMs: number, endMs: number): Uint
   return bytes;
 }
 
+/** The format ElevenLabs speech uses and the frame splicer therefore requires. */
+export const SPLICE_SAMPLE_RATE = 44_100;
+export const SPLICE_BITRATE_KBPS = 128;
+
+/**
+ * The selected performance as a splice-ready MP3, without asking a model to re-perform it.
+ *
+ * The encoder is loaded only for this action: it is a sizeable, LGPL-licensed dependency
+ * and has no reason to sit in the first page load for somebody who never imports a laugh.
+ * A mono encode also pins the channel mode to the one ElevenLabs currently returns. The
+ * server scans and refuses every result before storage, so that provider assumption cannot
+ * turn into a silently skipped clip.
+ */
+export async function toMp3(
+  buffer: AudioBuffer,
+  startMs: number,
+  endMs: number,
+): Promise<Uint8Array> {
+  const from = Math.max(0, Math.floor((startMs / 1000) * buffer.sampleRate));
+  const to = Math.min(buffer.length, Math.ceil((endMs / 1000) * buffer.sampleRate));
+  const selected = mono(buffer).slice(from, Math.max(from, to));
+  if (selected.length === 0) return new Uint8Array();
+
+  let samples = selected;
+  if (buffer.sampleRate !== SPLICE_SAMPLE_RATE) {
+    const outputLength = Math.max(
+      1,
+      Math.ceil((selected.length * SPLICE_SAMPLE_RATE) / buffer.sampleRate),
+    );
+    const context = new OfflineAudioContext(1, outputLength, SPLICE_SAMPLE_RATE);
+    const input = context.createBuffer(1, selected.length, buffer.sampleRate);
+    input.copyToChannel(selected, 0);
+    const source = context.createBufferSource();
+    source.buffer = input;
+    source.connect(context.destination);
+    source.start();
+    samples = (await context.startRendering()).getChannelData(0).slice();
+  }
+
+  const { Mp3Encoder } = await import('@breezystack/lamejs');
+  const encoder = new Mp3Encoder(1, SPLICE_SAMPLE_RATE, SPLICE_BITRATE_KBPS);
+  const parts: Uint8Array[] = [];
+  const blockSize = 1152;
+
+  for (let at = 0; at < samples.length; at += blockSize) {
+    const block = samples.subarray(at, Math.min(samples.length, at + blockSize));
+    const pcm = new Int16Array(block.length);
+    for (let i = 0; i < block.length; i++) {
+      const clamped = Math.max(-1, Math.min(1, block[i]));
+      pcm[i] = clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff;
+    }
+    const encoded = encoder.encodeBuffer(pcm);
+    if (encoded.length > 0) parts.push(encoded);
+  }
+  const tail = encoder.flush();
+  if (tail.length > 0) parts.push(tail);
+
+  const bytes = new Uint8Array(parts.reduce((length, part) => length + part.length, 0));
+  let at = 0;
+  for (const part of parts) {
+    bytes.set(part, at);
+    at += part.length;
+  }
+  return bytes;
+}
+
 /** Bytes as base64, for the JSON body every route on this page speaks. */
 export function toBase64(bytes: Uint8Array): string {
   let binary = '';

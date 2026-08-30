@@ -17,7 +17,7 @@
  */
 
 import type { VisemeMark } from '../live/visemeTable';
-import type { SplicedLaugh } from './laughs';
+import type { SplicedLaugh, VoiceGender } from './laughs';
 
 export const INDEX_KEY = 'index.json';
 
@@ -263,6 +263,8 @@ export interface LipsyncPackage {
 
   voiceId: string;
   voiceName?: string;
+  /** Required on new packages; absent only on takes made before gender-scoped originals. */
+  voiceGender?: VoiceGender;
   model: LipsyncModel;
   params: VoiceParams;
 

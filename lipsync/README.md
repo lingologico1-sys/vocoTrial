@@ -137,6 +137,19 @@ either side are left alone. See `src/lipsync/tags.ts`.
 It is a heuristic — a laugh is not one pose held — but the span is measured rather than
 guessed, and the alternative is words smeared across a laugh.
 
+#### Laugh library
+
+`[laughs]` and `[giggles]` can be lifted out and replaced with an authored clip. Importing
+always keeps the trimmed PCM WAV and makes a mono `mp3_44100_128` original-performance
+derivative in the browser. That original is shared by every voice in its male or female
+pool. The author may additionally ask ElevenLabs speech-to-speech to re-perform it for one
+exact, matching-gender voice; cross-gender conversion is refused.
+
+When both versions exist, the converted version is the default for that voice and the row
+can switch back to the original after auditioning both. Old exact-voice renders continue to
+work. Old retained sources remain unclassified until the author assigns a gender and makes
+their original derivative.
+
 ### What it needs configured
 
 - R2 bucket **`vocotrial-lipsync`**, bound `LIPSYNC` in `wrangler.toml`. Pages validates

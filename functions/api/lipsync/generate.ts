@@ -27,9 +27,11 @@ import {
   laughRenderKey,
   pick,
   shiftPast,
+  treatmentOf,
   type LaughRender,
   type LaughKind,
   type SplicedLaugh,
+  type VoiceGender,
 } from '../../../src/lipsync/laughs';
 import { concat, framesOf, sameFormat, scanMp3, splitAt, type Mp3Format } from './_mp3';
 import { SPLICE_FORMAT } from './laughs/_convert';
@@ -88,6 +90,7 @@ interface GenerateBody {
   language?: string;
   voiceId?: string;
   voiceName?: string;
+  voiceGender?: VoiceGender;
   model?: LipsyncModel;
   params?: Partial<VoiceParams>;
   /** How reactions are performed. See ReactionOptions. */
@@ -223,6 +226,7 @@ async function spliceLaughs(
       label: clip.label,
       atMs: cutAt,
       durationMs: clipScan.durationMs,
+      treatment: treatmentOf(clip),
     });
     // Back onto the original timeline, which is where the marks still live.
     insertions.push({ atMs: cutAt - grown, durationMs: clipScan.durationMs });
@@ -263,12 +267,16 @@ export async function onRequestPost(
   const text = (body.text ?? '').trim();
   const language = body.language ?? 'en';
   const voiceId = (body.voiceId ?? '').trim();
+  const voiceGender = body.voiceGender;
   const model = body.model ?? 'eleven_v3';
   const params: VoiceParams = { ...DEFAULT_PARAMS, ...(body.params ?? {}) };
   const reactions: ReactionOptions = { ...DEFAULT_REACTIONS, ...(body.reactions ?? {}) };
 
   if (!text) return json({ error: 'Nothing to say', code: 'no_text' }, 400);
   if (!voiceId) return json({ error: 'No voice chosen', code: 'no_voice' }, 400);
+  if (voiceGender !== 'male' && voiceGender !== 'female') {
+    return json({ error: 'Choose whether this voice is male or female', code: 'no_gender' }, 400);
+  }
   if (!LANGUAGES.has(language)) {
     return json({ error: `language must be one of ${[...LANGUAGES].join(', ')}` }, 400);
   }
@@ -296,7 +304,7 @@ export async function onRequestPost(
     ? await readClips(env.LIPSYNC)
     : { sources: [], renders: [] };
   const covered: LaughKind[] = LAUGH_KINDS.filter(
-    (kind) => eligible(library.renders, kind, voiceId).length > 0,
+    (kind) => eligible(library, kind, voiceId, voiceGender).length > 0,
   );
 
   // WHAT AN UNCOVERED LAUGH DOES DEPENDS ON THE MODEL, and this is the one place the two
@@ -418,7 +426,7 @@ export async function onRequestPost(
   // --- 4. Splice our own laughs into the speech -------------------------------------
   const wanted = lifted
     .map((laugh) => ({
-      clip: pick(library.renders, laugh.kind, voiceId),
+      clip: pick(library, laugh.kind, voiceId, voiceGender),
       atMs: laughTimeMs(laugh, wordCount(script), result.words ?? [], result.durationMs),
     }))
     .filter((w): w is { clip: LaughRender; atMs: number } => w.clip !== null)
@@ -486,6 +494,7 @@ export async function onRequestPost(
     language: language as LipsyncPackage['language'],
     voiceId,
     voiceName: body.voiceName,
+    voiceGender,
     model,
     params,
     durationMs: result.durationMs + addedMs,

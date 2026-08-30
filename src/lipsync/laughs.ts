@@ -1,6 +1,6 @@
 /**
- * The laugh library: laughs you provide, rendered into each voice, spliced in place of
- * whatever ElevenLabs would have done with the tag.
+ * The laugh library: performances you provide, used as recorded or re-performed into one
+ * exact voice, and spliced in place of whatever ElevenLabs would have done with the tag.
  *
  * WHY THERE IS A LIBRARY AT ALL. `[laughs]` and `[giggles]` are v3 *audio tags*, which are
  * advisory. The model decides per generation whether to render one, so the same line gives
@@ -14,26 +14,27 @@
  * clips out of takes where the model happened to laugh well. That assumed the model has
  * varied, good laughs to harvest; it has roughly one mediocre one per voice, so a library
  * built that way could never be better than the thing it replaced. So you provide the
- * laugh — recorded on a phone, or from a sound library — and ElevenLabs' speech-to-speech
- * endpoint re-performs it in the target voice before it is stored. You choose the
- * performance; the output is still unmistakably the right speaker.
+ * laugh — recorded on a phone, or from a sound library. The browser makes a splice-ready
+ * MP3 without changing that performance. Speech-to-speech remains an optional second
+ * treatment when matching the exact tutor matters more than preserving the recording.
  *
  * A SOURCE IS NOT A RENDER, and keeping them apart is the whole shape of this file. A
- * converted clip belongs to exactly one voice — speech-to-speech renders into one voice,
- * and a laugh in the wrong voice is a stranger interrupting, which no amount of correct
- * splicing repairs. The *recording behind it* belongs to no voice at all. So the recording
- * is kept as the asset, and adopting a new voice is a re-render of something you already
- * have rather than a hunt for the original file.
+ * converted clip belongs to exactly one voice. An original belongs to a male or female
+ * pool and every matching voice may use it. Cross-pool conversion is refused.
  *
- * WHAT MAKES THE SPLICE FREE is that the conversion is asked for as `mp3_44100_128`, the
- * same format the text-to-speech endpoint returns. Both sides of every join therefore agree
- * on version, layer, rate, bitrate and channel mode, which is exactly what _mp3.ts needs to
- * concatenate bytes instead of decoding them. ElevenLabs does the transcode on the way in,
- * so no codec is needed anywhere in this app.
+ * WHAT MAKES THE SPLICE FREE is that both treatments produce `mp3_44100_128`, the same
+ * format as text-to-speech. ElevenLabs encodes converted clips; a dynamically loaded LAME
+ * encoder handles originals in the browser. The Worker scans both before storage.
  */
 
 /** The two tags this applies to, and the only two. See TAGS in tags.ts. */
 export type LaughKind = 'laughs' | 'giggles';
+
+/** The two vocal pools an original recording can belong to. */
+export type VoiceGender = 'male' | 'female';
+
+/** How the MP3 that is actually spliced was made. Absent on legacy voice renders. */
+export type LaughTreatment = 'original' | 'voice-converted';
 
 export const LAUGH_KINDS: LaughKind[] = ['laughs', 'giggles'];
 
@@ -64,6 +65,18 @@ export interface LaughSource {
    * wide sound in every voice it is ever rendered into, not just the first.
    */
   kind: LaughKind;
+  /**
+   * Which voices may use the recording without re-performing it.
+   *
+   * Optional only for sources imported before original-performance clips existed. An
+   * unclassified source is never offered raw; its existing voice renders still work.
+   */
+  gender?: VoiceGender;
+  /**
+   * Per-voice audition choice. A conversion wins by default once it exists; recording an
+   * explicit `original` here lets the author keep the source performance for that voice.
+   */
+  preferredTreatmentByVoice?: Record<string, LaughTreatment>;
   label: string;
   durationMs: number;
   bytes: number;
@@ -90,6 +103,10 @@ export interface LaughRender {
    * that as a missing field rather than as a migration is why there is no migration.
    */
   sourceId?: string;
+  /** `original` is the source performance encoded to splice format, not re-performed. */
+  treatment?: LaughTreatment;
+  /** Copied from the source; absent on harvested legacy clips. */
+  gender?: VoiceGender;
   kind: LaughKind;
   label: string;
   /**
@@ -98,7 +115,8 @@ export interface LaughRender {
    * The target of the conversion, not the origin of the recording. A laugh you recorded
    * yourself, rendered into a tutor's voice, is filed under the tutor.
    */
-  voiceId: string;
+  /** Absent only for an original render, which belongs to a gender pool rather than a voice. */
+  voiceId?: string;
   voiceName?: string;
   durationMs: number;
   bytes: number;
@@ -115,6 +133,20 @@ export interface LaughLibraryIndex {
   renders: LaughRender[];
 }
 
+export function treatmentOf(render: LaughRender): LaughTreatment {
+  return render.treatment === 'original' ? 'original' : 'voice-converted';
+}
+
+/** The one original-performance derivative belonging to a source, when it has one. */
+export function originalFor(
+  renders: readonly LaughRender[],
+  sourceId: string,
+): LaughRender | undefined {
+  return renders.find(
+    (render) => render.sourceId === sourceId && treatmentOf(render) === 'original',
+  );
+}
+
 /**
  * A laugh that was spliced in, recorded on the package.
  *
@@ -128,6 +160,7 @@ export interface SplicedLaugh {
   label: string;
   atMs: number;
   durationMs: number;
+  treatment?: LaughTreatment;
 }
 
 /**
@@ -138,11 +171,54 @@ export interface SplicedLaugh {
  * another voice is another person.
  */
 export function eligible(
-  renders: readonly LaughRender[],
+  library: LaughLibraryIndex,
   kind: LaughKind,
   voiceId: string,
+  voiceGender?: VoiceGender,
 ): LaughRender[] {
-  return renders.filter((r) => r.kind === kind && r.voiceId === voiceId);
+  const selected: LaughRender[] = [];
+
+  for (const source of library.sources) {
+    if (source.kind !== kind) continue;
+    const converted = library.renders.find(
+      (render) =>
+        render.sourceId === source.id &&
+        treatmentOf(render) === 'voice-converted' &&
+        render.voiceId === voiceId,
+    );
+    // Sources from the previous version have no gender and no original derivative. Their
+    // exact-voice conversions remain usable until the source is explicitly classified.
+    if (!source.gender) {
+      if (converted) selected.push(converted);
+      continue;
+    }
+    if (!voiceGender || source.gender !== voiceGender) continue;
+
+    const original = originalFor(library.renders, source.id);
+    const preferred = source.preferredTreatmentByVoice?.[voiceId];
+    if (preferred === 'original' && original) selected.push(original);
+    else if (converted) selected.push(converted);
+    else if (original) selected.push(original);
+  }
+
+  // Harvested legacy clips have no source. They remain exact-voice renders and bypass the
+  // gender pool because the voice they came from is already known by id.
+  for (const render of library.renders) {
+    if (
+      render.kind === kind &&
+      !render.sourceId &&
+      treatmentOf(render) === 'voice-converted' &&
+      render.voiceId === voiceId
+    ) {
+      selected.push(render);
+    }
+  }
+
+  // A corrupt index must not make one object twice as likely. This also keeps the flat
+  // list safe if a future migration temporarily leaves a duplicate render behind.
+  return selected.filter(
+    (render, index) => selected.findIndex((candidate) => candidate.id === render.id) === index,
+  );
 }
 
 /**
@@ -157,12 +233,13 @@ export function eligible(
  * back to whatever generate.ts decides the tag should do without one.
  */
 export function pick(
-  renders: readonly LaughRender[],
+  library: LaughLibraryIndex,
   kind: LaughKind,
   voiceId: string,
+  voiceGender?: VoiceGender,
   random: () => number = Math.random,
 ): LaughRender | null {
-  const options = eligible(renders, kind, voiceId);
+  const options = eligible(library, kind, voiceId, voiceGender);
   if (options.length === 0) return null;
   return options[Math.floor(random() * options.length) % options.length];
 }
@@ -172,7 +249,16 @@ export function renderedVoices(
   renders: readonly LaughRender[],
   sourceId: string,
 ): Set<string> {
-  return new Set(renders.filter((r) => r.sourceId === sourceId).map((r) => r.voiceId));
+  return new Set(
+    renders
+      .filter(
+        (render): render is LaughRender & { voiceId: string } =>
+          render.sourceId === sourceId &&
+          treatmentOf(render) === 'voice-converted' &&
+          Boolean(render.voiceId),
+      )
+      .map((render) => render.voiceId),
+  );
 }
 
 /**

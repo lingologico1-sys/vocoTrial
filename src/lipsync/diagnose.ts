@@ -236,7 +236,8 @@ export function report(pkg: LipsyncPackage): string {
     for (const laugh of spliced) {
       L.push(
         `  ${secs(laugh.atMs)}  ${laugh.kind.padEnd(8)} ${secs(laugh.durationMs).padStart(7)}  ` +
-          `"${laugh.label}"  [${laugh.clipId.slice(0, 8)}]`,
+          `${(laugh.treatment ?? 'legacy').padEnd(15)} "${laugh.label}"  ` +
+          `[${laugh.clipId.slice(0, 8)}]`,
       );
     }
     // Worth stating, because it is the one span length on the page that is not a

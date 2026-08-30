@@ -1,57 +1,46 @@
 import { json } from '../../_middleware';
 import { type LipsyncEnv, readClips, writeClips } from '../_library';
-import { convertToVoice, isFailure } from './_convert';
+import {
+  convertToVoice,
+  isFailure,
+  validateOriginalMp3,
+  type ConvertFailure,
+} from './_convert';
 import {
   laughRenderKey,
   laughSourceKey,
+  type LaughKind,
   type LaughRender,
   type LaughSource,
-  type LaughKind,
+  type VoiceGender,
 } from '../../../../src/lipsync/laughs';
 
-/**
- * A laugh you provided, kept as a recording and rendered into the voice in hand.
- *
- * WHY IMPORT DOES BOTH. A source with no render is not yet usable for anything, and a
- * render with no source cannot be carried to another voice — so the first render is part of
- * importing rather than a second step somebody has to know to take. Every render after the
- * first is `render.ts`, which is the same conversion against a source that already exists.
- *
- * THE FILE ARRIVES ALREADY TRIMMED, as 16-bit mono PCM WAV cut in the browser. That is not
- * an arbitrary division of labour: the Workers runtime has no codec, so it cannot open an
- * m4a or find where a laugh starts, whereas a browser has already decoded the file to
- * samples in order to draw the trim. See src/lipsync/audioTrim.ts. What arrives here is
- * therefore exactly the selection, and this route never has to interpret audio at all —
- * it hands the bytes to ElevenLabs and checks what comes back.
- *
- * Written in dependency order, the order save.ts uses: the source object, then the render
- * object, then the index naming both. An interruption leaves an object nobody lists rather
- * than a listing that points at nothing.
- */
-
+/** Keep one recording, always raw and spliceable, and optionally re-perform it. */
 interface ImportBody {
-  /** The trimmed selection, WAV, base64. */
   audioBase64?: string;
+  rawMp3Base64?: string;
   kind?: LaughKind;
+  gender?: VoiceGender;
   label?: string;
-  /** The voice to render into first. The one the page currently has loaded. */
   voiceId?: string;
   voiceName?: string;
-  /** How long the selection is, measured in the browser where the samples were. */
+  voiceGender?: VoiceGender;
+  convert?: boolean;
   durationMs?: number;
   removeBackgroundNoise?: boolean;
 }
 
-/**
- * Bounds on what is worth importing.
- *
- * The floor is below the shortest giggle and above a mis-drag that selected nothing. The
- * ceiling is not a claim about laughter — some are long — but about a selection that took
- * the whole recording with it, which is indistinguishable from a deliberate one except by
- * length, and which would be charged for as a conversion either way.
- */
 const MIN_CLIP_MS = 150;
 const MAX_CLIP_MS = 8000;
+const decode = (base64: string) => Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+
+function encode(bytes: Uint8Array): string {
+  let binary = '';
+  for (let at = 0; at < bytes.length; at += 8192) {
+    binary += String.fromCharCode(...bytes.subarray(at, at + 8192));
+  }
+  return btoa(binary);
+}
 
 export async function onRequestPost(
   context: EventContext<LipsyncEnv, string, Record<string, unknown>>,
@@ -59,12 +48,6 @@ export async function onRequestPost(
   const { request, env } = context;
   if (!env.LIPSYNC) {
     return json({ error: 'No lip-sync library is configured', code: 'no_bucket' }, 500);
-  }
-  if (!env.ELEVENLABS_API_KEY) {
-    return json(
-      { error: 'ELEVENLABS_API_KEY is not configured on this deployment', code: 'no_key' },
-      500,
-    );
   }
 
   let body: ImportBody;
@@ -75,19 +58,35 @@ export async function onRequestPost(
   }
 
   const kind = body.kind;
+  const gender = body.gender;
   const voiceId = (body.voiceId ?? '').trim();
+  const wantsConversion = body.convert === true;
   const durationMs = Math.round(body.durationMs ?? 0);
 
   if (!body.audioBase64) return json({ error: 'No audio', code: 'no_audio' }, 400);
+  if (!body.rawMp3Base64) {
+    return json({ error: 'No original-performance MP3', code: 'no_original' }, 400);
+  }
   if (kind !== 'laughs' && kind !== 'giggles') {
     return json({ error: 'kind must be laughs or giggles', code: 'bad_kind' }, 400);
   }
-  if (!voiceId) return json({ error: 'No voice to render into', code: 'no_voice' }, 400);
-  if (durationMs < MIN_CLIP_MS) {
+  if (gender !== 'male' && gender !== 'female') {
+    return json({ error: 'gender must be male or female', code: 'bad_gender' }, 400);
+  }
+  if (wantsConversion && !voiceId) {
+    return json({ error: 'No voice to render into', code: 'no_voice' }, 400);
+  }
+  if (wantsConversion && body.voiceGender !== gender) {
     return json(
-      { error: `A laugh has to be at least ${MIN_CLIP_MS}ms`, code: 'too_short' },
+      {
+        error: 'A laugh can only be converted into a voice from its own gender pool',
+        code: 'gender_mismatch',
+      },
       400,
     );
+  }
+  if (durationMs < MIN_CLIP_MS) {
+    return json({ error: `A laugh has to be at least ${MIN_CLIP_MS}ms`, code: 'too_short' }, 400);
   }
   if (durationMs > MAX_CLIP_MS) {
     return json(
@@ -96,68 +95,118 @@ export async function onRequestPost(
     );
   }
 
-  const wav = Uint8Array.from(atob(body.audioBase64), (c) => c.charCodeAt(0));
-
-  // Converted BEFORE anything is stored, so a conversion that fails leaves no orphan
-  // source behind for somebody to wonder about later. The recording is only worth keeping
-  // once it is known to be convertible.
-  const converted = await convertToVoice(
-    env.ELEVENLABS_API_KEY,
-    voiceId,
-    wav,
-    body.removeBackgroundNoise !== false,
-  );
-  if (isFailure(converted)) {
-    const { status, ...rest } = converted;
+  const wav = decode(body.audioBase64);
+  const originalResult = validateOriginalMp3(decode(body.rawMp3Base64));
+  if (isFailure(originalResult)) {
+    const { status, ...rest } = originalResult;
     return json(rest, status);
+  }
+  // LAME adds a fixed encoder delay and a final padded frame. A small overrun is expected;
+  // a large one means the WAV, MP3 and claimed selection do not describe the same clip.
+  if (Math.abs(originalResult.scan.durationMs - durationMs) > 120) {
+    return json(
+      {
+        error: 'The original-performance MP3 does not match the selected duration',
+        code: 'duration_mismatch',
+        detail: `selected ${durationMs}ms; encoded ${originalResult.scan.durationMs}ms`,
+      },
+      400,
+    );
+  }
+
+  // A failed optional re-performance cannot veto the original performance. Losing a good
+  // source because STS handled it badly is precisely the failure this path removes.
+  let convertedResult: Awaited<ReturnType<typeof convertToVoice>> | undefined;
+  let conversionError: Omit<ConvertFailure, 'status'> | undefined;
+  if (wantsConversion) {
+    if (!env.ELEVENLABS_API_KEY) {
+      conversionError = {
+        error: 'The original was kept, but ELEVENLABS_API_KEY is not configured',
+        code: 'no_key',
+      };
+    } else {
+      convertedResult = await convertToVoice(
+        env.ELEVENLABS_API_KEY,
+        voiceId,
+        wav,
+        body.removeBackgroundNoise !== false,
+      );
+      if (isFailure(convertedResult)) {
+        conversionError = {
+          error: convertedResult.error,
+          code: convertedResult.code,
+          detail: convertedResult.detail,
+        };
+        convertedResult = undefined;
+      }
+    }
   }
 
   const label = (body.label ?? '').trim() || `${kind} ${new Date().toLocaleDateString()}`;
-
   const source: LaughSource = {
     id: crypto.randomUUID(),
     createdAt: Date.now(),
     kind,
+    gender,
     label,
     durationMs,
     bytes: wav.length,
   };
-
-  const render: LaughRender = {
+  const original: LaughRender = {
     id: crypto.randomUUID(),
     createdAt: Date.now(),
     sourceId: source.id,
+    treatment: 'original',
+    gender,
     kind,
     label,
-    voiceId,
-    voiceName: body.voiceName,
-    // The converted length, not the selection's. Speech-to-speech re-performs rather than
-    // transforms, so what comes back is close to the input but not identical to it — and
-    // it is this number the face's laugh is fitted to.
-    durationMs: converted.scan.durationMs,
-    bytes: converted.bytes.length,
+    durationMs: originalResult.scan.durationMs,
+    bytes: originalResult.bytes.length,
   };
+  const converted: LaughRender | undefined = convertedResult && !isFailure(convertedResult)
+    ? {
+        id: crypto.randomUUID(),
+        createdAt: Date.now(),
+        sourceId: source.id,
+        treatment: 'voice-converted',
+        gender,
+        kind,
+        label,
+        voiceId,
+        voiceName: body.voiceName,
+        durationMs: convertedResult.scan.durationMs,
+        bytes: convertedResult.bytes.length,
+      }
+    : undefined;
+  if (converted) source.preferredTreatmentByVoice = { [voiceId]: 'voice-converted' };
 
   await env.LIPSYNC.put(laughSourceKey(source.id), wav, {
     httpMetadata: { contentType: 'audio/wav' },
   });
-  await env.LIPSYNC.put(laughRenderKey(render.id), converted.bytes, {
+  await env.LIPSYNC.put(laughRenderKey(original.id), originalResult.bytes, {
     httpMetadata: { contentType: 'audio/mpeg' },
   });
-
-  const library = await readClips(env.LIPSYNC);
-  await writeClips(env.LIPSYNC, {
-    sources: [source, ...library.sources],
-    renders: [render, ...library.renders],
-  });
-
-  let binary = '';
-  for (let i = 0; i < converted.bytes.length; i++) {
-    binary += String.fromCharCode(converted.bytes[i]);
+  if (converted && convertedResult && !isFailure(convertedResult)) {
+    await env.LIPSYNC.put(laughRenderKey(converted.id), convertedResult.bytes, {
+      httpMetadata: { contentType: 'audio/mpeg' },
+    });
   }
 
-  // The rendered audio comes straight back so it can be auditioned without a second
-  // round trip. Whether the conversion is any good is the only question that matters
-  // here, and it should be answerable the instant the button stops spinning.
-  return json({ source, render, audioBase64: btoa(binary) });
+  const latest = await readClips(env.LIPSYNC);
+  await writeClips(env.LIPSYNC, {
+    sources: [source, ...latest.sources],
+    renders: [original, ...(converted ? [converted] : []), ...latest.renders],
+  });
+
+  const audition = converted && convertedResult && !isFailure(convertedResult)
+    ? convertedResult.bytes
+    : originalResult.bytes;
+  return json({
+    source,
+    original,
+    converted,
+    render: converted ?? original,
+    conversionError,
+    audioBase64: encode(audition),
+  });
 }

@@ -1,7 +1,21 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, Loader2, Sparkles } from 'lucide-react';
-import { fetchQuota, generate, listClips, LipsyncError, type Generated } from './library';
-import { LAUGH_KINDS, eligible, laughKindOf, type LaughRender } from './laughs';
+import {
+  fetchQuota,
+  fetchVoiceInfo,
+  generate,
+  LAUGH_LIBRARY_CHANGED,
+  listClips,
+  LipsyncError,
+  type Generated,
+} from './library';
+import {
+  LAUGH_KINDS,
+  eligible,
+  laughKindOf,
+  type LaughLibraryIndex,
+  type VoiceGender,
+} from './laughs';
 import {
   costOf,
   estimateUsd,
@@ -19,7 +33,7 @@ import {
 } from './published';
 import { SMILE_LEAD_MIN_MS, TAGS, reactionsIn, stripTags, type Tag } from './tags';
 import { scriptWarnings } from './warnings';
-import { loadPrefs, savePrefs } from './prefs';
+import { loadPrefs, loadVoiceGender, savePrefs, saveVoiceGender } from './prefs';
 
 /**
  * Writing a line and hearing it, without leaving the page.
@@ -86,6 +100,11 @@ export default function Compose({ onGenerated, busy, setBusy }: ComposeProps) {
   const [text, setText] = useState(remembered.text);
   const [language, setLanguage] = useState<LipsyncPackage['language']>(remembered.language);
   const [voiceId, setVoiceId] = useState(remembered.voiceId);
+  const [voiceName, setVoiceName] = useState(remembered.voiceName ?? '');
+  const [voiceGender, setVoiceGender] = useState<VoiceGender | undefined>(
+    loadVoiceGender(remembered.voiceId) ?? remembered.voiceGender,
+  );
+  const [lookingUpVoice, setLookingUpVoice] = useState(false);
   const [model, setModel] = useState<LipsyncModel>(remembered.model);
   const [params, setParams] = useState<VoiceParams>(remembered.params);
   const [reactions_, setReactions] = useState<ReactionOptions>(remembered.reactions);
@@ -97,8 +116,48 @@ export default function Compose({ onGenerated, busy, setBusy }: ComposeProps) {
   // alternative — saving on blur, or on generate — loses the line to the refresh
   // that happens mid-edit, which is the only case this is for.
   useEffect(() => {
-    savePrefs({ text, language, voiceId, model, params, reactions: reactions_ });
-  }, [text, language, voiceId, model, params, reactions_]);
+    savePrefs({
+      text,
+      language,
+      voiceId,
+      voiceName,
+      voiceGender,
+      model,
+      params,
+      reactions: reactions_,
+    });
+  }, [text, language, voiceId, voiceName, voiceGender, model, params, reactions_]);
+
+  // Voice labels are optional in ElevenLabs, so lookup can fill this control but never
+  // replace it. A missing label leaves the two-button choice waiting for the author.
+  useEffect(() => {
+    const id = voiceId.trim();
+    if (!id) {
+      setLookingUpVoice(false);
+      return;
+    }
+    let current = true;
+    const timer = window.setTimeout(() => {
+      setLookingUpVoice(true);
+      void fetchVoiceInfo(id)
+        .then((voice) => {
+          if (!current) return;
+          if (voice.name) setVoiceName(voice.name);
+          if (voice.gender) {
+            setVoiceGender(voice.gender);
+            saveVoiceGender(id, voice.gender);
+          }
+        })
+        .catch(() => undefined)
+        .finally(() => {
+          if (current) setLookingUpVoice(false);
+        });
+    }, 500);
+    return () => {
+      current = false;
+      window.clearTimeout(timer);
+    };
+  }, [voiceId]);
 
   // Read once on mount and again after each generation, since generating is the only
   // thing on this page that spends any of it.
@@ -119,17 +178,20 @@ export default function Compose({ onGenerated, busy, setBusy }: ComposeProps) {
    * keeps the two in step is that both ask `eligible` from laughs.ts rather than each
    * deciding for itself what "covered" means.
    */
-  const [renders, setRenders] = useState<LaughRender[]>([]);
+  const [library, setLibrary] = useState<LaughLibraryIndex>({ sources: [], renders: [] });
   useEffect(() => {
-    void listClips()
-      .then((library) => setRenders(library.renders))
-      .catch(() => undefined);
+    const refresh = () => void listClips().then(setLibrary).catch(() => undefined);
+    refresh();
+    window.addEventListener(LAUGH_LIBRARY_CHANGED, refresh);
+    return () => window.removeEventListener(LAUGH_LIBRARY_CHANGED, refresh);
   }, []);
 
   const { fromLibrary, fromTimings, dropped } = useMemo(() => {
     const covered = new Set(
       voiceId.trim()
-        ? LAUGH_KINDS.filter((k) => eligible(renders, k, voiceId.trim()).length > 0)
+        ? LAUGH_KINDS.filter(
+            (k) => eligible(library, k, voiceId.trim(), voiceGender).length > 0,
+          )
         : [],
     );
     // Read off the raw text rather than off `reactions`, which is empty on v2 because
@@ -154,7 +216,7 @@ export default function Compose({ onGenerated, busy, setBusy }: ComposeProps) {
       if (!laughKindOf(tag.tag)) timed.push(tag.tag);
     }
     return { fromLibrary: spliced, fromTimings: timed, dropped: gone };
-  }, [reactions, renders, voiceId, text, tagsAllowed]);
+  }, [reactions, library, voiceId, voiceGender, text, tagsAllowed]);
 
   /** Inserts at the cursor rather than appending — a tag placed mid-line is the point. */
   function insert(tag: string) {
@@ -183,12 +245,18 @@ export default function Compose({ onGenerated, busy, setBusy }: ComposeProps) {
       setProblem('Paste an ElevenLabs voice ID.');
       return;
     }
+    if (!voiceGender) {
+      setProblem('Choose whether this voice is male or female.');
+      return;
+    }
     setBusy(true);
     try {
       const result = await generate({
         text,
         language,
         voiceId: voiceId.trim(),
+        voiceName: voiceName || undefined,
+        voiceGender,
         model,
         params,
         reactions: reactions_,
@@ -293,16 +361,60 @@ export default function Compose({ onGenerated, busy, setBusy }: ComposeProps) {
         </div>
       )}
 
-      <div className="grid gap-3 sm:grid-cols-3">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <label className="flex flex-col gap-1.5">
           <span className="text-xs font-medium text-slate-400">Voice ID</span>
           <input
             value={voiceId}
-            onChange={(event) => setVoiceId(event.target.value)}
+            onChange={(event) => {
+              const next = event.target.value;
+              setVoiceId(next);
+              setVoiceName('');
+              setVoiceGender(loadVoiceGender(next));
+            }}
             placeholder="from the ElevenLabs voice page"
             className="rounded-lg border border-slate-800 bg-slate-900 px-3 py-2 font-mono text-xs text-slate-200 placeholder:text-slate-700"
           />
+          <span className="text-[11px] leading-snug text-slate-600">
+            {lookingUpVoice
+              ? 'Checking voice metadata…'
+              : voiceName
+                ? voiceName
+                : 'Name and gender are read when available.'}
+          </span>
         </label>
+
+        <fieldset className="flex flex-col gap-1.5">
+          <legend className="text-xs font-medium text-slate-400">Voice gender</legend>
+          <div className="grid grid-cols-2 gap-1 rounded-lg border border-slate-800 bg-slate-900 p-1">
+            {(['female', 'male'] as const).map((gender) => (
+              <label
+                key={gender}
+                className={`cursor-pointer rounded-md px-2 py-1.5 text-center text-xs capitalize transition-colors ${
+                  voiceGender === gender
+                    ? 'bg-slate-700 text-slate-100'
+                    : 'text-slate-500 hover:text-slate-300'
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="voice-gender"
+                  value={gender}
+                  checked={voiceGender === gender}
+                  onChange={() => {
+                    setVoiceGender(gender);
+                    saveVoiceGender(voiceId, gender);
+                  }}
+                  className="sr-only"
+                />
+                {gender}
+              </label>
+            ))}
+          </div>
+          <span className="text-[11px] leading-snug text-slate-600">
+            Sets which original laugh pool this voice can use.
+          </span>
+        </fieldset>
 
         <label className="flex flex-col gap-1.5">
           <span className="text-xs font-medium text-slate-400">Language</span>
@@ -562,7 +674,7 @@ export default function Compose({ onGenerated, busy, setBusy }: ComposeProps) {
         <button
           type="button"
           onClick={() => void run()}
-          disabled={busy || !script.trim() || !voiceId.trim()}
+          disabled={busy || !script.trim() || !voiceId.trim() || !voiceGender}
           className="inline-flex items-center gap-2 rounded-lg border border-slate-700 px-4 py-2 text-sm font-medium text-slate-200 transition-colors hover:border-slate-500 disabled:cursor-not-allowed disabled:border-slate-900 disabled:text-slate-700"
         >
           {busy ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}

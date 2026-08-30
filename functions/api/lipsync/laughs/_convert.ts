@@ -1,4 +1,4 @@
-import { scanMp3, type Mp3Scan } from '../_mp3';
+import { sameFormat, scanMp3, type Mp3Format, type Mp3Scan } from '../_mp3';
 
 /**
  * One laugh, re-performed in a chosen voice by ElevenLabs' voice changer.
@@ -33,6 +33,25 @@ const STS_MODEL = 'eleven_multilingual_sts_v2';
  * the same value on the text-to-speech call for the same reason.
  */
 export const SPLICE_FORMAT = 'mp3_44100_128';
+
+/**
+ * The fields a browser-encoded original must share with generated speech.
+ *
+ * Bitrate is recorded because it is useful in an error, although `sameFormat` correctly
+ * ignores it: MP3 frames may change bitrate within one legal stream. Channel mode is the
+ * one fact `SPLICE_FORMAT` does not spell out, and ElevenLabs currently returns mono.
+ */
+export const SPLICE_MP3: Mp3Format = {
+  version: 3,
+  layer: 1,
+  sampleRate: 44_100,
+  bitrateKbps: 128,
+  channelMode: 3,
+};
+
+const describe = (format: Mp3Format) =>
+  `${(format.sampleRate / 1000).toFixed(1)}kHz ${format.bitrateKbps}kbps ` +
+  `${format.channelMode === 3 ? 'mono' : 'stereo'} mpeg${format.version === 3 ? '1' : '2'}`;
 
 export interface Converted {
   bytes: Uint8Array;
@@ -98,4 +117,25 @@ export async function convertToVoice(
 
 export function isFailure(result: Converted | ConvertFailure): result is ConvertFailure {
   return 'error' in result;
+}
+
+/** Scan and format-check an original-performance derivative before it reaches R2. */
+export function validateOriginalMp3(bytes: Uint8Array): Converted | ConvertFailure {
+  const scan = scanMp3(bytes);
+  if (!scan) {
+    return {
+      error: 'The original-performance encode is not a readable MP3',
+      code: 'unreadable_original',
+      status: 400,
+    };
+  }
+  if (!sameFormat(scan.format, SPLICE_MP3)) {
+    return {
+      error: 'The original-performance encode does not match generated speech',
+      code: 'original_format',
+      status: 400,
+      detail: `got ${describe(scan.format)}; need ${describe(SPLICE_MP3)}`,
+    };
+  }
+  return { bytes, scan };
 }

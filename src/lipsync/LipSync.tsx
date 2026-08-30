@@ -1,5 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, AudioLines, Check, RotateCcw, Save, Upload } from 'lucide-react';
+import {
+  AlertTriangle,
+  AudioLines,
+  Check,
+  CheckCircle2,
+  RotateCcw,
+  Save,
+  Upload,
+  X,
+} from 'lucide-react';
 import BuildBadge from '../BuildBadge';
 import ReturnButton from '../ReturnButton';
 import SpeakingFace from '../live/SpeakingFace';
@@ -118,6 +127,7 @@ export default function LipSync() {
    * store. Saving is offered only for what this page made itself.
    */
   const [generated, setGenerated] = useState<Generated | null>(null);
+  const [showGenerationComplete, setShowGenerationComplete] = useState(false);
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
   /**
@@ -146,7 +156,14 @@ export default function LipSync() {
    * takes the yawn's and the sigh's eyes down with it. This one applies to the package
    * already in hand, only to the laughs, and is reversible by clicking it again.
    */
-  const [laughEyesOpen, setLaughEyesOpen] = useState(false);
+  const [laughEyesOpen, setLaughEyesOpen] = useState(true);
+  const playerRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    if (!showGenerationComplete) return;
+    const timeout = window.setTimeout(() => setShowGenerationComplete(false), 30_000);
+    return () => window.clearTimeout(timeout);
+  }, [showGenerationComplete, generated]);
 
   /**
    * The clock the mouth reads, and the one thing on this page that is subtle.
@@ -248,6 +265,7 @@ export default function LipSync() {
     setStarted(false);
     setDuration(0);
     setGenerated(null);
+    setShowGenerationComplete(false);
     setSaved(false);
   }
 
@@ -302,6 +320,7 @@ export default function LipSync() {
       oovCount: pkg.oovCount,
     });
     setGenerated(result);
+    setShowGenerationComplete(true);
     setSaved(false);
     setStarted(false);
     setDuration(0);
@@ -356,6 +375,7 @@ export default function LipSync() {
     setMeta(null);
     setProblem(null);
     setGenerated(null);
+    setShowGenerationComplete(false);
     setSaved(false);
     setStarted(false);
     setDuration(0);
@@ -526,7 +546,10 @@ export default function LipSync() {
           </p>
         )}
 
-        <section className="flex flex-col items-center gap-4 rounded-xl border border-slate-800 py-6">
+        <section
+          ref={playerRef}
+          className="flex flex-col items-center gap-4 rounded-xl border border-slate-800 py-6"
+        >
           <div className="w-[320px]">
             <SpeakingFace
               tap={null}
@@ -664,6 +687,7 @@ export default function LipSync() {
           // "show the library, but there is nothing to render for yet".
           voiceId={pkg?.voiceId ?? ''}
           voiceName={pkg?.voiceName}
+          voiceGender={pkg?.voiceGender}
           busy={busy}
           setBusy={setBusy}
         />
@@ -675,6 +699,40 @@ export default function LipSync() {
           </p>
         )}
       </div>
+
+      {showGenerationComplete && generated && (
+        <div
+          role="status"
+          aria-live="assertive"
+          className="fixed inset-x-4 bottom-4 z-50 mx-auto flex max-w-md items-start gap-3 rounded-xl border border-emerald-700/70 bg-slate-900 p-4 shadow-2xl shadow-black/60"
+        >
+          <CheckCircle2 size={20} className="mt-0.5 shrink-0 text-emerald-400" />
+          <div className="min-w-0 flex-1">
+            <p className="font-medium text-slate-100">Generation complete</p>
+            <p className="mt-1 text-sm text-slate-400">
+              {generated.package.name} is ready to review and play.
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                setShowGenerationComplete(false);
+                playerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              }}
+              className="mt-3 rounded-lg bg-emerald-500 px-3 py-1.5 text-xs font-medium text-slate-950 transition-colors hover:bg-emerald-400"
+            >
+              View generation
+            </button>
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowGenerationComplete(false)}
+            aria-label="Dismiss generation complete popup"
+            className="rounded-md p-1 text-slate-500 transition-colors hover:bg-slate-800 hover:text-slate-200"
+          >
+            <X size={16} />
+          </button>
+        </div>
+      )}
     </div>
   );
 }

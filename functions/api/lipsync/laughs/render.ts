@@ -4,7 +4,9 @@ import { convertToVoice, isFailure } from './_convert';
 import {
   laughRenderKey,
   laughSourceKey,
+  treatmentOf,
   type LaughRender,
+  type VoiceGender,
 } from '../../../../src/lipsync/laughs';
 
 /**
@@ -25,6 +27,7 @@ interface RenderBody {
   sourceId?: string;
   voiceId?: string;
   voiceName?: string;
+  voiceGender?: VoiceGender;
   removeBackgroundNoise?: boolean;
 }
 
@@ -57,12 +60,27 @@ export async function onRequestPost(
   const library = await readClips(env.LIPSYNC);
   const source = library.sources.find((s) => s.id === sourceId);
   if (!source) return json({ error: 'No such laugh', code: 'not_found' }, 404);
+  if (!source.gender) {
+    return json({ error: 'Classify that recording as male or female first', code: 'no_gender' }, 409);
+  }
+  if (body.voiceGender !== source.gender) {
+    return json(
+      {
+        error: 'A laugh can only be converted into a voice from its own gender pool',
+        code: 'gender_mismatch',
+      },
+      400,
+    );
+  }
 
   // Refused rather than made twice. A second render is a second charge for a clip that
   // would be picked at random against the first, so the library would grow a duplicate that
   // makes the same laugh twice as likely as the others — paying to make the variety worse.
   const already = library.renders.find(
-    (r) => r.sourceId === sourceId && r.voiceId === voiceId,
+    (r) =>
+      r.sourceId === sourceId &&
+      treatmentOf(r) === 'voice-converted' &&
+      r.voiceId === voiceId,
   );
   if (already) {
     return json(
@@ -95,6 +113,8 @@ export async function onRequestPost(
     id: crypto.randomUUID(),
     createdAt: Date.now(),
     sourceId,
+    treatment: 'voice-converted',
+    gender: source.gender,
     // Copied down from the source rather than taken from the request: what kind of laugh a
     // recording is, and what it is called, are facts about the recording and must not drift
     // between one voice's render and another's.
@@ -112,8 +132,19 @@ export async function onRequestPost(
   // Re-read rather than reusing the copy from above: the conversion is a slow call, and the
   // window between them is long enough for another import to have landed.
   const latest = await readClips(env.LIPSYNC);
+  const sources = latest.sources.map((entry) =>
+    entry.id === sourceId
+      ? {
+          ...entry,
+          preferredTreatmentByVoice: {
+            ...(entry.preferredTreatmentByVoice ?? {}),
+            [voiceId]: 'voice-converted' as const,
+          },
+        }
+      : entry,
+  );
   await writeClips(env.LIPSYNC, {
-    sources: latest.sources,
+    sources,
     renders: [render, ...latest.renders],
   });
 
