@@ -237,6 +237,7 @@ export default function EyewearPanel({
   const [settings, setSettings] = useState(DEFAULT_MATTE);
   const [proposal, setProposal] = useState<string | null>(kit.eyewear?.frame ?? null);
   const [frame, setFrame] = useState<string | null>(kit.eyewear?.frame ?? null);
+  const [readyCandidate, setReadyCandidate] = useState<EyewearCandidate | null>(null);
   const [coverage, setCoverage] = useState<number | null>(null);
 
   useEffect(() => setBox(kit.eyewear?.box ?? defaultBox()), [kit.id, kit.eyewear?.box]);
@@ -244,12 +245,12 @@ export default function EyewearPanel({
   useEffect(() => {
     if (!candidate) return;
     let live = true;
-    setFrame(null);
     proposeEyewearMatte(candidate.source, candidate.bare, candidate.box, settings)
       .then((result) => {
         if (!live) return;
         setProposal(result.image);
         setFrame(result.image);
+        setReadyCandidate(candidate);
         setCoverage(result.coverage);
       })
       .catch(() => undefined);
@@ -324,7 +325,7 @@ export default function EyewearPanel({
         </div>
       )}
 
-      {candidate && frame && proposal && (
+      {candidate && readyCandidate === candidate && frame && proposal && (
         <div className="space-y-3">
           <div className="grid gap-3 sm:grid-cols-4">
             <label className="text-xs text-slate-400">Threshold {settings.threshold}<input className="block w-full" type="range" min={4} max={100} value={settings.threshold} onChange={(event) => update('threshold', Number(event.target.value))} /></label>
