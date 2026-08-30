@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
   AudioLines,
@@ -16,7 +16,7 @@ import { parseMfaMarks, type MfaMarkFile } from '../live/mfa';
 import type { VisemeMark } from '../live/polly';
 import { MARK_LOOKAHEAD_MS } from '../live/polly';
 import { MAX_LOOKAHEAD_MS } from '../live/visemes';
-import Compose from './Compose';
+import Compose, { type ComposeVoice } from './Compose';
 import Diagnostics from './Diagnostics';
 import LaughLibrary from './LaughLibrary';
 import { audioUrl, saveLine, type Generated } from './library';
@@ -25,7 +25,7 @@ import { loadBundledKit } from '../facekit/bundled';
 import { fetchPublished, listPublished } from '../facekit/library';
 import type { PublishedFace } from '../facekit/published';
 import type { FaceKit } from '../facekit/kit';
-import { clearPrefs, loadPrefs, savePrefs } from './prefs';
+import { clearPrefs, loadPrefs, loadVoiceGender, savePrefs } from './prefs';
 
 /**
  * A mouth driven by a file instead of by a call.
@@ -87,6 +87,12 @@ export default function LipSync() {
   const [problem, setProblem] = useState<string | null>(null);
   const remembered = useState(loadPrefs)[0];
   const [lookaheadMs, setLookaheadMs] = useState(remembered.lookaheadMs);
+  const [composeVoice, setComposeVoice] = useState<ComposeVoice>({
+    voiceId: remembered.voiceId.trim(),
+    voiceName: remembered.voiceName || undefined,
+    voiceGender: loadVoiceGender(remembered.voiceId) ?? remembered.voiceGender,
+  });
+  const takeComposeVoice = useCallback((voice: ComposeVoice) => setComposeVoice(voice), []);
 
   const [kit, setKit] = useState<FaceKit | null>(null);
   const [faces, setFaces] = useState<PublishedFace[]>([]);
@@ -456,6 +462,7 @@ export default function LipSync() {
         <Compose
           key={generation}
           onGenerated={takeGenerated}
+          onVoiceChange={takeComposeVoice}
           busy={busy}
           setBusy={setBusy}
         />
@@ -682,12 +689,11 @@ export default function LipSync() {
         )}
 
         <LaughLibrary
-          // The voice of the loaded take, which is the voice a laugh would be converted
-          // into. Empty before anything has been generated, which the panel reads as
-          // "show the library, but there is nothing to render for yet".
-          voiceId={pkg?.voiceId ?? ''}
-          voiceName={pkg?.voiceName}
-          voiceGender={pkg?.voiceGender}
+          // Preferences configure the next generation, including the very first one.
+          // A loaded take describes the past and may use a voice Compose has since changed.
+          voiceId={composeVoice.voiceId}
+          voiceName={composeVoice.voiceName}
+          voiceGender={composeVoice.voiceGender}
           busy={busy}
           setBusy={setBusy}
         />

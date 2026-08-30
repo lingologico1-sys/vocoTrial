@@ -209,6 +209,122 @@ export async function cropToBox(src: string, box: Box): Promise<string> {
   return ctx.canvas.toDataURL('image/png');
 }
 
+export interface EyewearMatteSettings {
+  /** RGB distance at which a changed pixel begins to belong to the proposal. */
+  threshold: number;
+  /** Width of the soft decision around `threshold`, in colour levels. */
+  softness: number;
+  /** Maximum-filter radius used to close small holes in thin rims. */
+  grow: number;
+  /** Final alpha blur in pixels. */
+  feather: number;
+}
+
+export interface EyewearMatte {
+  /** Cropped RGBA artwork registered to the supplied box. */
+  image: string;
+  /** Share of the box carrying visible proposed artwork. */
+  coverage: number;
+}
+
+/** Smooth transition from zero to one, including the degenerate hard edge. */
+function smoothstep(edge0: number, edge1: number, value: number): number {
+  if (edge0 === edge1) return value >= edge1 ? 1 : 0;
+  const t = Math.min(1, Math.max(0, (value - edge0) / (edge1 - edge0)));
+  return t * t * (3 - 2 * t);
+}
+
+/**
+ * Proposes a glasses matte from the exact portrait before and after de-glassing.
+ *
+ * This is deliberately only a proposal. The difference also contains any eye,
+ * brow or skin pixels the model reconstructed, so FaceKit puts the result in an
+ * erase/restore editor before it can become wearable artwork.
+ */
+export async function proposeEyewearMatte(
+  glassed: string,
+  bare: string,
+  box: Box,
+  settings: EyewearMatteSettings,
+): Promise<EyewearMatte> {
+  const [glassedImage, bareImage] = await Promise.all([loadImage(glassed), loadImage(bare)]);
+  const before = context(box.width, box.height);
+  const after = context(box.width, box.height);
+  before.drawImage(glassedImage, box.x, box.y, box.width, box.height, 0, 0, box.width, box.height);
+  after.drawImage(bareImage, box.x, box.y, box.width, box.height, 0, 0, box.width, box.height);
+  const source = before.getImageData(0, 0, box.width, box.height);
+  const target = after.getImageData(0, 0, box.width, box.height);
+  let alpha = new Uint8ClampedArray(box.width * box.height);
+  const low = settings.threshold - settings.softness;
+  const high = settings.threshold + settings.softness;
+
+  for (let pixel = 0; pixel < alpha.length; pixel++) {
+    const i = pixel * 4;
+    // Max-channel distance keeps pale coloured rims whose luminance happens to
+    // match the skin; multiplying by the source alpha preserves cut-out edges.
+    const distance = Math.max(
+      Math.abs(source.data[i] - target.data[i]),
+      Math.abs(source.data[i + 1] - target.data[i + 1]),
+      Math.abs(source.data[i + 2] - target.data[i + 2]),
+    );
+    alpha[pixel] = Math.round(
+      255 * smoothstep(low, high, distance) * (source.data[i + 3] / 255),
+    );
+  }
+
+  const grow = Math.max(0, Math.min(8, Math.round(settings.grow)));
+  if (grow > 0) {
+    const expanded = new Uint8ClampedArray(alpha.length);
+    for (let y = 0; y < box.height; y++) {
+      for (let x = 0; x < box.width; x++) {
+        let strongest = 0;
+        for (let oy = -grow; oy <= grow; oy++) {
+          const sy = y + oy;
+          if (sy < 0 || sy >= box.height) continue;
+          for (let ox = -grow; ox <= grow; ox++) {
+            const sx = x + ox;
+            if (sx < 0 || sx >= box.width) continue;
+            strongest = Math.max(strongest, alpha[sy * box.width + sx]);
+          }
+        }
+        expanded[y * box.width + x] = strongest;
+      }
+    }
+    alpha = expanded;
+  }
+
+  const mask = context(box.width, box.height);
+  const maskData = mask.createImageData(box.width, box.height);
+  let visible = 0;
+  for (let pixel = 0; pixel < alpha.length; pixel++) {
+    const i = pixel * 4;
+    maskData.data[i] = 255;
+    maskData.data[i + 1] = 255;
+    maskData.data[i + 2] = 255;
+    maskData.data[i + 3] = alpha[pixel];
+    if (alpha[pixel] >= 16) visible++;
+  }
+  mask.putImageData(maskData, 0, 0);
+
+  let stencil: CanvasImageSource = mask.canvas;
+  const feather = Math.max(0, Math.min(6, settings.feather));
+  if (feather > 0) {
+    const softened = context(box.width, box.height);
+    softened.filter = `blur(${feather}px)`;
+    softened.drawImage(mask.canvas, 0, 0);
+    softened.filter = 'none';
+    stencil = softened.canvas;
+  }
+
+  before.globalCompositeOperation = 'destination-in';
+  before.drawImage(stencil, 0, 0);
+  before.globalCompositeOperation = 'source-over';
+  return {
+    image: before.canvas.toDataURL('image/png'),
+    coverage: visible / Math.max(1, alpha.length),
+  };
+}
+
 /**
  * The middle value of a list, which this is allowed to reorder.
  *

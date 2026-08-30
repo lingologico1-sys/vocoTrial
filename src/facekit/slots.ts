@@ -132,7 +132,7 @@ export interface Slot {
    * argument and ignore it, which costs a pair of brackets and means every
    * call site has to have the setting in hand.
    */
-  prompt: (lashes: LashStyle) => string;
+  prompt: (lashes: LashStyle, detachedEyewear?: boolean) => string;
 }
 
 /**
@@ -149,6 +149,32 @@ export const PREAMBLE = [
   'Keep the identical character, art style, line weight, colour palette, lighting,',
   'hair, glasses, skin tone and head position — change nothing except what is',
   'described next. The head must not move, rotate, or change size.',
+].join(' ');
+
+/** Shared instruction for every pose generated behind a detached glasses layer. */
+export const GLASSES_FREE_PREAMBLE = [
+  'Edit this portrait illustration.',
+  'Keep the identical character, art style, line weight, colour palette, lighting,',
+  'hair, skin tone and head position — change nothing except what is described next.',
+  'This working portrait deliberately wears no glasses. Do not add glasses,',
+  'sunglasses, lenses, rims or any other eyewear. The head must not move, rotate,',
+  'or change size.',
+].join(' ');
+
+/** The one regional edit that makes room for a detachable glasses layer. */
+export const REMOVE_GLASSES_PROMPT = [
+  'Remove the glasses completely, including the rims, bridge, arms, lens tint,',
+  'reflections and shadows cast by the glasses. Reconstruct the same person’s eyes,',
+  'eyelids, eyebrows, nose and skin naturally where the glasses hid them. Keep those',
+  'features in their original positions and preserve everything else exactly.',
+].join(' ');
+
+/** Preamble for removal itself; the ordinary one explicitly preserves glasses. */
+export const REMOVE_GLASSES_PREAMBLE = [
+  'Edit this portrait illustration.',
+  'Keep the identical character, art style, line weight, colour palette, lighting,',
+  'hair, skin tone and head position. The head must not move, rotate, or change size.',
+  'The only permitted change is the removal and reconstruction described next.',
 ].join(' ');
 
 /**
@@ -228,7 +254,7 @@ function lashClause(lashes: LashStyle): string {
  * correct under either regime beat two that each assumed one, and what is left
  * is the half that still applies.
  */
-const eyesClosedPrompt = (lashes: LashStyle): string =>
+const eyesClosedPrompt = (lashes: LashStyle, detachedEyewear = false): string =>
   [
     'Close both eyes.',
     // Naming the mark to draw, rather than the state to depict. Asking for
@@ -241,8 +267,10 @@ const eyesClosedPrompt = (lashes: LashStyle): string =>
     'The skin above and around each closed eye stays flat, smooth and exactly the',
     'colour of the surrounding face — no eyelid crease, no fold, no wrinkle, no',
     'extra shading or texture of any kind.',
-    'Keep the eyebrows unchanged, and keep any glasses exactly as they are: the same',
-    'frame colour, thickness and shape. Do not restyle the eyewear.',
+    'Keep the eyebrows unchanged.',
+    detachedEyewear
+      ? 'This working portrait deliberately has no glasses. Do not add glasses or any eyewear.'
+      : 'Keep any glasses exactly as they are: the same frame colour, thickness and shape. Do not restyle the eyewear.',
   ].join(' ');
 
 /*

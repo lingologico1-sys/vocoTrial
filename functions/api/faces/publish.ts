@@ -4,6 +4,7 @@ import {
   kitKey,
   legacySourceKey,
   originalKey,
+  eyewearSourceKey,
   type PublishedFace,
 } from '../../../src/facekit/published';
 import { type LibraryEnv, readIndex, writeIndex } from './_library';
@@ -20,12 +21,11 @@ import { type LibraryEnv, readIndex, writeIndex } from './_library';
  * why `ready` exists to say whether the thing saved is finished. A face arrives
  * here half-drawn as a matter of course.
  *
- * WHAT ARRIVES IS THE KIT WITHOUT `original`, and the portrait separately when
- * the library does not already hold it. Two objects come out: the kit under
- * kitKey, and — only when a portrait came with it — the portrait under
- * originalKey. Neither contains the other, so nothing is stored twice and a
- * save that changes only artwork sends only artwork. See originalKey for why
- * the portrait is the member that got split off.
+ * WHAT ARRIVES IS THE WEARABLE KIT without authoring sources. The uploaded
+ * portrait and exact pre-deglassing neutral base arrive separately when they
+ * changed, and are written under their own keys. None contains another, so a
+ * student reads only wearable artwork and an ordinary save does not resend
+ * unchanged authoring history.
  *
  * The checks below are shape checks, not a security boundary. The middleware
  * has already established that the caller knew the site password, and every
@@ -44,6 +44,8 @@ interface PublishBody {
   kit?: unknown;
   thumb?: unknown;
   original?: unknown;
+  eyewearSource?: unknown;
+  removeEyewearSource?: unknown;
   ready?: unknown;
 }
 
@@ -82,11 +84,19 @@ export async function onRequestPost(
   if (original !== undefined && (typeof original !== 'string' || !original.startsWith('data:image/'))) {
     return json({ error: 'That is not a portrait', code: 'bad_original' }, 400);
   }
+  const eyewearSource = body.eyewearSource;
+  if (
+    eyewearSource !== undefined &&
+    (typeof eyewearSource !== 'string' || !eyewearSource.startsWith('data:image/'))
+  ) {
+    return json({ error: 'That is not an eyewear source', code: 'bad_eyewear_source' }, 400);
+  }
 
   const kit = body.kit;
   // Belt and braces: the browser strips `original` before sending, and this is
   // what stops a caller that forgot from writing the bytes into both objects.
   delete kit.original;
+  delete kit.glassed;
   const wearable = JSON.stringify(kit);
 
   // Measured in bytes rather than characters: the data URLs are ASCII, but the
@@ -94,7 +104,10 @@ export async function onRequestPost(
   // units would be the wrong number for the thing being capped. Measured across
   // both halves, since both had to cross the wire to get here.
   const encoder = new TextEncoder();
-  const size = encoder.encode(wearable).length + (original ? encoder.encode(original).length : 0);
+  const size =
+    encoder.encode(wearable).length +
+    (original ? encoder.encode(original).length : 0) +
+    (typeof eyewearSource === 'string' ? encoder.encode(eyewearSource).length : 0);
   if (size > MAX_KIT_BYTES) {
     return json(
       { error: `That kit is ${Math.round(size / 1e6)} MB, over the limit`, code: 'too_large' },
@@ -125,6 +138,13 @@ export async function onRequestPost(
           // costs storage and nothing else. See legacySourceKey.
           env.FACES.delete(legacySourceKey(kit.id)),
         ]),
+    ...(eyewearSource === undefined
+      ? []
+      : [
+          env.FACES.put(eyewearSourceKey(kit.id), JSON.stringify(eyewearSource), {
+            httpMetadata: { contentType: 'application/json' },
+          }),
+        ]),
   ]);
 
   const entry: PublishedFace = {
@@ -141,10 +161,22 @@ export async function onRequestPost(
     // True once the portrait has ever been written, not only when it arrived
     // just now — that is the whole point of not re-sending it.
     hasOriginal: original !== undefined || existing?.hasOriginal === true,
+    hasEyewearSource:
+      body.removeEyewearSource === true
+        ? false
+        : eyewearSource !== undefined || existing?.hasEyewearSource === true,
   };
 
   const without = faces.filter((face) => face.id !== entry.id);
   await writeIndex(env.FACES, [entry, ...without].sort((a, b) => b.createdAt - a.createdAt));
+
+  // Removal follows the index for the same safety ordering as delete.ts. If
+  // this request stops between the two, an unlisted authoring object remains
+  // and nothing tries to fetch it; the reverse order could leave an index that
+  // promises a source which has already gone.
+  if (body.removeEyewearSource === true) {
+    await env.FACES.delete(eyewearSourceKey(kit.id));
+  }
 
   return json({ face: entry });
 }

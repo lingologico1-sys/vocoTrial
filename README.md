@@ -724,7 +724,8 @@ is deliberately not offered — they are code; save your version as your own.
 
 ## The shared face library
 
-A kit is nine 1024-square PNGs. Those used to live in the authoring browser's
+A kit is a 1024-square base, its expression patches, and optionally one cropped
+detachable-glasses layer. Those used to live in the authoring browser's
 IndexedDB and go nowhere else, which was fine while one person on one laptop was
 the whole audience and useless the moment a face had to appear on a machine that
 never authored it.
@@ -742,9 +743,10 @@ faceKit ──save────► R2 ──list────► /teach's face gri
 
 | Object | What it is |
 | --- | --- |
-| `index.json` | Every face as `{ id, name, createdAt, publishedAt, thumb, ready, hasOriginal }` |
-| `kits/<id>.json` | One whole kit, artwork inlined as data URLs, no `original` |
+| `index.json` | Every face as `{ id, name, createdAt, publishedAt, thumb, ready, hasOriginal, hasEyewearSource }` |
+| `kits/<id>.json` | One wearable kit, artwork inlined as data URLs, no authoring sources |
 | `originals/<id>.json` | The portrait that kit was authored from, on its own |
+| `eyewear-sources/<id>.json` | Exact neutral base before de-glassing, fetched only for matte editing |
 
 **The index is one object rather than a `list()` call**, because R2 will hand
 back custom metadata with its keys but that metadata is HTTP headers — capped
@@ -754,7 +756,7 @@ strip. Thumbnails ride inside the index for the same reason a thumbnail cannot
 be an `<img src>` pointing at a route: the middleware allows POST and nothing
 else.
 
-Five things worth knowing:
+Six things worth knowing:
 
 - **`publishedAt` is the whole cache check.** A browser keeps fetched kits in an
   IndexedDB store and compares that one number against the listing, so a page
@@ -778,6 +780,12 @@ Five things worth knowing:
   browser reads `hasOriginal` from the listing it already has and skips it on
   every save after the first. First save: both halves. Every save after: the kit
   alone, roughly half the bytes.
+- **Detachable glasses keep their own authoring source.** The wearable kit has
+  only the cropped RGBA layer and the glasses-free base. The exact neutral base
+  from before removal lives under `eyewear-sources/`, so another browser can
+  reopen the face and refine the difference-seeded matte without making every
+  student download that history. Replacing the matte rewrites it; restoring
+  baked-in glasses clears it after the index stops advertising it.
 - **Delete is delete.** It removes the kit, the portrait, and the index entry.
   The route was called `unpublish` and removed a shared copy, leaving the
   authored kit in the author's own browser; there is no second copy now, so it
@@ -785,7 +793,8 @@ Five things worth knowing:
 
 **A face can be edited from any browser.** Tapping one in faceKit's library
 strip reads `kits/<id>.json` through the same cache that wearing it uses — free
-if this browser has worn it — and fetches the portrait beside it.
+if this browser has worn it — and fetches the portrait and any eyewear authoring
+source beside it.
 
 Faces saved before the `originals/` prefix report `hasOriginal: false`, and
 there are two kinds. Those from the window when the whole authoring copy went to

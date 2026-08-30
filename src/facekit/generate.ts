@@ -52,6 +52,8 @@ interface GenerateArgs {
   box: MouthBox;
   /** The slot's instruction. The shared preamble is added here, not by callers. */
   instruction: string;
+  /** Override for a pass whose source intentionally has no glasses. */
+  preamble?: string;
   /** What to call this run in the diagnostics panel. The slot's own label. */
   label: string;
   /**
@@ -366,6 +368,7 @@ export async function generatePatch({
   base,
   box,
   instruction,
+  preamble = PREAMBLE,
   label,
   imageFirst,
   signal,
@@ -387,7 +390,7 @@ export async function generatePatch({
     const { image, usd, cached } = await postWithRetry(
       {
         model: modelKey,
-        prompt: `${PREAMBLE} ${instruction}`,
+        prompt: `${preamble} ${instruction}`,
         image: flattened,
         imageFirst,
       },
@@ -441,6 +444,7 @@ export async function generateBase({
   modelKey,
   base,
   instruction,
+  preamble = PREAMBLE,
   label,
   imageFirst,
   signal,
@@ -462,7 +466,7 @@ export async function generateBase({
     const { image, usd } = await postWithRetry(
       {
         model: modelKey,
-        prompt: `${PREAMBLE} ${instruction}`,
+        prompt: `${preamble} ${instruction}`,
         image: flattened,
         imageFirst,
       },

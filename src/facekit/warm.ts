@@ -42,22 +42,23 @@ import type { FaceKit } from './kit';
  * Nothing would have thrown, nothing would have logged, and the holes would
  * simply still be there — so the elements are kept.
  *
- * ONE KIT AT A TIME, because the memory is not small: nine 1024-square PNGs
- * decode to something over thirty megabytes of bitmap, which is worth holding
+ * ONE KIT AT A TIME, because the memory is not small: the base and expression
+ * patches decode to something over thirty megabytes of bitmap, with a cropped
+ * eyewear layer on top when present. That is worth holding
  * for the face on screen and not worth holding for every face tried in the
  * studio's picker this afternoon. Warming a new kit releases the last one.
  */
-let held: { id: string; images: HTMLImageElement[] } | null = null;
+let held: { kit: FaceKit; images: HTMLImageElement[] } | null = null;
 
 export async function warmKit(kit: FaceKit): Promise<void> {
   // Already the warm one. A re-render, or a page that hands back the same kit,
   // should not spend the decode again.
-  if (held?.id === kit.id) return;
+  if (held?.kit === kit) return;
 
   // `original` is deliberately absent: it is the portrait as uploaded, kept so
   // that neutralising stays repeatable, and no call ever paints it. Warming it
   // would decode a megabyte nobody is going to look at.
-  const sources = [kit.base, ...Object.values(kit.patches)].filter(
+  const sources = [kit.base, ...Object.values(kit.patches), kit.eyewear?.frame].filter(
     (source): source is string => typeof source === 'string' && source.length > 0,
   );
 
@@ -70,7 +71,7 @@ export async function warmKit(kit: FaceKit): Promise<void> {
   // Claimed before the awaits rather than after, so that two warms racing on a
   // fast face swap cannot both run to completion and leave the loser's images
   // installed over the winner's.
-  held = { id: kit.id, images };
+  held = { kit, images };
 
   await Promise.all(
     images.map(async (image) => {

@@ -74,7 +74,10 @@ export default function Filmstrip({ kit }: FilmstripProps) {
       for (const id of available) {
         const patch = kit.patches[id];
         if (!patch) continue;
-        const overlays = [{ patch, box: kit.boxes.mouth }];
+        const overlays = [
+          { patch, box: kit.boxes.mouth },
+          ...(kit.eyewear ? [{ patch: kit.eyewear.frame, box: kit.eyewear.box }] : []),
+        ];
         built.push({ id, src: await composite(kit.base, overlays) });
         if (generation.current !== run) return;
       }
@@ -92,6 +95,7 @@ export default function Filmstrip({ kit }: FilmstripProps) {
         const blinkFrame = await composite(kit.base, [
           ...(kit.patches.rest ? [{ patch: kit.patches.rest, box: kit.boxes.mouth }] : []),
           ...lids,
+          ...(kit.eyewear ? [{ patch: kit.eyewear.frame, box: kit.eyewear.box }] : []),
         ]);
         if (generation.current !== run) return;
         built.push({ id: BLINK, src: blinkFrame });
@@ -108,7 +112,7 @@ export default function Filmstrip({ kit }: FilmstripProps) {
     return () => {
       cancelled = true;
     };
-  }, [kit.base, kit.patches, kit.boxes, available]);
+  }, [kit.base, kit.patches, kit.boxes, kit.eyewear, available]);
 
   /**
    * The cycle, which is the speech poses and only those.

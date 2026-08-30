@@ -50,8 +50,15 @@ import { loadPrefs, loadVoiceGender, savePrefs, saveVoiceGender } from './prefs'
 
 interface ComposeProps {
   onGenerated: (result: Generated) => void;
+  onVoiceChange: (voice: ComposeVoice) => void;
   busy: boolean;
   setBusy: (busy: boolean) => void;
+}
+
+export interface ComposeVoice {
+  voiceId: string;
+  voiceName?: string;
+  voiceGender?: VoiceGender;
 }
 
 const LANGUAGES: Array<{ id: LipsyncPackage['language']; label: string }> = [
@@ -82,7 +89,7 @@ const KIND_STYLE: Record<Tag['kind'], string> = {
   reaction: 'border-amber-900 text-amber-300 hover:border-amber-700',
 };
 
-export default function Compose({ onGenerated, busy, setBusy }: ComposeProps) {
+export default function Compose({ onGenerated, onVoiceChange, busy, setBusy }: ComposeProps) {
   /**
    * Seeded from the last visit, read once rather than in a mount effect.
    *
@@ -111,6 +118,16 @@ export default function Compose({ onGenerated, busy, setBusy }: ComposeProps) {
   const [problem, setProblem] = useState<string | null>(null);
   const box = useRef<HTMLTextAreaElement | null>(null);
   const [quota, setQuota] = useState<Quota | null>(null);
+
+  // The laugh library configures the NEXT generation, so it needs the voice currently
+  // selected here rather than the voice stamped onto the previous generated package.
+  useEffect(() => {
+    onVoiceChange({
+      voiceId: voiceId.trim(),
+      voiceName: voiceName.trim() || undefined,
+      voiceGender,
+    });
+  }, [onVoiceChange, voiceId, voiceName, voiceGender]);
 
   // Written on every keystroke. It is one small JSON blob to the same key, and the
   // alternative — saving on blur, or on generate — loses the line to the refresh

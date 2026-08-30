@@ -359,6 +359,10 @@ export default function LaughLibrary({
               : here
                 ? 'voice-converted'
                 : 'original';
+            // The play button beside the treatment toggle auditions what this voice will
+            // actually use. Keeping it pointed at `here` made both toggle positions sound
+            // voice-converted even though the saved preference (and generation) changed.
+            const activeRender = active === 'original' ? original : here;
             return (
               <div
                 key={source.id}
@@ -423,8 +427,12 @@ export default function LaughLibrary({
                   <div className="flex shrink-0 items-center gap-1">
                     <button
                       type="button"
-                      onClick={() => void audition(here.id, 'render')}
-                      title={`Play it in ${voiceName ?? 'this voice'}`}
+                      onClick={() => void audition((activeRender ?? here).id, 'render')}
+                      title={
+                        active === 'original'
+                          ? 'Play the selected original performance'
+                          : `Play the selected version in ${voiceName ?? 'this voice'}`
+                      }
                       className={`rounded-md border p-1 transition-colors ${
                         active === 'voice-converted'
                           ? 'border-emerald-700 text-emerald-300'

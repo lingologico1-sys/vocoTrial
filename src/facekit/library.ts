@@ -1,4 +1,4 @@
-import { loadImage } from './canvas';
+import { composite, loadImage } from './canvas';
 import { migrate, type FaceKit } from './kit';
 import { THUMB_EDGE, type PublishedFace } from './published';
 
@@ -75,6 +75,16 @@ export async function fetchPublished(id: string): Promise<FaceKit> {
 export async function fetchOriginal(id: string): Promise<string | null> {
   try {
     return await post<string>('original', { id });
+  } catch (cause) {
+    if (cause instanceof LibraryError && cause.status === 404) return null;
+    throw cause;
+  }
+}
+
+/** Exact pre-deglassing neutral base, kept off the wearable kit. */
+export async function fetchEyewearSource(id: string): Promise<string | null> {
+  try {
+    return await post<string>('eyewear-source', { id });
   } catch (cause) {
     if (cause instanceof LibraryError && cause.status === 404) return null;
     throw cause;
@@ -165,7 +175,12 @@ async function thumbnail(base: string): Promise<string> {
  */
 export async function publishKit(
   kit: FaceKit,
-  options: { ready: boolean; hasOriginal: boolean },
+  options: {
+    ready: boolean;
+    hasOriginal: boolean;
+    hasEyewearSource?: boolean;
+    eyewearSourceChanged?: boolean;
+  },
 ): Promise<PublishedFace> {
   // The smiling portrait when the author drew one, and this is the only place
   // it is ever used. It is not the base and never becomes it — see
@@ -174,16 +189,24 @@ export async function publishKit(
   // nobody is comparing it against. Baked in here rather than chosen at draw
   // time so that a browser picking a face has one image to fetch, as it always
   // did.
-  const thumb = await thumbnail(kit.bases?.smile ?? kit.base);
+  const thumbBase = kit.bases?.smile ?? kit.base;
+  const thumbSource = kit.eyewear
+    ? await composite(thumbBase, [{ patch: kit.eyewear.frame, box: kit.eyewear.box }])
+    : thumbBase;
+  const thumb = await thumbnail(thumbSource);
   // Split rather than deleted from a copy: `original` is one member among data
   // URLs, and pulling it out by name here is what makes the request's two
   // halves independent.
-  const { original, ...rest } = kit;
+  const { original, glassed, ...rest } = kit;
   const { face } = await post<{ face: PublishedFace }>('publish', {
     kit: rest,
     thumb,
     ready: options.ready,
     ...(original && !options.hasOriginal ? { original } : {}),
+    ...(glassed && (!options.hasEyewearSource || options.eyewearSourceChanged)
+      ? { eyewearSource: glassed }
+      : {}),
+    ...(!kit.eyewear && options.hasEyewearSource ? { removeEyewearSource: true } : {}),
   });
   return face;
 }

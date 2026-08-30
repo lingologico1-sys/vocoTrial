@@ -1,5 +1,5 @@
 import { blobToDataUrl } from './canvas';
-import { KIT_FORMAT, migrate, type Boxes, type FaceKit } from './kit';
+import { KIT_FORMAT, migrate, type Boxes, type EyewearLayer, type FaceKit } from './kit';
 import type { Persona } from './persona';
 import type { LashStyle, SlotId } from './slots';
 
@@ -38,6 +38,7 @@ interface BundledManifest {
   base?: string;
   boxes?: Boxes;
   patches?: Partial<Record<SlotId, string>>;
+  eyewear?: EyewearLayer;
   lashes?: LashStyle;
   /**
    * Carried through like the rest of the manifest, and it is the one member
@@ -73,6 +74,9 @@ export async function loadBundledKit(name = 'face'): Promise<FaceKit | null> {
       base: `${dir}/${manifest.base}`,
       boxes: manifest.boxes,
       patches,
+      eyewear: manifest.eyewear
+        ? { ...manifest.eyewear, frame: `${dir}/${manifest.eyewear.frame}` }
+        : undefined,
       lashes: manifest.lashes,
       persona: manifest.persona,
       spentUsd: 0,
@@ -111,5 +115,12 @@ export async function inlineKit(kit: FaceKit): Promise<FaceKit> {
     if (typeof src === 'string') patches[slot as SlotId] = await inline(src);
   }
 
-  return { ...kit, base: await inline(kit.base), patches };
+  return {
+    ...kit,
+    base: await inline(kit.base),
+    patches,
+    eyewear: kit.eyewear
+      ? { ...kit.eyewear, frame: await inline(kit.eyewear.frame) }
+      : undefined,
+  };
 }

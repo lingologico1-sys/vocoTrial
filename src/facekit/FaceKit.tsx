@@ -4,6 +4,7 @@ import ReturnButton from '../ReturnButton';
 import BoxPicker from './BoxPicker';
 import DiagnosticsPanel from './DiagnosticsPanel';
 import Filmstrip from './Filmstrip';
+import EyewearPanel, { type EyewearCandidate } from './EyewearPanel';
 import MotionPreview from './MotionPreview';
 import PersonaPanel from './PersonaPanel';
 import { bundledId, inlineKit, loadBundledKit } from './bundled';
@@ -41,6 +42,9 @@ import {
 import {
   NEUTRALISE_BASE_PROMPT,
   SMILE_BASE_PROMPT,
+  GLASSES_FREE_PREAMBLE,
+  REMOVE_GLASSES_PREAMBLE,
+  REMOVE_GLASSES_PROMPT,
   BROW_BOXES,
   DEFAULT_LASH_STYLE,
   LASH_STYLES,
@@ -55,6 +59,7 @@ import {
 import {
   deleteFace,
   fetchLegacyOriginal,
+  fetchEyewearSource,
   fetchOriginal,
   listPublished,
   publishKit,
@@ -341,6 +346,8 @@ export default function FaceKit() {
   const [ready, setReadyFlag] = useState(false);
   const [region, setRegion] = useState<BoxId>('mouth');
   const [candidates, setCandidates] = useState<Partial<Record<SlotId, Candidate[]>>>({});
+  const [eyewearCandidate, setEyewearCandidate] = useState<EyewearCandidate | null>(null);
+  const [eyewearSourceChanged, setEyewearSourceChanged] = useState(false);
   /**
    * Which generations are in flight, and on which attempt.
    *
@@ -584,13 +591,16 @@ export default function FaceKit() {
           setError('That face is in the listing but its artwork is missing');
           return;
         }
-        const original = face.hasOriginal
-          ? await fetchOriginal(face.id)
-          : await fetchLegacyOriginal(face.id);
-        setKit(original ? { ...kit, original } : kit);
+        const [original, glassed] = await Promise.all([
+          face.hasOriginal ? fetchOriginal(face.id) : fetchLegacyOriginal(face.id),
+          face.hasEyewearSource ? fetchEyewearSource(face.id) : Promise.resolve(null),
+        ]);
+        setKit({ ...kit, ...(original ? { original } : {}), ...(glassed ? { glassed } : {}) });
         setReadyFlag(face.ready !== false);
         setDirty(false);
         setCandidates({});
+        setEyewearCandidate(null);
+        setEyewearSourceChanged(false);
         // A kit arriving from the library has boxes but no history of how they
         // got there, so every box goes back to being judged on size.
         setFollowing({});
@@ -620,6 +630,7 @@ export default function FaceKit() {
     let live = true;
     const overlays = [
       ...(kit.patches.rest ? [{ patch: kit.patches.rest, box: kit.boxes.mouth }] : []),
+      ...(kit.eyewear ? [{ patch: kit.eyewear.frame, box: kit.eyewear.box }] : []),
     ];
     composite(kit.base, overlays)
       .then((image) => {
@@ -716,6 +727,8 @@ export default function FaceKit() {
     try {
       const normalised = await normalise(await fileToDataUrl(file));
       setKit(newKit(file.name.replace(/\.[^.]+$/, '') || 'face', normalised));
+      setEyewearCandidate(null);
+      setEyewearSourceChanged(false);
       setCandidates({});
       setFollowing({});
       setShownBase(null);
@@ -755,7 +768,8 @@ export default function FaceKit() {
         modelKey,
         base: kit.bases?.neutral ?? kit.base,
         box: kit.boxes[definition.region],
-        instruction: definition.prompt(kit.lashes ?? DEFAULT_LASH_STYLE),
+        instruction: definition.prompt(kit.lashes ?? DEFAULT_LASH_STYLE, Boolean(kit.eyewear)),
+        preamble: kit.eyewear ? GLASSES_FREE_PREAMBLE : undefined,
         label: definition.label,
         imageFirst,
         onAttempt: (attempt) => mark(key, attempt),
@@ -805,9 +819,9 @@ export default function FaceKit() {
     const replaces = kind === 'neutral';
     if (
       replaces &&
-      generated > 0 &&
+      (generated > 0 || Boolean(kit.eyewear)) &&
       !window.confirm(
-        `${verb} redraws the base, so the ${generated} image(s) cut from the old one will be discarded. Go on?`,
+        `${verb} redraws the base, so ${generated + (kit.eyewear ? 1 : 0)} piece(s) of generated or layered artwork will be discarded. Go on?`,
       )
     ) {
       return;
@@ -820,8 +834,12 @@ export default function FaceKit() {
       // "try that again", not "edit the last attempt".
       const result = await generateBase({
         modelKey: BASE_MODEL_KEY,
-        base: kit.original ?? kit.base,
+        base:
+          kind === 'smile' && kit.eyewear
+            ? kit.bases?.neutral ?? kit.base
+            : kit.original ?? kit.base,
         instruction,
+        preamble: kind === 'smile' && kit.eyewear ? GLASSES_FREE_PREAMBLE : undefined,
         box: kit.boxes.mouth,
         label,
         imageFirst,
@@ -829,16 +847,27 @@ export default function FaceKit() {
       });
       edit((current) => {
         const bases = { ...current.bases, [kind]: result.base };
+        if (replaces && current.eyewear) delete bases.smile;
         // A smile is a view, not a target: it is stored beside the base and
         // never becomes it, so the base and its patches stay put. Only the
         // neutral pass replaces the base, and with it the patches that were
         // cut from the old one.
         return replaces
-          ? { ...current, base: result.base, bases, patches: {}, spentUsd: current.spentUsd + result.usd }
+          ? {
+              ...current,
+              base: result.base,
+              bases,
+              patches: {},
+              eyewear: undefined,
+              glassed: undefined,
+              spentUsd: current.spentUsd + result.usd,
+            }
           : { ...current, bases, spentUsd: current.spentUsd + result.usd };
       });
       if (replaces) {
         setCandidates({});
+        setEyewearCandidate(null);
+        setEyewearSourceChanged(true);
         setShownBase(null);
       } else {
         // Show the smile that was just drawn, since it changed nothing else
@@ -857,6 +886,97 @@ export default function FaceKit() {
 
   const smile = () =>
     redrawBase(SMILE_BASE_PROMPT, 'smile', 'Smiling base', 'Adding a smile');
+
+  const removeGlasses = async (box: Box) => {
+    if (!kit) return;
+    const key = 'eyewear:remove';
+    const source = kit.bases?.neutral ?? kit.base;
+    mark(key, 1);
+    setError(null);
+    try {
+      const result = await generatePatch({
+        modelKey: MODEL_KEY,
+        base: source,
+        box,
+        instruction: REMOVE_GLASSES_PROMPT,
+        preamble: REMOVE_GLASSES_PREAMBLE,
+        label: 'Removing glasses',
+        imageFirst,
+        onAttempt: (attempt) => mark(key, attempt),
+      });
+      const bare = await composite(source, [{ patch: result.patch, box }]);
+      setEyewearCandidate({ source, bare, box });
+      edit((current) => ({ ...current, spentUsd: current.spentUsd + result.usd }));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'The glasses could not be removed');
+    } finally {
+      mark(key, 0);
+    }
+  };
+
+  const acceptEyewear = (candidate: EyewearCandidate, frame: string) => {
+    edit((current) => {
+      const patches = { ...current.patches };
+      delete patches.eyeLeftClosed;
+      delete patches.eyeRightClosed;
+      const bases = { ...current.bases, neutral: candidate.bare };
+      // A smile drawn before detachment has glasses baked into it. Keeping it
+      // would double the frames when thumbnails begin composing the layer.
+      delete bases.smile;
+      return {
+        ...current,
+        base: candidate.bare,
+        bases,
+        patches,
+        eyewear: { frame, box: candidate.box },
+        glassed: candidate.source,
+      };
+    });
+    setCandidates((current) => {
+      const next = { ...current };
+      delete next.eyeLeftClosed;
+      delete next.eyeRightClosed;
+      return next;
+    });
+    setEyewearCandidate(null);
+    setEyewearSourceChanged(true);
+    setShownBase(null);
+  };
+
+  const retuneEyewear = () => {
+    if (!kit?.eyewear || !kit.glassed) return;
+    setEyewearCandidate({
+      source: kit.glassed,
+      bare: kit.bases?.neutral ?? kit.base,
+      box: kit.eyewear.box,
+    });
+  };
+
+  const restoreGlasses = () => {
+    if (!kit?.glassed || !window.confirm('Restore the baked-in glasses and remove the detachable layer? Both closed-eye patches will be discarded.')) return;
+    edit((current) => {
+      if (!current.glassed) return current;
+      const patches = { ...current.patches };
+      delete patches.eyeLeftClosed;
+      delete patches.eyeRightClosed;
+      const bases = { ...current.bases, neutral: current.glassed };
+      delete bases.smile;
+      const boxes = { ...current.boxes };
+      delete boxes.browLeft;
+      delete boxes.browRight;
+      return {
+        ...current,
+        base: current.glassed,
+        bases,
+        patches,
+        boxes,
+        eyewear: undefined,
+        glassed: undefined,
+      };
+    });
+    setEyewearCandidate(null);
+    setEyewearSourceChanged(true);
+  };
 
   /**
    * Shows one drawn rest pose in the picker, as a look rather than a change.
@@ -1033,6 +1153,7 @@ export default function FaceKit() {
     () => Object.values(committed).reduce((total, count) => total + count, 0),
     [committed],
   );
+  const artwork = generated + (kit?.eyewear ? 1 : 0);
 
   /**
    * Back to the portrait as uploaded, keeping the boxes.
@@ -1048,11 +1169,31 @@ export default function FaceKit() {
    */
   const restart = () => {
     if (!kit) return;
-    if (!window.confirm(`Discard ${generated} generated image(s) and start again from the portrait you uploaded?`)) {
+    if (!window.confirm(`Discard ${artwork} generated or layered image(s) and start again from the portrait you uploaded?`)) {
       return;
     }
-    edit((current) => ({ ...current, base: current.original ?? current.base, patches: {} }));
+    edit((current) => {
+      const restored = current.original ?? current.base;
+      const bases = current.bases ? { ...current.bases, neutral: restored } : current.bases;
+      if (current.eyewear && bases) delete bases.smile;
+      const boxes = { ...current.boxes };
+      if (current.eyewear) {
+        delete boxes.browLeft;
+        delete boxes.browRight;
+      }
+      return {
+        ...current,
+        base: restored,
+        bases,
+        boxes,
+        patches: {},
+        eyewear: undefined,
+        glassed: undefined,
+      };
+    });
     setCandidates({});
+    setEyewearCandidate(null);
+    setEyewearSourceChanged(true);
     setError(null);
   };
 
@@ -1062,6 +1203,8 @@ export default function FaceKit() {
     }
     setKit(null);
     setCandidates({});
+    setEyewearCandidate(null);
+    setEyewearSourceChanged(false);
     setFollowing({});
     setDirty(false);
   };
@@ -1091,8 +1234,11 @@ export default function FaceKit() {
       const face = await publishKit(kit, {
         ready,
         hasOriginal: entry?.hasOriginal === true,
+        hasEyewearSource: entry?.hasEyewearSource === true,
+        eyewearSourceChanged,
       });
       remember(face);
+      setEyewearSourceChanged(false);
       setDirty(false);
       return true;
     } catch (cause) {
@@ -1138,6 +1284,7 @@ export default function FaceKit() {
     }
     const files = [
       { name: 'base.png', source: kit.base },
+      ...(kit.eyewear ? [{ name: 'eyewear-frame.png', source: kit.eyewear.frame }] : []),
       ...SLOTS.filter((entry) => kit.patches[entry.id]).map((entry) => ({
         name: patchFilename(entry.id, entry.region),
         source: kit.patches[entry.id]!,
@@ -1153,6 +1300,9 @@ export default function FaceKit() {
       // Written only when there is one, so a folder for a face with no
       // background holds no empty key inviting someone to fill it in.
       ...(kit.persona ? { persona: kit.persona } : {}),
+      ...(kit.eyewear
+        ? { eyewear: { frame: 'eyewear-frame.png', box: kit.eyewear.box } }
+        : {}),
       patches: Object.fromEntries(
         SLOTS.filter((entry) => kit.patches[entry.id]).map((entry) => [
           entry.id,
@@ -1308,7 +1458,7 @@ export default function FaceKit() {
                 <div className="flex flex-wrap gap-2">
                   <button
                     type="button"
-                    disabled={Boolean(busy['base:neutralise'] || busy['base:smile'])}
+                    disabled={Boolean(busy['base:neutralise'] || busy['base:smile'] || eyewearCandidate)}
                     onClick={() => void neutralise()}
                     className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:border-slate-500 disabled:opacity-40"
                   >
@@ -1318,7 +1468,7 @@ export default function FaceKit() {
                   </button>
                   <button
                     type="button"
-                    disabled={Boolean(busy['base:neutralise'] || busy['base:smile'])}
+                    disabled={Boolean(busy['base:neutralise'] || busy['base:smile'] || eyewearCandidate)}
                     onClick={() => void smile()}
                     className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:border-slate-500 disabled:opacity-40"
                   >
@@ -1338,6 +1488,17 @@ export default function FaceKit() {
                 one.
               </Guidance>
             </div>
+
+            <EyewearPanel
+              kit={kit}
+              candidate={eyewearCandidate}
+              busy={busy['eyewear:remove'] ?? 0}
+              onGenerate={(box) => void removeGlasses(box)}
+              onAccept={acceptEyewear}
+              onDiscardCandidate={() => setEyewearCandidate(null)}
+              onRetune={retuneEyewear}
+              onRestore={restoreGlasses}
+            />
 
             {/*
               Four cells rather than two columns, placed explicitly, so that the
@@ -1474,15 +1635,15 @@ export default function FaceKit() {
 
                     <Guidance label="How to place a brow band">
                       Not a mask and not a crop — no generator ever sees this box, so it
-                      never locks and the glasses are never at risk. Cover the brow, give it
-                      plenty of plain forehead <em>above</em>, and end it on the last clear row
-                      of skin <em>below</em> the brow and above the spectacle rim — that bottom
+                      never locks. Cover the brow, give it plenty of plain forehead{' '}
+                      <em>above</em>, and end it on the last clear row of skin <em>below</em> the
+                      brow{kit.eyewear ? '. The glasses are a separate layer and do not constrain this box' : ' and above the spectacle rim'} — that bottom
                       row is what gets stretched up to fill the gap the brow leaves. Then drag
                       the dashed line onto the <em>top of the brow</em>: the band above it is
                       the forehead this brow rises into, and it is what caps the travel. Take
                       the line to the bottom of the box and this brow holds still. There is one
-                      box per brow because a rim runs diagonally, so the row that is clear on
-                      one side is already frame on the other. Where a rim or a fringe leaves no
+                      box per brow because the two sides need not have the same clearance.
+                      Where a fringe leaves no
                       clear row at all, leave the box unplaced. The second brow is placed at the
                       size of the first, and with its line at the same height, so only its{' '}
                       <em>position</em> needs the diagonal thought — until you size it yourself,
@@ -1542,9 +1703,20 @@ export default function FaceKit() {
                       ) : (
                         <>
                           {' '}
-                          Keep it <em>inside</em> the lens. A box that catches a spectacle rim
-                          invites the model to redesign the glasses; one that stops short of the
-                          frame throws any such damage away with the rest of the crop. Resizing
+                          {kit.eyewear ? (
+                            <>
+                              The working base has no glasses, so cover the whole eye and the skin
+                              a closed lid needs. The detached frames are painted back over this
+                              patch after it is composited.
+                            </>
+                          ) : (
+                            <>
+                              Keep it <em>inside</em> the lens. A box that catches a spectacle rim
+                              invites the model to redesign the glasses; one that stops short of the
+                              frame throws any such damage away with the rest of the crop.
+                            </>
+                          )}{' '}
+                          Resizing
                           one eye resizes the other to match, about its own centre and without
                           moving it — until you size that one yourself, after which it keeps
                           what you gave it.
@@ -1631,7 +1803,7 @@ export default function FaceKit() {
                       <div className="flex flex-wrap gap-1.5 pt-1">
                         <button
                           type="button"
-                          disabled={Boolean(busy[busyKey])}
+                          disabled={Boolean(busy[busyKey] || eyewearCandidate)}
                           onClick={() => void run(entry.id, MODEL_KEY)}
                           title={findImageModel(MODEL_KEY)?.label}
                           className="rounded-md border border-slate-700 px-2 py-1 text-[11px] text-slate-300 hover:border-slate-500 disabled:opacity-40"
@@ -1808,14 +1980,14 @@ export default function FaceKit() {
               >
                 Download folder
               </button>
-              {generated > 0 && (
+              {artwork > 0 && (
                 <button
                   type="button"
                   onClick={restart}
                   title="Keeps the portrait you uploaded and the boxes you placed"
                   className="rounded-lg border border-amber-700/70 px-3 py-1.5 text-sm text-amber-300 hover:border-amber-500"
                 >
-                  Start again from the original · discards {generated}
+                  Start again from the original · discards {artwork}
                 </button>
               )}
               <button

@@ -57,6 +57,8 @@ export interface PublishedFace {
    * at all. Both are seeded by republishing once from a browser holding one.
    */
   hasOriginal?: boolean;
+  /** Whether the exact pre-deglassing neutral base is kept for matte re-editing. */
+  hasEyewearSource?: boolean;
 }
 
 /** The index, as one object, so listing the library is one read. */
@@ -105,6 +107,11 @@ export function originalKey(id: string): string {
   return `originals/${id}.json`;
 }
 
+/** Authoring-only neutral base from immediately before detachable glasses were cut. */
+export function eyewearSourceKey(id: string): string {
+  return `eyewear-sources/${id}.json`;
+}
+
 /**
  * Where the authoring copy used to live, kept only so it can be deleted.
  *
@@ -142,17 +149,16 @@ export const THUMB_EDGE = 192;
 /**
  * The most one published kit may weigh, as JSON.
  *
- * A kit is nine 1024-square PNGs inlined as data URLs, and base64 adds a third
- * again to each — so a heavy portrait lands in the low tens of megabytes and a
- * reasonable one well under. The ceiling is here to stop a single malformed
+ * A kit is a 1024-square base, its patches and possibly a cropped eyewear layer,
+ * all inlined as data URLs; base64 adds a third again to each. A heavy portrait
+ * lands in the low tens of megabytes and a reasonable one well under. The ceiling
+ * is here to stop a single malformed
  * publish filling the bucket, not to police normal artwork; nothing authored by
  * faceKit has come close.
  *
- * Doubled from 32 MB when publishing started carrying `original` as well, and
- * left there now that the two travel as separate members of one request: the
- * first save of a face still puts both on the wire at once, which is the case
- * the ceiling has to clear. Every save after it sends the kit alone and lands
- * at roughly half this.
+ * Doubled from 32 MB when publishing started carrying authoring sources as well.
+ * They are separate R2 objects but members of the same first request; later saves
+ * skip unchanged sources and send the wearable kit alone.
  *
  * Still comfortably inside Cloudflare's own request-body limit, which is the
  * real ceiling here and is not ours to raise.

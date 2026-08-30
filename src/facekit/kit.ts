@@ -76,6 +76,20 @@ export interface MouthBox extends Box {
 }
 
 /**
+ * Artwork worn in front of every generated expression.
+ *
+ * Kept cropped rather than as a mostly-empty full-frame PNG. `box` is both its
+ * registration on the 1024-square base and the rectangle the author approved
+ * while removing the glasses. The frame is deliberately a plain RGBA image:
+ * lens highlights can remain in it when useful, while clear lens interiors
+ * remain transparent and reveal the moving eyes and brows below.
+ */
+export interface EyewearLayer {
+  frame: string;
+  box: Box;
+}
+
+/**
  * Either box that carries a measurement inside it.
  *
  * For the code that handles both drags at once, which is the picker and the one
@@ -232,6 +246,16 @@ export interface FaceKit {
   boxes: Boxes;
   /** One PNG data URL per authored slot, already cropped to its region's box. */
   patches: Partial<Record<SlotId, string>>;
+  /** Optional glasses painted last, over the base, brows, mouths and eyelids. */
+  eyewear?: EyewearLayer;
+  /**
+   * Exact neutral base before a glasses-removal pass.
+   *
+   * Authoring history, not wearable artwork. The library stores it separately
+   * from the kit so a student never downloads it, then restores it when this
+   * face is opened in FaceKit on another browser.
+   */
+  glassed?: string;
   /**
    * How much eyelash the closed-eye prompt asks for.
    *

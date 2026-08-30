@@ -1,5 +1,10 @@
 import { json } from '../_middleware';
-import { kitKey, legacySourceKey, originalKey } from '../../../src/facekit/published';
+import {
+  eyewearSourceKey,
+  kitKey,
+  legacySourceKey,
+  originalKey,
+} from '../../../src/facekit/published';
 import { type LibraryEnv, readIndex, writeIndex } from './_library';
 
 /**
@@ -36,11 +41,16 @@ export async function onRequestPost(
 
   const faces = await readIndex(env.FACES);
   await writeIndex(env.FACES, faces.filter((face) => face.id !== body.id));
-  // R2 takes an array, so this is one request rather than three. Deleting a key
+  // R2 takes an array, so this is one request rather than four. Deleting a key
   // that is not there is not an error, which is what makes this safe for a face
   // from either side of the originals/ split — each has one of the two authoring
   // keys and neither has both.
-  await env.FACES.delete([kitKey(body.id), originalKey(body.id), legacySourceKey(body.id)]);
+  await env.FACES.delete([
+    kitKey(body.id),
+    originalKey(body.id),
+    eyewearSourceKey(body.id),
+    legacySourceKey(body.id),
+  ]);
 
   return json({ ok: true });
 }

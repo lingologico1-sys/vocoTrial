@@ -1196,6 +1196,17 @@ export default function Face({
                 />
               ) : null,
             )}
+
+            {/* Detached glasses stay registered to the head but above every expression. */}
+            {kit.eyewear && (
+              <image
+                href={kit.eyewear.frame}
+                x={toHead(kit.eyewear.box.x)}
+                y={toHead(kit.eyewear.box.y)}
+                width={toHead(kit.eyewear.box.width)}
+                height={toHead(kit.eyewear.box.height)}
+              />
+            )}
     
             <circle
               ref={mouthRef}
