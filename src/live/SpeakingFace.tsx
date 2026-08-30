@@ -3,7 +3,7 @@ import type { AudioTap } from '../realtime/audio';
 import type { FaceKit } from '../facekit/kit';
 import Face from './Face';
 import { MarkMouth, type VisemeMark } from './polly';
-import { laughBob } from './headMotion';
+import { GIGGLE_BOB_GAIN, laughBob } from './headMotion';
 import type {
   HeadMotion,
   MotionCadence,
@@ -64,6 +64,8 @@ interface SpeakingFaceProps {
     endMs: number;
     eyesClosed?: boolean;
     nod?: boolean;
+    /** A giggle rather than a laugh: the same bob at GIGGLE_BOB_GAIN of the depth. */
+    giggling?: boolean;
   }> | null;
   /** Which way of measuring the audio drives the mouth. Switchable mid-call. */
   driver: MouthDriver;
@@ -275,8 +277,15 @@ export default function SpeakingFace({
         const bobbing = expressions.find(
           (e) => e.nod && at >= e.startMs && at < e.endMs,
         );
+        // A giggle is the same shape at half the throw, scaled here rather than in
+        // laughBob so that the bob stays a pure function of position and the depth
+        // stays a property of the span. Spans made before the giggle split carry no
+        // flag and take the laugh's full depth, which is how they were performed.
         setLaughNod(
-          bobbing ? laughBob(at - bobbing.startMs, bobbing.endMs - bobbing.startMs) : 0,
+          bobbing
+            ? laughBob(at - bobbing.startMs, bobbing.endMs - bobbing.startMs) *
+              (bobbing.giggling ? GIGGLE_BOB_GAIN : 1)
+            : 0,
         );
       }
       frame = requestAnimationFrame(step);

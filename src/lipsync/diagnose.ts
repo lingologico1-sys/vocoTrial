@@ -178,15 +178,43 @@ export function report(pkg: LipsyncPackage): string {
   L.push(`  marks      ${pkg.marks.length}`);
   L.push(`  words      ${pkg.words.length}`);
   L.push(`  oov        ${pkg.oovCount}`);
-  L.push(`  reactions  ${pkg.reactionCount} span(s) overlaid from the timings`);
+  const spliced = pkg.laughs ?? [];
+  L.push(
+    `  reactions  ${pkg.reactionCount} span(s), ${spliced.length} of them spliced laughs`,
+  );
   L.push('');
 
   L.push('TEXT AS TYPED');
   L.push(`  ${pkg.text.replace(/\n/g, '\n  ')}`);
   L.push('');
+  // Three texts now rather than two, and the difference between them is diagnostic. If a
+  // laugh is missing from the audio, the first question is whether the model was even
+  // asked for one — and `spoken` is the only record of that. Printed only when it
+  // differs, so an ordinary line still shows two blocks and not three.
+  if (pkg.spoken && pkg.spoken !== pkg.text) {
+    L.push('WHAT ELEVENLABS WAS ASKED TO SAY (laughs lifted out and spliced instead)');
+    L.push(`  ${pkg.spoken.replace(/\n/g, '\n  ')}`);
+    L.push('');
+  }
   if (pkg.script !== pkg.text) {
     L.push('SCRIPT THE ALIGNER SAW (tags stripped)');
     L.push(`  ${pkg.script.replace(/\n/g, '\n  ')}`);
+    L.push('');
+  }
+
+  if (spliced.length > 0) {
+    L.push(`LAUGHS SPLICED FROM THE LIBRARY (${spliced.length})`);
+    for (const laugh of spliced) {
+      L.push(
+        `  ${secs(laugh.atMs)}  ${laugh.kind.padEnd(8)} ${secs(laugh.durationMs).padStart(7)}  ` +
+          `"${laugh.label}"  [${laugh.clipId.slice(0, 8)}]`,
+      );
+    }
+    // Worth stating, because it is the one span length on the page that is not a
+    // measurement and someone comparing these times to the aligner's will wonder.
+    L.push("  These lengths are the clips' own, known before synthesis rather than");
+    L.push('  measured after it. The audio was cut open and everything after each');
+    L.push('  insertion moved along by exactly this much.');
     L.push('');
   }
 

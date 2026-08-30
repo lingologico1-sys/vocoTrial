@@ -17,6 +17,7 @@
  */
 
 import type { VisemeMark } from '../live/visemeTable';
+import type { SplicedLaugh } from './laughs';
 
 export const INDEX_KEY = 'index.json';
 
@@ -82,6 +83,21 @@ export interface ExpressionSpan {
    */
   laughing?: boolean;
   /**
+   * True when a giggle caused this span: a laugh with its mouth shut.
+   *
+   * Read at playback for the depth of the bob rather than for the eyes, which is the
+   * whole difference between this field and the one above it. A giggle leaves the eyes
+   * alone, so it never reaches the question `laughing` exists to answer; what it needs
+   * carrying instead is that its head moves less. By playback time the tag is gone and
+   * only the span remains, so the span has to say which of the two it was.
+   *
+   * Optional, and absent on every package made before the split — when `[giggles]` was
+   * an alias of `[laughs]` and really was performed at the laugh's depth. Falling back
+   * to that depth is therefore not a default, it is accuracy about how the package was
+   * made.
+   */
+  giggling?: boolean;
+  /**
    * The head bobbing through the span, which in practice means a laugh.
    *
    * HONOURED NOW, and what changed is that it stopped being an extra. It was carried
@@ -134,12 +150,25 @@ export interface ReactionOptions {
    * that is a judgement about a drawing, which is what all three of these are for.
    */
   nod: boolean;
+  /**
+   * Whether a giggle bobs the head.
+   *
+   * Separate from `nod` because turning the two off does not cost the same thing. A
+   * laugh without its bob is still legible — the mouth is open and holding a laugh
+   * pose — so switching it off trades rhythm for stillness. A giggle without its bob
+   * is a closed-mouth smile: the pose alone says nothing about laughing, and the
+   * gesture does not survive. Somebody quieting a portrait that reads badly in motion
+   * is usually after the big movement, not both, and one switch could not tell them
+   * apart.
+   */
+  giggleNod: boolean;
 }
 
 export const DEFAULT_REACTIONS: ReactionOptions = {
   eyes: true,
   smileLeadIn: true,
   nod: true,
+  giggleNod: true,
 };
 
 export type LipsyncModel = 'eleven_v3' | 'eleven_multilingual_v2';
@@ -166,8 +195,27 @@ export interface LipsyncPackage {
   /** A short label for the listing. Derived from the text unless someone names it. */
   name: string;
 
-  /** As typed, tags and all. What was sent to ElevenLabs. */
+  /**
+   * As typed, tags and all.
+   *
+   * NO LONGER WHAT WAS SENT TO ELEVENLABS, which this used to say and which stopped
+   * being true when laughs began coming out of our own library. `spoken` is what was
+   * sent. This is the author's line, and it stays the author's line because it is what
+   * everything human-facing is derived from — the name, the cost estimate, the tag
+   * warnings, and `laughEyeSpans`' positional fallback, which matches stored spans
+   * against the tags in source order and would mismatch against a text with two of them
+   * removed.
+   */
   text: string;
+  /**
+   * What ElevenLabs was actually asked to say: `text` with the laugh tags lifted out.
+   *
+   * Kept because the difference between this and `text` is the difference between what
+   * the model performed and what the finished audio contains, and a package that could
+   * not show both would be unable to explain itself. Absent on packages made before the
+   * laugh library, where it was the same string as `text`.
+   */
+  spoken?: string;
   /** Tags stripped. What the aligner was given, and the only text MFA ever saw. */
   script: string;
   language: 'en' | 'fr' | 'es';
@@ -187,6 +235,20 @@ export interface LipsyncPackage {
   oovCount: number;
   /** How many reaction spans were overlaid rather than trusted to the aligner. */
   reactionCount: number;
+  /**
+   * The laughs spliced into this audio from the library, in the order they occur.
+   *
+   * Carried for three separate reasons, any one of which would justify it. It makes a
+   * saved take reproducible — the clip was chosen at random, and without this record a
+   * regenerate would silently be a different line. It lets Diagnostics say what the
+   * audio actually contains rather than what was asked for. And it is the only thing
+   * that distinguishes a laugh we spliced from one ElevenLabs happened to render, which
+   * is the distinction this whole mechanism exists to make.
+   *
+   * Empty or absent means every laugh in the line, if any, came from the model — either
+   * because the library had nothing for this voice or because the package predates it.
+   */
+  laughs?: SplicedLaugh[];
   /** How the reactions in this line were performed. */
   reactions: ReactionOptions;
   /** What the eyes and head do, and when. Empty unless something asked. */

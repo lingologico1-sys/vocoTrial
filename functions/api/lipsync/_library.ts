@@ -1,4 +1,5 @@
 import { INDEX_KEY, type PublishedLine } from '../../../src/lipsync/published';
+import { LAUGHS_INDEX_KEY, type LaughClip } from '../../../src/lipsync/laughs';
 
 /**
  * The R2 side of the saved-line library, and the keys the generator needs.
@@ -48,6 +49,35 @@ export async function readIndex(bucket: R2Bucket): Promise<PublishedLine[]> {
 
 export function writeIndex(bucket: R2Bucket, lines: PublishedLine[]): Promise<unknown> {
   return bucket.put(INDEX_KEY, JSON.stringify({ lines }), {
+    httpMetadata: { contentType: 'application/json' },
+  });
+}
+
+/**
+ * The laugh library's index, kept exactly the way the line index above is.
+ *
+ * A second small object rather than a second bucket, and separate from the line index
+ * rather than folded into it. Separate because generate.ts reads this on every single
+ * request and the line index on none of them: merging them would mean fetching every
+ * saved line's summary to find out which laughs exist, on the hot path, forever.
+ *
+ * The same one-writer caveat applies and matters less here — clips are cut occasionally
+ * and by one person, where lines are saved in bursts while tuning a voice.
+ */
+export async function readClips(bucket: R2Bucket): Promise<LaughClip[]> {
+  const object = await bucket.get(LAUGHS_INDEX_KEY);
+  if (!object) return [];
+
+  try {
+    const parsed = (await object.json()) as { clips?: unknown };
+    return Array.isArray(parsed.clips) ? (parsed.clips as LaughClip[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function writeClips(bucket: R2Bucket, clips: LaughClip[]): Promise<unknown> {
+  return bucket.put(LAUGHS_INDEX_KEY, JSON.stringify({ clips }), {
     httpMetadata: { contentType: 'application/json' },
   });
 }

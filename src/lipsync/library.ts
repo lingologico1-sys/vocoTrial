@@ -1,4 +1,5 @@
 import type { Quota } from './cost';
+import type { LaughClip, LaughKind } from './laughs';
 import type {
   ReactionOptions,
   LipsyncModel,
@@ -71,6 +72,17 @@ export interface GenerateRequest {
   model: LipsyncModel;
   params: VoiceParams;
   reactions: ReactionOptions;
+  /**
+   * Leave the laugh tags in the prompt and let ElevenLabs try, rather than splicing.
+   *
+   * This is how the library gets its first clip, and it is not an alternative mode. Once
+   * a voice has laughs kept for it, `[laughs]` never reaches the model again — so without
+   * a way to ask for one deliberately, the library could never grow past whatever
+   * happened to be in it, and a voice with a single mediocre giggle would be stuck with
+   * it forever. Off by default: the unreliability is the thing being fixed, and this is
+   * the switch that goes looking for it on purpose.
+   */
+  harvest?: boolean;
 }
 
 /**
@@ -118,6 +130,49 @@ export async function fetchQuota(): Promise<Quota | null> {
 
 export function deleteLine(id: string): Promise<unknown> {
   return post('delete', { id });
+}
+
+/**
+ * The laugh library.
+ *
+ * Four calls rather than one because they are asked at four different moments: the
+ * listing on mount, a cut when something worth keeping has just been heard, the audio
+ * only when a clip is auditioned, and a delete rarely. See src/lipsync/laughs.ts for
+ * what a clip is and functions/api/lipsync/laughs for what each route does.
+ */
+export async function listClips(): Promise<LaughClip[]> {
+  const { clips } = await post<{ clips: LaughClip[] }>('laughs/list');
+  return clips;
+}
+
+export interface CutRequest {
+  /** A SAVED line. A clip is cut from R2, so an unsaved take has nothing to cut from. */
+  sourceId: string;
+  kind: LaughKind;
+  startMs: number;
+  endMs: number;
+  label?: string;
+}
+
+/**
+ * Keeps part of a saved line as a laugh.
+ *
+ * The times that come back are the times the cut actually landed on, which are up to
+ * half a frame from the ones asked for — the caller should show those rather than its
+ * own, so that what the panel says matches what the clip contains.
+ */
+export function cutClip(
+  request: CutRequest,
+): Promise<{ clip: LaughClip; audioBase64: string; cutFromMs: number; cutToMs: number }> {
+  return post('laughs/cut', request);
+}
+
+export function fetchClip(id: string): Promise<{ audioBase64: string }> {
+  return post<{ audioBase64: string }>('laughs/get', { id });
+}
+
+export function deleteClip(id: string): Promise<unknown> {
+  return post('laughs/delete', { id });
 }
 
 /**

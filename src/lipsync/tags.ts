@@ -5,6 +5,7 @@
 // phone, so there is nothing to collapse. This module names poses directly.
 import type { Viseme, VisemeMark } from '../live/visemeTable';
 import type { ExpressionSpan, ReactionOptions } from './published';
+import { laughKindOf, type LaughKind } from './laughs';
 
 /**
  * ElevenLabs v3 audio tags, sorted by what they do to a forced alignment.
@@ -82,6 +83,17 @@ export interface Tag {
   eyes?: 'closed' | 'blink' | 'none';
   /** True of a laugh, which is the only thing a smile precedes. */
   laughing?: boolean;
+  /**
+   * True of a giggle, which is a laugh with its mouth shut.
+   *
+   * A SECOND FLAG RATHER THAN A DEGREE ON THE FIRST. The two share a shape — held pose,
+   * head carrying the rhythm — and differ in every switch that reaches them: a giggle
+   * wants no lead-in smile (its pose already is `smile`, so a smile before it is a
+   * smile before itself), no eye channel at all, and a shallower bob. A single
+   * `laughing` with an intensity beside it would have had three call sites asking
+   * "which kind" through a number, which is the flag written badly.
+   */
+  giggling?: boolean;
 }
 
 const directive = (group: Tag['group']) => (tag: string): Tag => ({
@@ -116,8 +128,28 @@ export const TAGS: Tag[] = [
   // headMotion.ts, and `nod` below, which is what turns it on.
   { tag: '[laughs]', kind: 'reaction', group: 'Reactions', viseme: 'laugh',
     perform: 'hold', eyes: 'closed', laughing: true },
-  { tag: '[giggles]', kind: 'reaction', group: 'Reactions', viseme: 'laugh',
-    perform: 'hold', eyes: 'closed', laughing: true },
+  // A giggle: the same gesture as a laugh, one size down and with the mouth shut. It
+  // was a literal alias of [laughs] until now — same open pose, same closed eyes, same
+  // bob — which meant the palette offered a distinction it did not draw.
+  //
+  // THE MOUTH IS `smile`, NOT `laugh`. slots.ts keeps `smile` closed on purpose and
+  // calls a closed-mouth laugh a stifled one, which is exactly what a giggle is. That
+  // one substitution carries most of the difference on its own: the teeth do not
+  // appear, the jaw does not drop, and what is left to read laughter from is the head.
+  //
+  // EYES LEFT ALONE, and this is where it parts company with the laugh rather than
+  // merely scaling it. A laugh screws its eyes up; a giggle is the version being held
+  // in, and the kit has no eye-crinkle artwork to say so. Lids down across a shut mouth
+  // is not a smaller laugh — it is a face doing nothing at all, which on a portrait
+  // reads as serene or asleep. With the mouth closed the bob is the only signal left,
+  // and the open eyes are what keep it looking amused rather than becalmed.
+  //
+  // No lead-in smile either, and not by omission: `laughing` is what leadIns gates on,
+  // and a giggle whose own pose is `smile` has nothing to anticipate with. The bob is
+  // shallower — see GIGGLE_BOB_GAIN in headMotion.ts, which is where the depth lives,
+  // because depth is a fact about playback and this table is a fact about the body.
+  { tag: '[giggles]', kind: 'reaction', group: 'Reactions', viseme: 'smile',
+    perform: 'hold', eyes: 'none', giggling: true },
 
   // Panting keeps the pulse, and is the only thing left that has one. It survives the
   // argument above because it alternates between two poses that differ only in how far
@@ -201,6 +233,162 @@ export function reactionsIn(text: string): Tag[] {
     .filter((t): t is Tag => t?.kind === 'reaction');
 }
 
+/** Words as the aligner will count them: whitespace-separated, tags already gone. */
+export function wordCount(script: string): number {
+  return script.split(/\s+/).filter(Boolean).length;
+}
+
+/** One laugh tag lifted out of the text, and where in the script it was standing. */
+export interface LaughTag {
+  kind: LaughKind;
+  tag: string;
+  /**
+   * How many script words precede it.
+   *
+   * The anchor is a word index rather than a character offset or a timestamp because the
+   * aligner's word tier is the only thing that knows where anything actually is. It is
+   * also the one coordinate that survives the tag being deleted: the words either side
+   * are still there, still spoken, and still measured.
+   */
+  wordsBefore: number;
+}
+
+/**
+ * The text with laugh tags lifted out, and a note of where each one stood.
+ *
+ * WHY ONLY THESE TWO. Every other tag still goes to ElevenLabs untouched, and should:
+ * `[whispering]` changes how words are said and works, `[pause]` inserts silence the
+ * aligner reads correctly on its own, and `[sighs]` makes a sound we have no library for
+ * and no reason to replace. It is specifically `[laughs]` and `[giggles]` that are being
+ * taken over, because they are the two that we can now do better ourselves — and taking
+ * them out of the prompt is most of why that works. The model stops being asked for a
+ * laugh, so it stops sometimes deciding not to give one, and what it returns is clean
+ * speech with a known gap in the sense rather than a coin flip in the audio.
+ *
+ * WHAT THIS COSTS, said plainly because it is the one real regression. With the tag gone,
+ * ElevenLabs has no reason to leave room where the laugh goes, so a laugh in the middle
+ * of an unpunctuated clause is spliced into continuous speech and reads as an
+ * interruption. Punctuation on either side is what buys the room back, and it is the
+ * author's to place — which is why this is documented rather than worked around by, say,
+ * substituting an ellipsis, a thing v3 reads as hesitation and would perform.
+ */
+export function splitLaughs(
+  text: string,
+  /**
+   * Which kinds to lift, which is which kinds the library can actually cover.
+   *
+   * Passed in rather than assumed, because a tag we cannot replace must stay in the
+   * prompt. An empty library, or a voice nobody has cut a giggle from, has to leave
+   * `[giggles]` where it is and let ElevenLabs try — that is unreliable, but it is what
+   * this build did before the library existed, so the floor is the old behaviour instead
+   * of a laugh that silently never happens at all.
+   */
+  kinds: readonly LaughKind[],
+): { spoken: string; laughs: LaughTag[] } {
+  const laughs: LaughTag[] = [];
+  let spoken = '';
+  let read = 0;
+
+  for (const match of text.matchAll(BRACKETED)) {
+    const kind = laughKindOf(match[0]);
+    if (kind === null || !kinds.includes(kind)) continue;
+    laughs.push({
+      kind,
+      tag: match[0],
+      // Counted over the script, not the raw text, so that directive tags standing
+      // between here and the start are not mistaken for words the aligner will report.
+      wordsBefore: wordCount(stripTags(text.slice(0, match.index))),
+    });
+    spoken += text.slice(read, match.index);
+    read = match.index + match[0].length;
+  }
+
+  spoken += text.slice(read);
+  return {
+    // Only the run of spaces a removed tag leaves behind is tidied. Newlines and the
+    // author's own spacing are left alone: this is going to a model that reads
+    // punctuation for prosody, and reflowing it would change the read.
+    laughs,
+    spoken: spoken.replace(/[ \t]{2,}/g, ' ').replace(/[ \t]+([,.!?;:])/g, '$1').trim(),
+  };
+}
+
+/**
+ * Where in the audio a lifted laugh belongs, from the words the aligner did measure.
+ *
+ * THE MIDPOINT OF THE GAP, not the end of the word before or the start of the one after.
+ * A laugh butted against the last phoneme of the previous word clips its own onset; one
+ * butted against the next word leaves no room for the mouth to arrive. Splitting the
+ * silence gives the gesture a boundary on both sides, and where there is no silence at
+ * all — two words run together — the midpoint degenerates to that instant, which is the
+ * honest answer rather than a fabricated pause.
+ *
+ * INDICES ARE RESCALED WHEN THE COUNTS DISAGREE, which is a real case and not a
+ * defensive flourish. `wordsBefore` counts whitespace-separated tokens; MFA counts what
+ * its dictionary considers words, and in French a clitic like "l'école" can come back as
+ * two. Taking the index literally would then put every laugh after that point one word
+ * early, and the error accumulates down the line. Scaling proportionally spreads the
+ * disagreement instead of concentrating it at the end, and the exact case — the counts
+ * agreeing, which is nearly every English line — is unaffected because the ratio is 1.
+ */
+export function laughTimeMs(
+  laugh: LaughTag,
+  scriptWordCount: number,
+  words: ReadonlyArray<{ startMs: number; endMs: number }>,
+  durationMs: number,
+): number {
+  if (words.length === 0) return Math.max(0, Math.round(durationMs / 2));
+
+  const scaled =
+    scriptWordCount > 0 && scriptWordCount !== words.length
+      ? Math.round((laugh.wordsBefore * words.length) / scriptWordCount)
+      : laugh.wordsBefore;
+  const index = Math.max(0, Math.min(words.length, scaled));
+
+  // Before the first word: at the very top of the clip. Whatever silence ElevenLabs put
+  // in front of the speech stays in front of the laugh, which is where it belongs.
+  if (index === 0) return 0;
+  // After the last word: at the end, not at the last word's end — a clip usually has a
+  // moment of decay after the final phoneme, and cutting into it to place a laugh would
+  // truncate the sentence to fit the gesture.
+  if (index >= words.length) return Math.max(words[words.length - 1].endMs, durationMs);
+
+  return Math.round((words[index - 1].endMs + words[index].startMs) / 2);
+}
+
+/**
+ * The span a laugh clip occupies, built from a length we chose rather than one we found.
+ *
+ * This is the payoff of the whole exercise, and it is worth being explicit about what
+ * changed. `reactionSpans` below measures a span off ElevenLabs' character timings —
+ * honest, but a measurement of whatever the model did, including doing nothing. This
+ * builds the identical shape from a clip whose duration was known before a single byte
+ * was synthesised. Everything downstream — `leadIns`, `performSpan`, `expressionSpans`,
+ * `laughBob` — takes a `Span` and cannot tell which of the two it was handed, which is
+ * exactly why nothing downstream had to change.
+ */
+export function laughSpan(kind: LaughKind, startMs: number, durationMs: number): Span | null {
+  const tag = BY_TAG.get(`[${kind}]`);
+  if (!tag?.viseme) return null;
+  return spanFrom(tag, startMs, startMs + durationMs);
+}
+
+/** One reaction tag's row turned into a span over a stretch of time. */
+function spanFrom(tag: Tag, startMs: number, endMs: number): Span {
+  return {
+    startMs,
+    endMs,
+    viseme: tag.viseme as Viseme,
+    perform: tag.perform ?? 'hold',
+    rebound: tag.rebound ?? 'uh',
+    edge: tag.edge ?? 'rest',
+    pulseMs: tag.pulseMs ?? PULSE_MS,
+    eyes: tag.eyes ?? 'none',
+    laughing: tag.laughing === true,
+    giggling: tag.giggling === true,
+  };
+}
+
 export interface Span {
   startMs: number;
   endMs: number;
@@ -211,6 +399,7 @@ export interface Span {
   pulseMs: number;
   eyes: NonNullable<Tag['eyes']>;
   laughing: boolean;
+  giggling: boolean;
 }
 
 /**
@@ -239,14 +428,18 @@ const BLINK_MS = 160;
  * A span shorter than this gets no lead-in smile.
  *
  * A face smiles a beat before it laughs, and an expression arriving with the sound
- * reads as a flinch. A very short giggle still gets none: the beat is a piece of
+ * reads as a flinch. A very short laugh still gets none: the beat is a piece of
  * anticipation, and anticipating something already over reads as a twitch rather than
  * as a laugh being wound up.
  *
  * The original reason was different and no longer applies — the beat used to be spent
- * inside the span, so a short giggle "would spend most of itself arriving". It is spent
+ * inside the span, so a short laugh "would spend most of itself arriving". It is spent
  * before the span now, for the reason under SMILE_LEAD_MS, and costs the laugh nothing.
  * The gate is kept on the new grounds rather than removed with the old ones.
+ *
+ * The examples used to say "giggle", from when `[giggles]` was an alias of `[laughs]`.
+ * A giggle is now gated a step earlier and never reaches this length at all: leadIns
+ * asks `laughing`, and a giggle's own pose is the smile this would precede it with.
  */
 export const SMILE_LEAD_MIN_MS = 420;
 /**
@@ -286,17 +479,9 @@ export function reactionSpans(
     } else if (characters[i] === ']' && open >= 0) {
       const tag = BY_TAG.get(characters.slice(open, i + 1).join('').toLowerCase());
       if (tag?.kind === 'reaction' && tag.viseme) {
-        spans.push({
-          startMs: Math.round(starts[open] * 1000),
-          endMs: Math.round(ends[i] * 1000),
-          viseme: tag.viseme,
-          perform: tag.perform ?? 'hold',
-          rebound: tag.rebound ?? 'uh',
-          edge: tag.edge ?? 'rest',
-          pulseMs: tag.pulseMs ?? PULSE_MS,
-          eyes: tag.eyes ?? 'none',
-          laughing: tag.laughing === true,
-        });
+        spans.push(
+          spanFrom(tag, Math.round(starts[open] * 1000), Math.round(ends[i] * 1000)),
+        );
       }
       open = -1;
     }
@@ -423,11 +608,24 @@ export function expressionSpans(
         // Recorded rather than derived later, because by playback time the tag that
         // caused the span is gone and only its timings remain.
         laughing: s.laughing ? true : undefined,
+        // Recorded for the same reason `laughing` is, and read for a different one:
+        // playback scales the bob's depth by it. See GIGGLE_BOB_GAIN.
+        giggling: s.giggling ? true : undefined,
         // The laugh's rhythm, and no longer a decoration on top of a pulsing mouth:
         // the mouth holds its pose now, so with this off a laugh is a still open
         // mouth. Which is a legitimate thing to want on a portrait whose head reads
         // badly in motion, and the reason it is still a switch rather than anatomy.
-        nod: options.nod && s.laughing ? true : undefined,
+        //
+        // Two switches feeding one flag, because the two gestures fail differently
+        // when they read badly. A laugh with its bob off is still a laugh — the open
+        // mouth carries it — whereas a giggle with its bob off is a closed smile and
+        // nothing else, which is to say it is not a giggle at all. Somebody who wants
+        // the head still through the big gesture may well want it moving through the
+        // small one, and one switch could not have said so.
+        nod:
+          (options.nod && s.laughing) || (options.giggleNod && s.giggling)
+            ? true
+            : undefined,
       };
     })
     .filter((e) => e.eyesClosed || e.nod);
@@ -453,6 +651,14 @@ export function expressionSpans(
  *              The zip is trusted only when the two lengths agree; if they disagree the
  *              package is not what this function believes it is, and it says no rather
  *              than opening the eyes of whichever reaction happens to line up.
+ *
+ * A PACKAGE MADE BEFORE THE GIGGLE SPLIT lands in that refusal on purpose, and it is
+ * worth naming because it is the first case to actually reach it. `[giggles]` used to
+ * close its eyes and no longer does, so an old package's stored spans include one this
+ * table no longer produces, the lengths disagree, and every laugh in that line keeps its
+ * eyes. That is the right way round: the alternative is offsetting the tags against the
+ * spans and opening the eyes of whatever sits at the wrong index. Anything generated
+ * since `laughing` existed takes the first branch and is unaffected.
  */
 export function laughEyeSpans(
   expressions: readonly ExpressionSpan[],
@@ -515,7 +721,23 @@ export function overlayReactions(
     // — the lead-in smile included — for the reason searching to the end would be wrong:
     // anything later is one of the marks just dropped, and resuming into a pose that was
     // suppressed for being about to be overruled puts it back after the fact.
-    if (!marks.some((m) => m.timeMs === span.endMs)) {
+    //
+    // AND UNLESS ANOTHER SPAN IS STILL RUNNING THERE, which is the condition that was
+    // missing and that adjacent spans made certain rather than merely possible. Two
+    // laughs in a row end one where the next begins; the closing mark then lands inside
+    // the second gesture, and because it sorts before the second laugh's own mark and
+    // carries a different pose, the run collapses to "laugh, then whatever preceded the
+    // first one" — the mouth stops laughing partway through a laugh that is still
+    // audible. Resuming a previous pose only makes sense when there is nothing to resume
+    // into; inside another reaction there is, and it is that reaction.
+    //
+    // leadIns already refuses its beat for the same reason (see the note there about
+    // "[giggles] [giggles]"). This is the same hazard on the other end of the span, and
+    // it went unguarded because nothing used to place two spans exactly back to back.
+    const stillGoing = spans.some(
+      (other, j) => j !== i && span.endMs >= other.startMs && span.endMs < other.endMs,
+    );
+    if (!stillGoing && !marks.some((m) => m.timeMs === span.endMs)) {
       const before = [...marks].reverse().find((m) => m.timeMs <= gesture[i].from);
       out.push({
         timeMs: span.endMs,

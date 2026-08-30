@@ -545,6 +545,26 @@ export const LAUGH_NOD_GAIN = 2.2;
 const LAUGH_BOB_EDGE = 0.14;
 
 /**
+ * How much of the laugh's bob a giggle gets.
+ *
+ * A giggle is the same gesture one size down: closed lips instead of an open laugh
+ * pose, and a head that ticks rather than throws. Depth is the only thing scaled —
+ * the rate is left at LAUGH_BOB and the envelope at LAUGH_BOB_EDGE — because rate is
+ * where the two gestures actually agree. Laughter and giggling run at much the same
+ * frequency in a body; what separates them is amplitude and whether the mouth is open,
+ * and both of those are already accounted for.
+ *
+ * A half, and the halving is against `laughBob`'s output rather than against
+ * LAUGH_NOD_GAIN, which matters for one reason: Face caps the laugh at NOD_DEPTH_MAX,
+ * and that cap is what the overscan pays for. Scaling the 0-to-1 shape leaves the cap
+ * on the same side of the arithmetic, so a giggle stays strictly inside a depth the
+ * frame is already known to clear. Scaling the gain instead would have put a second
+ * number under that cap and made the giggle's real depth depend on where the panel's
+ * depth slider happened to sit relative to it.
+ */
+export const GIGGLE_BOB_GAIN = 0.5;
+
+/**
  * How far the head is dipped for a laugh this far into it, 0 to 1.
  *
  * A pure function of where the clip is rather than a channel with state, and

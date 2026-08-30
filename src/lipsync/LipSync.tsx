@@ -9,6 +9,7 @@ import { MARK_LOOKAHEAD_MS } from '../live/polly';
 import { MAX_LOOKAHEAD_MS } from '../live/visemes';
 import Compose from './Compose';
 import Diagnostics from './Diagnostics';
+import LaughLibrary from './LaughLibrary';
 import { audioUrl, saveLine, type Generated } from './library';
 import { laughEyeSpans, withLaughEyesOpen } from './tags';
 import { loadBundledKit } from '../facekit/bundled';
@@ -401,6 +402,7 @@ export default function LipSync() {
     if (!pkg) return null;
     return laughEyesOpen ? withLaughEyesOpen(pkg.expressions, pkg.text) : pkg.expressions;
   }, [pkg, laughEyesOpen]);
+  const spliced = pkg?.laughs?.length ?? 0;
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-200">
@@ -636,14 +638,37 @@ export default function LipSync() {
                 ? 'In the library, with its audio and the timings it was aligned from.'
                 : 'Nothing is stored until you say so — tuning a voice should not fill a bucket.'}
             </span>
-            {generated.package.reactionCount > 0 && (
+            {/* Spliced laughs are counted separately from the rest, because they are the
+                one kind of span that was NOT marked from the timings — its length came
+                from a clip chosen before anything was synthesised. Rolling them into the
+                same number would report the thing this page most wants to distinguish as
+                indistinguishable. */}
+            {spliced > 0 && (
+              <span className="text-xs text-emerald-400/80">
+                {spliced} laugh{spliced === 1 ? '' : 's'} spliced from the library
+              </span>
+            )}
+            {generated.package.reactionCount - spliced > 0 && (
               <span className="text-xs text-amber-400/80">
-                {generated.package.reactionCount} reaction span
-                {generated.package.reactionCount === 1 ? '' : 's'} marked from the timings
+                {generated.package.reactionCount - spliced} reaction span
+                {generated.package.reactionCount - spliced === 1 ? '' : 's'} marked from the
+                timings
               </span>
             )}
           </div>
         )}
+
+        <LaughLibrary
+          // Only a saved line can be cut from: the clip is taken out of the audio in R2
+          // so that it is provably the same bytes, and an unsaved take is a blob in this
+          // tab that the server has never seen.
+          sourceId={saved && pkg ? pkg.id : null}
+          sourceName={pkg?.name ?? null}
+          voiceId={pkg?.voiceId ?? ''}
+          audioTime={audioTime}
+          busy={busy}
+          setBusy={setBusy}
+        />
 
         {meta && (
           <p className="font-mono text-[11px] text-slate-600">

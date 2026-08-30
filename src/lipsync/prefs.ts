@@ -62,6 +62,11 @@ const PREFS_VERSION = 2;
  * One field and one version so far, and deliberately written as a general step rather
  * than as a special case: the next unwired default to be finished will want the same
  * treatment, and the shape is easier to copy than to rediscover.
+ *
+ * `giggleNod` did not need a step and the difference is the whole test: it has never
+ * been written to storage, so an older blob is missing it rather than wrong about it,
+ * and `validate` fills a missing flag from the default already. This exists only for a
+ * field that carries an answer nobody gave.
  */
 function migrate(saved: Partial<LipsyncPrefs> & { version?: number }): Partial<LipsyncPrefs> {
   if (saved.version === PREFS_VERSION) return saved;
@@ -156,6 +161,7 @@ function validate(saved: Partial<LipsyncPrefs>): LipsyncPrefs {
       eyes: flag(reactions.eyes, DEFAULT_REACTIONS.eyes),
       smileLeadIn: flag(reactions.smileLeadIn, DEFAULT_REACTIONS.smileLeadIn),
       nod: flag(reactions.nod, DEFAULT_REACTIONS.nod),
+      giggleNod: flag(reactions.giggleNod, DEFAULT_REACTIONS.giggleNod),
     },
     faceId: str(saved.faceId, DEFAULT_PREFS.faceId),
     lookaheadMs: bounded(saved.lookaheadMs, 0, MAX_LOOKAHEAD_MS, DEFAULT_PREFS.lookaheadMs),

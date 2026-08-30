@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, Loader2, Sparkles } from 'lucide-react';
-import { fetchQuota, generate, LipsyncError, type Generated } from './library';
+import { fetchQuota, generate, listClips, LipsyncError, type Generated } from './library';
+import { LAUGH_KINDS, eligible, laughKindOf, type LaughClip } from './laughs';
 import {
   costOf,
   estimateUsd,
@@ -89,6 +90,17 @@ export default function Compose({ onGenerated, busy, setBusy }: ComposeProps) {
   const [params, setParams] = useState<VoiceParams>(remembered.params);
   const [reactions_, setReactions] = useState<ReactionOptions>(remembered.reactions);
   const [problem, setProblem] = useState<string | null>(null);
+  /**
+   * Ask ElevenLabs for the laughs on this run, instead of splicing ours.
+   *
+   * NOT REMEMBERED, unlike everything else on this panel, and that is the point of it
+   * rather than an oversight. Once a voice has laughs kept for it the tags stop being
+   * sent at all, so this is the only way to get a fresh one to cut — and it is a thing
+   * somebody does deliberately, once, when the library needs a new laugh. Persisted, it
+   * would quietly turn the unreliability back on for every line thereafter, which is
+   * exactly the bug the library exists to fix.
+   */
+  const [harvest, setHarvest] = useState(false);
   const box = useRef<HTMLTextAreaElement | null>(null);
   const [quota, setQuota] = useState<Quota | null>(null);
 
@@ -110,6 +122,40 @@ export default function Compose({ onGenerated, busy, setBusy }: ComposeProps) {
   const script = useMemo(() => stripTags(text), [text]);
   const reactions = useMemo(() => (tagsAllowed ? reactionsIn(text) : []), [text, tagsAllowed]);
   const warnings = useMemo(() => scriptWarnings(script), [script]);
+  /** Whether this line has a laugh or a giggle in it — the two the library covers. */
+  const laughing = useMemo(
+    () => reactions.some((r) => r.laughing || r.giggling),
+    [reactions],
+  );
+
+  /**
+   * Which of this line's tags the library will take over, and which the model still gets.
+   *
+   * The same rule generate.ts applies, evaluated here so the panel can say what will
+   * happen before a take is spent finding out. Duplicated logic is worth flagging: what
+   * keeps the two in step is that both ask `eligible` from laughs.ts rather than each
+   * deciding for itself what "covered" means.
+   */
+  const [clips, setClips] = useState<LaughClip[]>([]);
+  useEffect(() => {
+    void listClips().then(setClips).catch(() => undefined);
+  }, []);
+
+  const [fromLibrary, fromTimings] = useMemo(() => {
+    const covered = new Set(
+      harvest || !voiceId.trim()
+        ? []
+        : LAUGH_KINDS.filter((k) => eligible(clips, k, voiceId.trim()).length > 0),
+    );
+    const spliced: string[] = [];
+    const timed: string[] = [];
+    for (const tag of reactions) {
+      const kind = laughKindOf(tag.tag);
+      if (kind && covered.has(kind)) spliced.push(tag.tag);
+      else timed.push(tag.tag);
+    }
+    return [spliced, timed];
+  }, [reactions, clips, voiceId, harvest]);
 
   /** Inserts at the cursor rather than appending — a tag placed mid-line is the point. */
   function insert(tag: string) {
@@ -147,6 +193,7 @@ export default function Compose({ onGenerated, busy, setBusy }: ComposeProps) {
         model,
         params,
         reactions: reactions_,
+        harvest,
       });
       onGenerated(result);
       // The count just changed, so the panel should stop showing the old one.
@@ -412,6 +459,16 @@ export default function Compose({ onGenerated, busy, setBusy }: ComposeProps) {
                 <span className="text-xs text-slate-300">Head bobs through a laugh</span>
               </label>
             )}
+            {reactions.some((r) => r.giggling) && (
+              <label className="flex items-center gap-2" title="A giggle is a closed-mouth smile, so the bob is the only thing saying it is a laugh at all — shallower than the laugh's, and switched separately for that reason">
+                <input
+                  type="checkbox"
+                  checked={reactions_.giggleNod}
+                  onChange={(e) => setReactions((r) => ({ ...r, giggleNod: e.target.checked }))}
+                />
+                <span className="text-xs text-slate-300">Head bobs through a giggle</span>
+              </label>
+            )}
           </div>
           {/* What each tag does is not a preference, so it is shown rather than offered. */}
           <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-slate-600">
@@ -426,7 +483,9 @@ export default function Compose({ onGenerated, busy, setBusy }: ComposeProps) {
                       ? 'opens and closes'
                       : r.laughing
                         ? 'holds, head bobs'
-                        : 'holds'}
+                        : r.giggling
+                          ? 'closed smile, small bob'
+                          : 'holds'}
                   {r.eyes === 'closed' ? ', eyes shut' : r.eyes === 'blink' ? ', blinks' : ''}
                 </span>
               </span>
@@ -438,9 +497,34 @@ export default function Compose({ onGenerated, busy, setBusy }: ComposeProps) {
             are there because whether that suits a particular drawing is a different
             question. A laugh holds its pose and takes its rhythm from the head: drawn
             artwork swaps whole mouths rather than opening a jaw, so a pulsing laugh
-            flapped between two pictures.
+            flapped between two pictures. A giggle is that same gesture held in: the
+            lips stay shut, the eyes stay open, and the head bobs half as far.
           </p>
         </div>
+      )}
+
+      {/* Only when there is a laugh in the line for it to apply to. Elsewhere it would be
+          a switch with no observable effect, which reads as broken rather than as inert. */}
+      {laughing && (
+        <label className="flex items-start gap-2 rounded-lg border border-slate-800 px-3 py-2">
+          <input
+            type="checkbox"
+            className="mt-0.5"
+            checked={harvest}
+            onChange={(event) => setHarvest(event.target.checked)}
+          />
+          <span className="flex flex-col gap-0.5">
+            <span className="text-xs text-slate-300">
+              Let ElevenLabs try the laughs on this take
+            </span>
+            <span className="text-[11px] leading-snug text-slate-600">
+              For cutting a new clip. A laugh kept for this voice is normally spliced in
+              from the library and the tag never reaches the model — which is what makes
+              it reliable, and also what stops a better laugh ever turning up. Tick this to
+              ask for one, save the take, and cut it out below. Not remembered.
+            </span>
+          </span>
+        </label>
       )}
 
       {warnings.map((w) => (
@@ -462,12 +546,25 @@ export default function Compose({ onGenerated, busy, setBusy }: ComposeProps) {
         </p>
       )}
 
-      {reactions.length > 0 && (
+      {/* Two different claims about two different sets of tags, so two notices. Merging
+          them into one count was actively wrong once the library existed: a spliced laugh
+          is the opposite of "marked from the timings" — its span is the length of a clip
+          chosen before synthesis, which is the strongest guarantee on this page, and
+          filing it under the same warning as an unaligned sigh buries that. */}
+      {fromLibrary.length > 0 && (
+        <p className="flex items-start gap-2 rounded-lg border border-emerald-900/60 bg-emerald-950/20 px-3 py-2 text-xs text-emerald-300">
+          <Sparkles size={14} className="mt-0.5 shrink-0" />
+          {fromLibrary.join(' ')} will be spliced in from the laugh library and never sent
+          to ElevenLabs, so the span is exactly as long as the clip.
+        </p>
+      )}
+
+      {fromTimings.length > 0 && (
         <p className="flex items-start gap-2 rounded-lg border border-amber-900/60 bg-amber-950/30 px-3 py-2 text-xs text-amber-300">
           <AlertTriangle size={14} className="mt-0.5 shrink-0" />
-          {reactions.length} reaction tag{reactions.length === 1 ? '' : 's'} —{' '}
-          {reactions.map((r) => r.tag).join(' ')} — will have their spans marked from the
-          timings rather than aligned.
+          {fromTimings.length} reaction tag{fromTimings.length === 1 ? '' : 's'} —{' '}
+          {fromTimings.join(' ')} — will have their spans marked from the timings rather
+          than aligned.
         </p>
       )}
 
