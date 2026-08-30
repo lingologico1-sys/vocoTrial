@@ -17,6 +17,7 @@ import {
   type VoiceParams,
 } from './published';
 import { TAGS, reactionsIn, stripTags, type Tag } from './tags';
+import { scriptWarnings } from './warnings';
 
 /**
  * Writing a line and hearing it, without leaving the page.
@@ -85,6 +86,7 @@ export default function Compose({ onGenerated, busy, setBusy }: ComposeProps) {
   const cost = useMemo(() => costOf(text), [text]);
   const script = useMemo(() => stripTags(text), [text]);
   const reactions = useMemo(() => (tagsAllowed ? reactionsIn(text) : []), [text, tagsAllowed]);
+  const warnings = useMemo(() => scriptWarnings(script), [script]);
 
   /** Inserts at the cursor rather than appending — a tag placed mid-line is the point. */
   function insert(tag: string) {
@@ -353,6 +355,16 @@ export default function Compose({ onGenerated, busy, setBusy }: ComposeProps) {
           that is a consequence of the audio rather than of the setting.
         </p>
       </details>
+
+      {warnings.map((w) => (
+        <p
+          key={w.found}
+          className="flex items-start gap-2 rounded-lg border border-amber-900/60 bg-amber-950/30 px-3 py-2 text-xs text-amber-300"
+        >
+          <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+          {w.message}
+        </p>
+      ))}
 
       {cost.unknownTags.length > 0 && (
         <p className="flex items-start gap-2 rounded-lg border border-amber-900/60 bg-amber-950/30 px-3 py-2 text-xs text-amber-300">

@@ -1,5 +1,6 @@
 import { POLLY_VISEMES } from '../live/visemeTable';
 import type { LipsyncPackage } from './published';
+import { isMergedWord } from './warnings';
 
 /**
  * Working out why the mouth did what it did, and writing it down so it can be sent.
@@ -21,7 +22,7 @@ import type { LipsyncPackage } from './published';
 /** Shorter than this is easing, not stillness. SHAPE_TAU is 35ms; this is four of them. */
 export const MIN_QUIET = 140;
 
-export type QuietCause = 'pause' | 'unknown-word' | 'unexplained';
+export type QuietCause = 'pause' | 'unknown-word' | 'punctuation' | 'unexplained';
 
 export interface Quiet {
   startMs: number;
@@ -55,12 +56,26 @@ export function quietStretches(pkg: LipsyncPackage): Quiet[] {
     // it would hide precisely the case this exists for.
     if (unknown.length === 0 && endMs - startMs < MIN_QUIET) continue;
 
+    // A quiet stretch sitting inside a word MFA merged is almost always the pause at
+    // the punctuation it merged across — "lycée, c'était" arrives as one token, so the
+    // comma's own pause looks like the mouth shutting mid-word. Reporting that as an
+    // anomaly sends someone hunting for a bug in the most ordinary thing in the
+    // sentence, which is what happened the first time this panel was used in anger.
+    const merged = words.length > 0 && words.every((w) => isMergedWord(pkg, w));
+
     out.push({
       startMs,
       endMs,
       words,
       unknown,
-      cause: unknown.length > 0 ? 'unknown-word' : words.length > 0 ? 'unexplained' : 'pause',
+      cause:
+        unknown.length > 0
+          ? 'unknown-word'
+          : words.length === 0
+            ? 'pause'
+            : merged
+              ? 'punctuation'
+              : 'unexplained',
     });
   }
   return out;
@@ -97,6 +112,7 @@ export function report(pkg: LipsyncPackage): string {
   const quiet = quietStretches(pkg);
   const oov = pkg.oovWords ?? [];
   const unexplained = quiet.filter((q) => q.cause === 'unexplained');
+  const punctuation = quiet.filter((q) => q.cause === 'punctuation');
   const pauses = quiet.filter((q) => q.cause === 'pause');
   const L: string[] = [];
 
@@ -141,6 +157,16 @@ export function report(pkg: LipsyncPackage): string {
   if (pkg.script !== pkg.text) {
     L.push('SCRIPT THE ALIGNER SAW (tags stripped)');
     L.push(`  ${pkg.script.replace(/\n/g, '\n  ')}`);
+    L.push('');
+  }
+
+  if (punctuation.length > 0) {
+    L.push(`PAUSES INSIDE A MERGED WORD (${punctuation.length}) — almost certainly fine`);
+    for (const q of punctuation) {
+      L.push(`  ${secs(q.startMs)}–${secs(q.endMs)}  in "${q.words.join(' ')}"`);
+    }
+    L.push('  MFA merges tokens across some punctuation, so the pause at a comma lands');
+    L.push('  inside what it calls one word.');
     L.push('');
   }
 

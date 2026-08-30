@@ -157,9 +157,13 @@ export async function onRequestPost(
     return json({ error: 'ElevenLabs returned no audio', code: 'tts_empty' }, 502);
   }
 
-  // normalized_alignment describes the text the model actually spoke — numbers spelled
-  // out, abbreviations expanded — which is nearer to what MFA was given. Either is
-  // usable for finding a tag, since a tag survives normalisation unchanged.
+  // normalized_alignment is used only to locate tags, and it is worth recording what it
+  // is NOT, because this comment used to claim the opposite. It does not spell numbers
+  // out: sending "à 6 heures" returns "à 6 heures" in both alignments, padded with a
+  // space and otherwise untouched. So there is no normalised transcript to hand the
+  // aligner, and a digit reaches MFA as a digit, which no dictionary lists — the mouth
+  // then shuts over a word the voice plainly said. Compose warns about digits before
+  // anyone spends a generation on one; see scriptWarnings in warnings.ts.
   const alignment = spoken.normalized_alignment ?? spoken.alignment;
 
   // --- 2. Align the bytes we just made ---------------------------------------------
