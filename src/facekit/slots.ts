@@ -299,6 +299,58 @@ const CORNERS_FIXED = [
 ].join(' ');
 
 /**
+ * The ceiling, stated once, applied to every mouth pose.
+ *
+ * CORNERS_FIXED already forbids widening, so this looks redundant and is not. That
+ * clause is a *prohibition on movement* — corners stay where they are — which a
+ * generator satisfies by not consciously moving them, and which says nothing at all
+ * about the shape that comes back. This is a *measurement on the result*, checkable
+ * against something already in the picture. The note under ee explains why that
+ * distinction earns its words: a proportion the generator can measure off its own
+ * output beats an adjective it has to interpret.
+ *
+ * The evidence that adjectives do not hold is the whole history of this file. `aa`
+ * inflated until it was given a number — no wider than the closed mouth — and stopped.
+ * `ee` was handed licence over the corners and came back a grin, twice. `laugh` asked
+ * for a "broad" mouth with corners "outward" and got one stretched across the face.
+ * Three poses, three roads to the same failure, and only the pose carrying an actual
+ * measurement ever held. So the measurement goes on all of them rather than being
+ * rediscovered one pose at a time.
+ *
+ * ONE REFERENCE, USED EVERYWHERE: the closed mouth. It is the right one because it is
+ * the base every patch is generated from, so it is on screen while the model works, and
+ * because it is what the kit cross-fades through — a pose wider than the closed mouth
+ * is a pose that inflates on the way in, which is the artefact all of this exists to
+ * stop.
+ */
+const WIDTH_CAP = [
+  'Measured from one outer corner to the other, the mouth is no wider than the closed',
+  'mouth it was drawn from — the same width or narrower, never wider, whatever else it',
+  'is doing.',
+].join(' ');
+
+/**
+ * The same ceiling for the two poses that genuinely do spread.
+ *
+ * A pressed lip and a smile both widen a little in life, and mbp and smile say so on
+ * purpose — mbp's seam grows "longer and flatter", and a smile whose corners cannot move
+ * outward at all is most of the way to being no smile. Handing those two a flat
+ * prohibition would put the note in contradiction with the prompt above it, and a
+ * contradictory prompt is worse than an uncapped one: the generator picks a side and
+ * there is no telling which.
+ *
+ * So they get a bound rather than a ban, and the bound is a fraction rather than an
+ * adverb, for WIDTH_CAP's reason. "Very slightly" and "a little" are what these two
+ * poses said before, and they are exactly the kind of licence the CORNERS_FIXED note
+ * describes a generator spending all of.
+ */
+const WIDTH_CAP_SLIGHT = [
+  'The mouth may end up very slightly wider than the closed mouth it was drawn from, and',
+  'no more: each corner travels outward by at most a tenth of the width of the closed',
+  'mouth, and it does not spread beyond that.',
+].join(' ');
+
+/**
  * The compression exemption, for the poses defined by it.
  *
  * Everything CORNERS_FIXED protects is protected here too — colour, line
@@ -393,36 +445,81 @@ const SMILE_SPREADS = [
 ].join(' ');
 
 /**
- * The one pose that drops the jaw AND lifts the corners.
+ * The one pose that drops the jaw AND curves the lip line.
  *
- * Every other note forbids one or the other, and for good reasons that both stop
- * applying here. CORNERS_FIXED exists because a mouth that grows wider between speech
- * poses reads as inflating; SMILE_SPREADS grants the corners but assumes lips that stay
- * shut. A laugh is the case neither anticipated: the jaw is as open as `aa` and the
- * corners are as lifted as `smile`, at the same time, and holding either half still is
- * what makes a drawn laugh look like a scream.
+ * Every other note forbids one or the other, and for good reasons that only half stop
+ * applying here. SMILE_SPREADS grants the corners but assumes lips that stay shut, and a
+ * closed-mouth laugh is a stifled one. CORNERS_FIXED, though, still applies in full: it
+ * exists because a mouth that grows wider between poses reads as inflating, and that is
+ * as true of a laugh as of a speech pose.
+ *
+ * SO THE LICENCE IS VERTICAL ONLY, and this is the second time that lesson has been
+ * learned in this file. The note above CORNERS_FIXED records ee being exempted for two
+ * rounds and coming back a grin, and draws the conclusion that a generator given any
+ * licence over the corners spends all of it. The first draft of this clause did not heed
+ * it — it asked for corners that "travel outward" and an opening that is "both wide and
+ * clearly curved", and got back a mouth stretched most of the way across the face. The
+ * width allowance is withdrawn: the corners rise in place, the seam curves, and the
+ * opening stays inside `aa`'s cap. A laugh is not a bigger `aa`. It is an `aa` that is
+ * smiling, with both rows of teeth showing.
  *
  * The chin is allowed to travel for JAW_DROPS' reason exactly — a dropped jaw moves it,
  * and a face that refuses has a hole cut in it.
  */
 const LAUGH_OPENS = [
-  'The corners of the mouth lift and travel outward as the jaw drops, so the opening is',
-  'both wide and clearly curved upward at each end rather than level.',
-  'Keep the lips the same colour and line weight as the original, and keep the mouth',
-  'centred where it is: it does not slide or tilt.',
+  'The corners of the mouth lift as the jaw drops, so the line of the opening curves',
+  'clearly upward at each end rather than sitting level.',
+  'The corners rise in place: they do not travel outward, and the opening does not grow',
+  'wider than a plain open mouth — what makes it a laugh is the upward curve and the',
+  'teeth, not the size.',
+  'Keep the lips the same colour, thickness and line weight as the original, and keep the',
+  'mouth centred where it is: it does not slide or tilt.',
   'The chin and the skin between the lower lip and the chin travel downward with the jaw,',
   'as far as the jaw opens and no further.',
   'Do not change the nose or the cheeks, and do not move the outer edges of the jaw.',
 ].join(' ');
 
-const MOUTH_NOTE = [CORNERS_FIXED, MOUTH_STYLE, FACE_FIXED].join(' ');
-const SMILE_NOTE = [SMILE_SPREADS, MOUTH_STYLE].join(' ');
-const MBP_NOTE = [MBP_COMPRESSES, MOUTH_STYLE, FACE_FIXED].join(' ');
-const TEETH_NOTE = [CORNERS_FIXED, MOUTH_STYLE, TEETH_BAND, FACE_FIXED].join(' ');
+/**
+ * TEETH_BAND's rules, applied to two rows instead of one.
+ *
+ * Separate from TEETH_BAND rather than replacing it because every other toothy pose
+ * shows the upper row alone, and rightly — `aa` and `ee` and `fv` are speech, and speech
+ * does not bare the lower teeth. A laugh does, and here it is also load-bearing. Holding
+ * the laugh to `aa`'s jaw drop and `aa`'s width, as the note above LAUGH_OPENS does,
+ * leaves the two poses close enough that the kit's SAME_MOUTH check may call them the
+ * same drawing. The second band is the difference that does not cost size: it reads at a
+ * glance, it separates the two in the contact sheet, and it is what a laughing mouth
+ * actually shows.
+ *
+ * The flat-edge clause is stated for each band in the direction that band needs it —
+ * the upper row's straight edge is its bottom, the lower row's is its top — because
+ * "flat lower edge" applied to a bottom row asks for the wrong thing.
+ */
+const LAUGH_TEETH = [
+  'Draw the upper teeth as one single unbroken white band along the top of the opening',
+  'with a flat, straight lower edge, and the lower teeth as a second, shallower unbroken',
+  'white band along the bottom of the opening with a flat, straight upper edge, with a',
+  'plain dark interior between the two bands.',
+  'In both bands: no individual teeth, no dividing lines, outlines or gaps between them,',
+  'and no scalloped, wavy, pointed or jagged edge anywhere along either.',
+  'Each band is the same plain white across its whole width.',
+].join(' ');
+
+/*
+ * Every note carries a width cap, and it is the strict one unless the pose has a
+ * stated reason to spread. mbp and smile are the two that do; fv takes the strict cap
+ * despite sharing MBP_COMPRESSES with mbp, because its own prompt already insists the
+ * mouth "stays as wide as it was" — the cap makes the note agree with the prompt
+ * instead of quietly licensing what the prompt forbids.
+ */
+const MOUTH_NOTE = [CORNERS_FIXED, WIDTH_CAP, MOUTH_STYLE, FACE_FIXED].join(' ');
+const SMILE_NOTE = [SMILE_SPREADS, WIDTH_CAP_SLIGHT, MOUTH_STYLE].join(' ');
+const MBP_NOTE = [MBP_COMPRESSES, WIDTH_CAP_SLIGHT, MOUTH_STYLE, FACE_FIXED].join(' ');
+const TEETH_NOTE = [CORNERS_FIXED, WIDTH_CAP, MOUTH_STYLE, TEETH_BAND, FACE_FIXED].join(' ');
 /** The one pose that both shows teeth and thins a lip. */
-const FV_NOTE = [MBP_COMPRESSES, MOUTH_STYLE, TEETH_BAND, FACE_FIXED].join(' ');
-const OPEN_NOTE = [CORNERS_FIXED, MOUTH_STYLE, TEETH_BAND, JAW_DROPS].join(' ');
-const LAUGH_NOTE = [LAUGH_OPENS, MOUTH_STYLE, TEETH_BAND].join(' ');
+const FV_NOTE = [MBP_COMPRESSES, WIDTH_CAP, MOUTH_STYLE, TEETH_BAND, FACE_FIXED].join(' ');
+const OPEN_NOTE = [CORNERS_FIXED, WIDTH_CAP, MOUTH_STYLE, TEETH_BAND, JAW_DROPS].join(' ');
+const LAUGH_NOTE = [LAUGH_OPENS, WIDTH_CAP, MOUTH_STYLE, LAUGH_TEETH].join(' ');
 
 const mouth =
   (shape: string, note: string = MOUTH_NOTE) =>
@@ -579,21 +676,29 @@ export const SLOTS: Slot[] = [
    * WRITTEN AGAINST ITS TWO NEIGHBOURS, because they are what it will collapse into if
    * the prompt is loose, and they are neighbours in different directions:
    *
-   *   aa     the same jaw, corners level. An open mouth with level corners is alarm,
-   *          not delight, and an `aa` returned for this slot makes a laughing face
-   *          look like a screaming one.
+   *   aa     the same jaw and the same width, corners level and the lower teeth hidden.
+   *          An open mouth with level corners is alarm, not delight, and an `aa`
+   *          returned for this slot makes a laughing face look like a screaming one.
    *   smile  the same corners, lips shut. A closed-mouth laugh is a stifled one, and
    *          slots.ts keeps smile closed on purpose — see the note on that slot.
    *
    * So both halves are asked for explicitly and neither is left to be inferred, which
    * is the same fix rest and mbp needed when they came back as the same picture.
+   *
+   * WHAT IT IS NOT is stated too, because the first draft was all superlative — "broad
+   * laugh", "as far as a wide open mouth", corners "outward", a "wide curved shape" —
+   * five pushes toward size and no cap against any of them, and what came back was a
+   * mouth stretched across the whole face. `aa` avoided that with one clause its
+   * neighbour lacked: no wider than the closed mouth. The laugh borrows it verbatim and
+   * says outright that it is an open mouth that is smiling rather than a bigger one.
+   * That deliberately walks the pose toward `aa`; LAUGH_TEETH is what keeps them apart.
    */
   {
     id: 'laugh',
     label: 'Laugh',
     region: 'mouth',
     prompt: mouth(
-      'Open the mouth into a broad laugh. Drop the jaw as far as a wide open mouth, and at the same time lift both corners clearly upward and outward, so the opening is a wide curved shape rising at each end rather than a level oval. Show the upper teeth as one simple white band along the top and a plain dark interior below. The result has to be plainly distinguishable from a wide open mouth, because the corners are lifted rather than level; and from a closed smile, because the jaw is genuinely dropped and the teeth and the dark interior are visible. No dimples and no creases.',
+      'Open the mouth into a laugh. Drop the jaw exactly as far as a plain open mouth and no further — an opening about as tall as the closed mouth is wide, and no wider than the closed mouth — and at the same time lift both corners so the opening rises at each end into an upward curve instead of a level oval. Show the upper teeth as one simple white band along the top and the lower teeth as a shallower white band along the bottom, with a plain dark interior between them. This is not a broad, wide or exaggerated laugh: it is an open mouth that is smiling, the same size as a plain open mouth. The result has to be plainly distinguishable from a plain open mouth, because the corners are lifted rather than level and the lower teeth show as well as the upper; and from a closed smile, because the jaw is genuinely dropped and the teeth and the dark interior are visible. No dimples and no creases.',
       LAUGH_NOTE,
     ),
   },
