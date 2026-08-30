@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, AudioLines, Check, Save, Upload } from 'lucide-react';
+import { AlertTriangle, AudioLines, Check, RotateCcw, Save, Upload } from 'lucide-react';
 import BuildBadge from '../BuildBadge';
 import ReturnButton from '../ReturnButton';
 import SpeakingFace from '../live/SpeakingFace';
@@ -10,10 +10,12 @@ import { MAX_LOOKAHEAD_MS } from '../live/visemes';
 import Compose from './Compose';
 import Diagnostics from './Diagnostics';
 import { audioUrl, saveLine, type Generated } from './library';
+import { laughEyeSpans, withLaughEyesOpen } from './tags';
 import { loadBundledKit } from '../facekit/bundled';
 import { fetchPublished, listPublished } from '../facekit/library';
 import type { PublishedFace } from '../facekit/published';
 import type { FaceKit } from '../facekit/kit';
+import { clearPrefs, loadPrefs, savePrefs } from './prefs';
 
 /**
  * A mouth driven by a file instead of by a call.
@@ -73,10 +75,28 @@ export default function LipSync() {
   const [marks, setMarks] = useState<readonly VisemeMark[] | null>(null);
   const [meta, setMeta] = useState<MarksMeta | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
-  const [lookaheadMs, setLookaheadMs] = useState(MARK_LOOKAHEAD_MS);
+  const remembered = useState(loadPrefs)[0];
+  const [lookaheadMs, setLookaheadMs] = useState(remembered.lookaheadMs);
 
   const [kit, setKit] = useState<FaceKit | null>(null);
   const [faces, setFaces] = useState<PublishedFace[]>([]);
+  /**
+   * Which face is worn, in state as well as on the <select>.
+   *
+   * It was uncontrolled before, because nothing needed to know: the kit itself was
+   * the only record and the element remembered its own choice. Now the choice has to
+   * survive a reload — and be put back on the element, which a fresh DOM would
+   * otherwise open on the first option while wearing a different face.
+   */
+  const [faceId, setFaceId] = useState(remembered.faceId);
+  /**
+   * Bumped by Reset, and used as Compose's key.
+   *
+   * Compose seeds itself from storage in its initialisers, so the way to return it
+   * to defaults is to make it mount again after the store has been cleared. A key
+   * change does exactly that, and keeps the default values defined once, in prefs.ts.
+   */
+  const [generation, setGeneration] = useState(0);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [pose, setPose] = useState<string>('rest');
@@ -115,6 +135,17 @@ export default function LipSync() {
    * no honest pose but rest.
    */
   const [started, setStarted] = useState(false);
+  /**
+   * Whether the laughs in this line keep their eyes.
+   *
+   * A playback switch, not a generation one, and that is the whole point of it. The
+   * same choice exists in Compose as `reactions.eyes`, but that is answered before the
+   * voice is synthesised and covers every reaction at once — turning it off to save a
+   * laugh's eyes costs a fresh ElevenLabs take (a different performance, on v3) and
+   * takes the yawn's and the sigh's eyes down with it. This one applies to the package
+   * already in hand, only to the laughs, and is reversible by clicking it again.
+   */
+  const [laughEyesOpen, setLaughEyesOpen] = useState(false);
 
   /**
    * The clock the mouth reads, and the one thing on this page that is subtle.
@@ -134,16 +165,38 @@ export default function LipSync() {
   const audioTime = useRef(() => audioRef.current?.currentTime ?? 0).current;
 
   useEffect(() => {
+    // The remembered face is fetched instead of the bundled one, when there is one.
+    // The bundled kit still loads first either way, so a published face that has
+    // since been deleted leaves a face on screen rather than an empty frame.
     loadBundledKit()
       .then(setKit)
       .catch(() => undefined);
+    if (remembered.faceId) {
+      fetchPublished(remembered.faceId)
+        .then(setKit)
+        .catch(() => undefined);
+    }
     listPublished()
       // The same filter studio's picker uses. The library holds work in progress
       // now that saving is publishing, so `ready` is what separates a face that can
       // be worn from one still being drawn. Absent reads as ready — see published.ts.
-      .then((list) => setFaces(list.filter((face) => face.ready !== false)))
+      .then((list) => {
+        const wearable = list.filter((face) => face.ready !== false);
+        setFaces(wearable);
+        // A face remembered from a previous visit can have been deleted or unpublished
+        // since. Without this the <select> holds a value with no matching <option> and
+        // renders blank, which reads as a bug rather than as a face that went away.
+        setFaceId((id) => (id && !wearable.some((face) => face.id === id) ? '' : id));
+      })
       .catch(() => undefined);
+    // Read once, at mount: `remembered` is the snapshot taken before the first paint,
+    // and re-running this on a later change would fight the picker.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    savePrefs({ lookaheadMs, faceId });
+  }, [lookaheadMs, faceId]);
 
   // Object URLs are revoked when they are replaced, not on every render: a URL
   // handed to a playing <audio> element must outlive the render that made it.
@@ -268,6 +321,7 @@ export default function LipSync() {
   }
 
   async function wear(id: string) {
+    setFaceId(id);
     if (!id) {
       loadBundledKit()
         .then(setKit)
@@ -279,6 +333,36 @@ export default function LipSync() {
     } catch {
       /* Keep whatever is already on rather than stripping the face bare. */
     }
+  }
+
+  /**
+   * Back to a page that has never been opened.
+   *
+   * Everything goes: the remembered settings, the clip and its marks, the face. The
+   * clip is dropped along with the settings on purpose — a Reset that emptied the
+   * form but left a recording loaded under it would leave the audio paired with a
+   * script that is no longer on screen, which is the exact confusion this page was
+   * built to catch.
+   *
+   * No confirmation. The costly thing here is a generation, and a generation that
+   * matters has been saved to the library, which this does not touch.
+   */
+  function reset() {
+    clearPrefs();
+    if (audio) URL.revokeObjectURL(audio.url);
+    setAudio(null);
+    setMarks(null);
+    setMeta(null);
+    setProblem(null);
+    setGenerated(null);
+    setSaved(false);
+    setStarted(false);
+    setDuration(0);
+    setPose('rest');
+    const fresh = loadPrefs();
+    setLookaheadMs(fresh.lookaheadMs);
+    void wear(fresh.faceId);
+    setGeneration((n) => n + 1);
   }
 
   /**
@@ -303,6 +387,21 @@ export default function LipSync() {
   // nothing to say and rest is the only truthful pose.
   const driving = ready && started;
 
+  /**
+   * The expressions the face is actually given, which are the stored ones unless the
+   * switch above is on. Recomputed rather than written back to the package: what was
+   * generated stays what was generated, and Diagnostics keeps describing it truthfully.
+   */
+  const pkg = generated?.package ?? null;
+  const hasLaughEyes = useMemo(
+    () => (pkg ? laughEyeSpans(pkg.expressions, pkg.text).some(Boolean) : false),
+    [pkg],
+  );
+  const expressions = useMemo(() => {
+    if (!pkg) return null;
+    return laughEyesOpen ? withLaughEyesOpen(pkg.expressions, pkg.text) : pkg.expressions;
+  }, [pkg, laughEyesOpen]);
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-200">
       <BuildBadge look="workshop" />
@@ -317,10 +416,27 @@ export default function LipSync() {
               by the file, not by listening to the sound.
             </p>
           </div>
-          <ReturnButton look="workshop" />
+          <div className="flex shrink-0 items-center gap-2">
+            <button
+              type="button"
+              onClick={reset}
+              disabled={busy}
+              title="Forget the remembered settings and clear the loaded clip"
+              className="inline-flex items-center gap-2 rounded-lg border border-slate-800 px-3 py-1.5 text-xs text-slate-400 transition-colors hover:border-slate-600 hover:text-slate-200 disabled:cursor-not-allowed disabled:border-slate-900 disabled:text-slate-700"
+            >
+              <RotateCcw size={14} />
+              Reset
+            </button>
+            <ReturnButton look="workshop" />
+          </div>
         </header>
 
-        <Compose onGenerated={takeGenerated} busy={busy} setBusy={setBusy} />
+        <Compose
+          key={generation}
+          onGenerated={takeGenerated}
+          busy={busy}
+          setBusy={setBusy}
+        />
 
         <div className="flex items-center gap-3">
           <span className="text-xs uppercase tracking-wide text-slate-600">or open files</span>
@@ -414,7 +530,7 @@ export default function LipSync() {
               tap={null}
               marks={driving ? marks : null}
               audioTime={driving ? audioTime : null}
-              expressions={driving ? (generated?.package.expressions ?? null) : null}
+              expressions={driving ? expressions : null}
               driver="scheduled"
               lookaheadMs={lookaheadMs}
               kit={kit}
@@ -444,6 +560,7 @@ export default function LipSync() {
           <label className="flex flex-col gap-1.5">
             <span className="text-xs font-medium text-slate-400">Face</span>
             <select
+              value={faceId}
               className="rounded-lg border border-slate-800 bg-slate-900 px-3 py-2 text-sm text-slate-200"
               onChange={(event) => void wear(event.target.value)}
             >
@@ -477,6 +594,28 @@ export default function LipSync() {
               buying back.
             </span>
           </label>
+
+          {/* Only when there is a laugh to argue about. A checkbox that provably does
+              nothing to the line on screen is worse than no checkbox: it invites the
+              reading that the eyes were left closed on purpose by something else. */}
+          {hasLaughEyes && (
+            <label className="flex items-start gap-2 sm:col-span-2">
+              <input
+                type="checkbox"
+                className="mt-0.5"
+                checked={laughEyesOpen}
+                onChange={(event) => setLaughEyesOpen(event.target.checked)}
+              />
+              <span className="flex flex-col gap-0.5">
+                <span className="text-xs text-slate-400">Eyes open through laughs</span>
+                <span className="text-[11px] leading-snug text-slate-600">
+                  Applies to this take as it plays — no regeneration, and the audio is
+                  untouched. Yawns, sighs and sniffs keep their eyes either way, since
+                  what those do with the lids is half of what makes them recognisable.
+                </span>
+              </span>
+            </label>
+          )}
         </section>
 
         {generated && <Diagnostics pkg={generated.package} />}

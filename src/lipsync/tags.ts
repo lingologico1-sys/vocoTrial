@@ -394,8 +394,66 @@ export function expressionSpans(
           ? Math.min(s.endMs, s.startMs + BLINK_MS)
           : s.endMs,
       eyesClosed: true,
+      // Recorded rather than derived later, because by playback time the tag that
+      // caused the span is gone and only its timings remain.
+      laughing: s.laughing ? true : undefined,
       nod: options.nod && s.laughing ? true : undefined,
     }));
+}
+
+/**
+ * Which of a package's expression spans are a laugh screwing its eyes up.
+ *
+ * A playback-time question, and deliberately not the same one `ReactionOptions.eyes`
+ * answers. That flag decides whether the eyes move at all and is settled before the
+ * voice is ever synthesised, so changing it costs a fresh take from ElevenLabs — and on
+ * `eleven_v3` a fresh take is a different performance, not the same line with its eyes
+ * open. This answers the narrower question the note on that flag singles out, about a
+ * package that already exists.
+ *
+ * Two sources, in order:
+ *
+ *   the flag   Spans built since `ExpressionSpan.laughing` existed simply say.
+ *   the text   Older ones do not, and are matched positionally instead. That is exact
+ *              rather than a guess: `expressionSpans` keeps the reaction spans that
+ *              have eyes in source order, and `reactionsIn` reads the same tags out of
+ *              the same string in the same order, so the nth span is the nth such tag.
+ *              The zip is trusted only when the two lengths agree; if they disagree the
+ *              package is not what this function believes it is, and it says no rather
+ *              than opening the eyes of whichever reaction happens to line up.
+ */
+export function laughEyeSpans(
+  expressions: readonly ExpressionSpan[],
+  text: string,
+): boolean[] {
+  if (expressions.some((e) => e.laughing !== undefined)) {
+    return expressions.map((e) => e.laughing === true);
+  }
+  const tags = reactionsIn(text).filter((t) => (t.eyes ?? 'none') !== 'none');
+  if (tags.length !== expressions.length) return expressions.map(() => false);
+  return tags.map((t) => t.laughing === true);
+}
+
+/**
+ * The same spans with the laughs' eyes left open.
+ *
+ * Non-destructive by construction: it takes the stored expressions and returns new ones,
+ * so the package keeps what it was generated with and the choice stays a checkbox.
+ */
+export function withLaughEyesOpen(
+  expressions: readonly ExpressionSpan[],
+  text: string,
+): ExpressionSpan[] {
+  const laughs = laughEyeSpans(expressions, text);
+  return (
+    expressions
+      // Only the lids are being argued about, so only the lids are cleared — a laugh
+      // span can carry `nod` as well, and dropping the whole span would silently drop
+      // that too. A span left with nothing at all to say is then dropped, rather than
+      // handed on as an empty window for the face to evaluate every frame.
+      .map((e, i) => (laughs[i] ? { ...e, eyesClosed: undefined } : e))
+      .filter((e) => e.eyesClosed || e.nod)
+  );
 }
 
 export function overlayReactions(

@@ -69,6 +69,19 @@ export interface ExpressionSpan {
    */
   eyesClosed?: boolean;
   /**
+   * True when a laugh caused this span, rather than a yawn, a sigh or a sniff.
+   *
+   * Carried so that playback can tell them apart, and it is the laugh that needs telling
+   * apart because the laugh is the one the note on `ReactionOptions.eyes` singles out:
+   * screwed-up eyes are delightful on one face and unsettling on another. Without the
+   * flag, opening the eyes through a laugh means opening them through every reaction,
+   * and a yawn with its eyes open is not a yawn.
+   *
+   * Optional because packages made before this field existed do not carry it. See
+   * `laughEyeSpans` in tags.ts, which recovers the answer from the text for those.
+   */
+  laughing?: boolean;
+  /**
    * A single deliberate nod through the span.
    *
    * CARRIED BUT NOT YET HONOURED. The head is driven by headMotion, whose nod fires on

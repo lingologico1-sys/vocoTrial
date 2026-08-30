@@ -11,8 +11,6 @@ import {
   type Quota,
 } from './cost';
 import {
-  DEFAULT_REACTIONS,
-  DEFAULT_PARAMS,
   type ReactionOptions,
   type LipsyncModel,
   type LipsyncPackage,
@@ -20,6 +18,7 @@ import {
 } from './published';
 import { SMILE_LEAD_MIN_MS, TAGS, reactionsIn, stripTags, type Tag } from './tags';
 import { scriptWarnings } from './warnings';
+import { loadPrefs, savePrefs } from './prefs';
 
 /**
  * Writing a line and hearing it, without leaving the page.
@@ -69,15 +68,36 @@ const KIND_STYLE: Record<Tag['kind'], string> = {
 };
 
 export default function Compose({ onGenerated, busy, setBusy }: ComposeProps) {
-  const [text, setText] = useState('');
-  const [language, setLanguage] = useState<LipsyncPackage['language']>('fr');
-  const [voiceId, setVoiceId] = useState('');
-  const [model, setModel] = useState<LipsyncModel>('eleven_v3');
-  const [params, setParams] = useState<VoiceParams>(DEFAULT_PARAMS);
-  const [reactions_, setReactions] = useState<ReactionOptions>(DEFAULT_REACTIONS);
+  /**
+   * Seeded from the last visit, read once rather than in a mount effect.
+   *
+   * An effect would render the empty form first and then replace it, which flashes
+   * a blank voice ID at exactly the moment someone is looking to see whether they
+   * still need to fetch one. Reading in the initialiser means the first paint is
+   * already correct. `useState(loadPrefs)` — the function form, so the read happens
+   * on mount and not on every render.
+   *
+   * Reset is a remount, not a setter: LipSync clears the store and changes this
+   * component's key, so these initialisers run again over cleared storage. That
+   * keeps the defaults in one place instead of duplicated into a reset handler.
+   */
+  const remembered = useState(loadPrefs)[0];
+  const [text, setText] = useState(remembered.text);
+  const [language, setLanguage] = useState<LipsyncPackage['language']>(remembered.language);
+  const [voiceId, setVoiceId] = useState(remembered.voiceId);
+  const [model, setModel] = useState<LipsyncModel>(remembered.model);
+  const [params, setParams] = useState<VoiceParams>(remembered.params);
+  const [reactions_, setReactions] = useState<ReactionOptions>(remembered.reactions);
   const [problem, setProblem] = useState<string | null>(null);
   const box = useRef<HTMLTextAreaElement | null>(null);
   const [quota, setQuota] = useState<Quota | null>(null);
+
+  // Written on every keystroke. It is one small JSON blob to the same key, and the
+  // alternative — saving on blur, or on generate — loses the line to the refresh
+  // that happens mid-edit, which is the only case this is for.
+  useEffect(() => {
+    savePrefs({ text, language, voiceId, model, params, reactions: reactions_ });
+  }, [text, language, voiceId, model, params, reactions_]);
 
   // Read once on mount and again after each generation, since generating is the only
   // thing on this page that spends any of it.
