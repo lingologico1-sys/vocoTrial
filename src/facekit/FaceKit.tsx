@@ -1565,6 +1565,8 @@ export default function FaceKit() {
                   base={
                     shownBase
                       ? kit.bases?.[shownBase] ?? assembled ?? kit.base
+                      : kit.eyewear && region !== 'mouth'
+                        ? kit.bases?.neutral ?? kit.base
                       : assembled ?? kit.base
                   }
                   boxes={kit.boxes}
