@@ -223,11 +223,30 @@ const BLINK_MS = 160;
  * A span shorter than this gets no lead-in smile.
  *
  * A face smiles a beat before it laughs, and an expression arriving with the sound
- * reads as a flinch. But a short giggle that smiled first would spend most of itself
- * arriving, so the beat is only worth it when there is a laugh left after it.
+ * reads as a flinch. A very short giggle still gets none: the beat is a piece of
+ * anticipation, and anticipating something already over reads as a twitch rather than
+ * as a laugh being wound up.
+ *
+ * The original reason was different and no longer applies — the beat used to be spent
+ * inside the span, so a short giggle "would spend most of itself arriving". It is spent
+ * before the span now, for the reason under SMILE_LEAD_MS, and costs the laugh nothing.
+ * The gate is kept on the new grounds rather than removed with the old ones.
  */
 export const SMILE_LEAD_MIN_MS = 420;
-/** How long that beat lasts. Long enough to register, short enough not to delay. */
+/**
+ * How long that beat lasts, and — the part that was wrong — where it is spent.
+ *
+ * BEFORE THE SPAN, NOT INSIDE IT. The first draft placed the smile at `span.startMs`
+ * and pushed the laugh to `startMs + SMILE_LEAD_MS`, which is not what "a beat before"
+ * describes: the audible laugh began on time and the mouth began laughing 130ms late.
+ * That is video lagging audio by more than lip-sync survives, and self-inflicted — the
+ * span timings were measured, correct, and then moved.
+ *
+ * Anticipation has to come out of the silence in front of the laugh, because that is
+ * where a real one takes it from. So the smile is stamped at `startMs - SMILE_LEAD_MS`
+ * and the laugh still lands exactly on its sound. What this costs is the window of
+ * speech before the tag, which overlayReactions now clears — see LEAD_CLEARED there.
+ */
 const SMILE_LEAD_MS = 130;
 
 /**
@@ -280,6 +299,23 @@ export function reactionSpans(
  * the right pose rather than inheriting the reaction's.
  */
 /**
+ * How long a lead-in smile this span gets, or zero.
+ *
+ * Shared by performSpan, which stamps the smile, and overlayReactions, which has to
+ * clear the window that smile occupies. Two places deriving the same number
+ * independently is how they drift apart, and a drift here is a speech mark surviving
+ * inside the lead-in and overwriting it.
+ *
+ * Clamped so the beat cannot start before the recording does. A laugh in the first
+ * 130ms of an utterance gets a shorter run-up rather than a mark at a negative time.
+ */
+function leadInMs(span: Span, options: ReactionOptions): number {
+  if (!span.laughing || !options.smileLeadIn) return 0;
+  if (span.endMs - span.startMs < SMILE_LEAD_MIN_MS) return 0;
+  return Math.min(SMILE_LEAD_MS, span.startMs);
+}
+
+/**
  * The marks one span is performed with.
  *
  * A laugh pulses; everything else is a single held shape, because a sigh or a swallow
@@ -290,14 +326,15 @@ export function reactionSpans(
  */
 function performSpan(span: Span, options: ReactionOptions): VisemeMark[] {
   const marks: VisemeMark[] = [];
+  // Not const: the pulse loop below walks it to the end of the span.
   let at = span.startMs;
 
   // A smile before a laugh, on a span long enough to carry one. Nothing else is
   // preceded by an expression, because nothing else is anticipated the way a laugh is.
-  if (span.laughing && options.smileLeadIn && span.endMs - span.startMs >= SMILE_LEAD_MIN_MS) {
-    marks.push({ timeMs: at, viseme: 'smile' });
-    at += SMILE_LEAD_MS;
-  }
+  // It is stamped ahead of the span and `at` does not move: the beat comes out of the
+  // silence in front of the laugh, never out of the laugh. See SMILE_LEAD_MS.
+  const lead = leadInMs(span, options);
+  if (lead > 0) marks.push({ timeMs: at - lead, viseme: 'smile' });
 
   const length = span.endMs - at;
 
@@ -352,18 +389,28 @@ export function overlayReactions(
 ): VisemeMark[] {
   if (spans.length === 0) return [...marks];
 
-  const inside = (ms: number) => spans.some((s) => ms >= s.startMs && ms < s.endMs);
+  // LEAD_CLEARED. A span covers its own audio, and for a laugh with a lead-in it also
+  // covers the beat of silence in front of it. Both windows have to be cleared of real
+  // marks, and for the same reason at two removes: inside the span MFA was fitting words
+  // to audio that has none, and inside the lead-in it was fitting them to the last of
+  // the speech before the tag — real, but about to be overruled by an expression. A word
+  // mark left standing there sorts after the smile and simply overwrites it, which is
+  // the lead-in silently not happening rather than the lead-in looking wrong.
+  const gesture = spans.map((s) => ({ from: s.startMs - leadInMs(s, options), to: s.endMs }));
+  const inside = (ms: number) => gesture.some((g) => ms >= g.from && ms < g.to);
   const out: VisemeMark[] = marks.filter((m) => !inside(m.timeMs));
 
   for (const span of spans) {
     out.push(...performSpan(span, options));
 
     // What was in force when the reaction began is what the mouth returns to, unless a
-    // real mark already lands at that instant. The last mark before the span STARTED,
-    // not before it ended: searching to the end would find one of the marks just
-    // dropped, from inside the span, where the aligner was fitting words to a laugh.
+    // real mark already lands at that instant. The last mark before the GESTURE started
+    // — the lead-in smile included — for the reason searching to the end would be wrong:
+    // anything later is one of the marks just dropped, and resuming into a pose that was
+    // suppressed for being about to be overruled puts it back after the fact.
     if (!marks.some((m) => m.timeMs === span.endMs)) {
-      const before = [...marks].reverse().find((m) => m.timeMs <= span.startMs);
+      const from = span.startMs - leadInMs(span, options);
+      const before = [...marks].reverse().find((m) => m.timeMs <= from);
       out.push({
         timeMs: span.endMs,
         polly: before?.polly,

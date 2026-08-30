@@ -413,6 +413,51 @@ const VISEME_ORDER: SlotId[] = [
 const SMILE_IN_MS = 420;
 const SMILE_OUT_MS = 160;
 
+/**
+ * The same fade, for the smile that is worn as a pose rather than as an idle.
+ *
+ * Both numbers above are wrong for a mark-driven smile, and the second one was being
+ * used for both halves of it: `smiled` is `smileWorn && viseme === 'rest'`, and a smile
+ * leading a laugh is never at rest, so the lead-in arrived over SMILE_OUT_MS and left
+ * over SMILE_OUT_MS — 160ms each way, governed by a constant whose whole reason for
+ * existing is getting out of the way of a mouth that has started talking.
+ *
+ * Leaving was the damaging half. This patch is last in VISEME_ORDER and so paints over
+ * every other one, and it is the only patch with a transition at all — `laugh` has
+ * none and snaps to full opacity underneath. A 160ms fade-out against a 110ms pulse
+ * meant the first pulse and most of the second happened behind a closed mouth, and the
+ * laugh's visible onset landed a quarter of a second after its sound.
+ *
+ * So both halves are sized against the thing they have to fit inside rather than
+ * against the idle timer: in, comfortably within SMILE_LEAD_MS, so the beat is fully
+ * arrived when the jaw drops; out, well under one pulse, so it is gone before the laugh
+ * has anything to show.
+ */
+const SMILE_MARK_IN_MS = 90;
+const SMILE_MARK_OUT_MS = 60;
+
+/**
+ * How long the smile patch takes to cross the opacity it was just given.
+ *
+ * The direction is not knowable from props alone — CSS is handed a duration, not a
+ * curve per direction — so it is read off what the mouth is doing instead, which is
+ * the same thing one remove earlier:
+ *
+ *   smiled      the idle smile is on, so this is it arriving. Slow, on purpose: it is
+ *               the whole gesture and wants to be seen happening.
+ *   viseme is   a mark put it there, so this is the lead-in arriving.
+ *   'smile'
+ *   viseme is   the lead-in leaving, because a laugh is the only thing a smile ever
+ *   'laugh'     leads. Fast, or it covers the laugh it introduced.
+ *   otherwise   the idle smile leaving, ahead of a mouth that has started talking.
+ */
+const smileFadeMs = (smiled: number, viseme: Viseme): number => {
+  if (smiled) return SMILE_IN_MS;
+  if (viseme === 'smile') return SMILE_MARK_IN_MS;
+  if (viseme === 'laugh') return SMILE_MARK_OUT_MS;
+  return SMILE_OUT_MS;
+};
+
 export default function Face({
   shape,
   viseme,
@@ -1102,7 +1147,7 @@ export default function Face({
                   style={
                     id === 'smile'
                       ? {
-                          transition: `opacity ${smiled ? SMILE_IN_MS : SMILE_OUT_MS}ms ease-in-out`,
+                          transition: `opacity ${smileFadeMs(smiled, viseme)}ms ease-in-out`,
                         }
                       : undefined
                   }

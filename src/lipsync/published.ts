@@ -98,10 +98,11 @@ export interface ReactionOptions {
    */
   eyes: boolean;
   /**
-   * A brief smile before a laugh opens.
+   * A brief smile in the silence before a laugh opens.
    *
-   * Only on a span long enough to carry one — a short giggle that smiled first would
-   * spend most of itself arriving. See SMILE_LEAD_MIN_MS in tags.ts.
+   * Taken from ahead of the laugh rather than out of it, so the laugh still lands on
+   * its own sound. Only on a span long enough to carry one, because anticipating
+   * something already over reads as a twitch. See SMILE_LEAD_MIN_MS in tags.ts.
    */
   smileLeadIn: boolean;
   /** Not honoured yet — see ExpressionSpan.nod. */
