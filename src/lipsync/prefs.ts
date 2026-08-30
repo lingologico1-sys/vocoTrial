@@ -7,6 +7,7 @@ import {
   type VoiceParams,
 } from './published';
 import { MARK_LOOKAHEAD_MS } from '../live/polly';
+import { MAX_LOOKAHEAD_MS } from '../live/visemes';
 
 /**
  * What this page remembers between visits.
@@ -38,6 +39,26 @@ export interface LipsyncPrefs {
 
 const PREFS_KEY = 'lipsync.prefs.v1';
 
+const LANGUAGES: readonly LipsyncPackage['language'][] = ['en', 'fr', 'es'];
+const MODELS: readonly LipsyncModel[] = ['eleven_v3', 'eleven_multilingual_v2'];
+
+/**
+ * The longest script this will keep, and a storage guard rather than an API limit.
+ *
+ * localStorage is about five megabytes for the whole origin, and facekit/store.ts
+ * already treats that budget as tight enough to push face artwork into IndexedDB
+ * instead. This page has no business spending a measurable slice of it on one text
+ * box, and no line worth generating comes anywhere near this — a script this long
+ * would be rejected by ElevenLabs before it was ever aligned.
+ *
+ * OVER THE CAP THE TEXT IS DROPPED, NOT TRUNCATED. A shortened script that came back
+ * looking complete could be generated and billed as if it were the whole line, and
+ * the missing tail would show up only as a face that stops moving early — which is
+ * the exact failure this page exists to catch, arriving from the one direction nobody
+ * would think to check. Losing the text outright is obvious; losing its end is not.
+ */
+export const MAX_STORED_TEXT = 20_000;
+
 export const DEFAULT_PREFS: LipsyncPrefs = {
   text: '',
   language: 'fr',
@@ -49,25 +70,72 @@ export const DEFAULT_PREFS: LipsyncPrefs = {
   lookaheadMs: MARK_LOOKAHEAD_MS,
 };
 
+function oneOf<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {
+  return typeof value === 'string' && (allowed as readonly string[]).includes(value)
+    ? (value as T)
+    : fallback;
+}
+
+function bounded(value: unknown, min: number, max: number, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value)
+    ? Math.min(max, Math.max(min, value))
+    : fallback;
+}
+
+function flag(value: unknown, fallback: boolean): boolean {
+  return typeof value === 'boolean' ? value : fallback;
+}
+
+function str(value: unknown, fallback: string): string {
+  return typeof value === 'string' && value.length <= MAX_STORED_TEXT ? value : fallback;
+}
+
 /**
- * Anything malformed is discarded rather than repaired: it is only a cache.
+ * Every field checked against what the controls that set it would allow.
  *
- * Merged over the defaults field by field so that a stored blob written before a
- * field existed still opens, with the new field at its default rather than
- * undefined — which for `params` would otherwise crash the sliders reading it.
+ * Run on the way in AND on the way out, which is not belt and braces: writing is where
+ * an over-long script is stopped before it can cost the quota, and reading is where a
+ * blob written by an older build — or edited by hand in devtools, which is a thing
+ * that happens on a bench page — is brought back into range.
+ *
+ * The values matter more than they look. `lookaheadMs` out of range leaves the slider
+ * silently pinned at its ceiling while state says otherwise, so the number under the
+ * label stops describing the mouth. A `model` string this build does not know reaches
+ * ElevenLabs and comes back a rejected generation, which costs a round trip and reads
+ * as a broken page rather than as stale storage. Both are cheap to prevent here and
+ * genuinely confusing to diagnose anywhere else.
  */
+function validate(saved: Partial<LipsyncPrefs>): LipsyncPrefs {
+  const params = saved.params ?? DEFAULT_PARAMS;
+  const reactions = saved.reactions ?? DEFAULT_REACTIONS;
+  return {
+    text: str(saved.text, DEFAULT_PREFS.text),
+    language: oneOf(saved.language, LANGUAGES, DEFAULT_PREFS.language),
+    voiceId: str(saved.voiceId, DEFAULT_PREFS.voiceId),
+    model: oneOf(saved.model, MODELS, DEFAULT_PREFS.model),
+    params: {
+      stability: bounded(params.stability, 0, 1, DEFAULT_PARAMS.stability),
+      similarityBoost: bounded(params.similarityBoost, 0, 1, DEFAULT_PARAMS.similarityBoost),
+      style: bounded(params.style, 0, 1, DEFAULT_PARAMS.style),
+      speakerBoost: flag(params.speakerBoost, DEFAULT_PARAMS.speakerBoost),
+    },
+    reactions: {
+      eyes: flag(reactions.eyes, DEFAULT_REACTIONS.eyes),
+      smileLeadIn: flag(reactions.smileLeadIn, DEFAULT_REACTIONS.smileLeadIn),
+      nod: flag(reactions.nod, DEFAULT_REACTIONS.nod),
+    },
+    faceId: str(saved.faceId, DEFAULT_PREFS.faceId),
+    lookaheadMs: bounded(saved.lookaheadMs, 0, MAX_LOOKAHEAD_MS, DEFAULT_PREFS.lookaheadMs),
+  };
+}
+
+/** Anything malformed is discarded rather than repaired: it is only a cache. */
 export function loadPrefs(): LipsyncPrefs {
   try {
     const raw = window.localStorage.getItem(PREFS_KEY);
     const parsed: unknown = raw ? JSON.parse(raw) : null;
     if (!parsed || typeof parsed !== 'object') return DEFAULT_PREFS;
-    const saved = parsed as Partial<LipsyncPrefs>;
-    return {
-      ...DEFAULT_PREFS,
-      ...saved,
-      params: { ...DEFAULT_PARAMS, ...(saved.params ?? {}) },
-      reactions: { ...DEFAULT_REACTIONS, ...(saved.reactions ?? {}) },
-    };
+    return validate(parsed as Partial<LipsyncPrefs>);
   } catch {
     return DEFAULT_PREFS;
   }
@@ -75,7 +143,10 @@ export function loadPrefs(): LipsyncPrefs {
 
 export function savePrefs(prefs: Partial<LipsyncPrefs>): void {
   try {
-    window.localStorage.setItem(PREFS_KEY, JSON.stringify({ ...loadPrefs(), ...prefs }));
+    window.localStorage.setItem(
+      PREFS_KEY,
+      JSON.stringify(validate({ ...loadPrefs(), ...prefs })),
+    );
   } catch {
     // Private browsing, or a full quota. Losing the cache is not worth an error.
   }
