@@ -1,0 +1,165 @@
+import { POLLY_VISEMES } from '../live/visemeTable';
+import type { LipsyncPackage } from './published';
+
+/**
+ * Working out why the mouth did what it did, and writing it down so it can be sent.
+ *
+ * Split out of Diagnostics.tsx for two reasons. The classification is the interesting
+ * part and JSX is a poor place to test it from — the threshold bug below was found by a
+ * check that could only be written once this was a function. And the report has to be
+ * plain text a person can paste into a message, which is a different job from rendering
+ * a panel even though both say the same things.
+ *
+ * WHAT THE REPORT IS FOR. Somebody looking at a face that shut its mouth mid-sentence
+ * needs to hand over enough for the problem to be diagnosed without the audio. That is
+ * the metadata, the script as the aligner received it, every word it could not look up,
+ * every quiet stretch with its cause, and what the mouth wore for each word. Deliberately
+ * not the raw mark array: several hundred entries that say the same thing as the per-word
+ * summary, at ten times the length.
+ */
+
+/** Shorter than this is easing, not stillness. SHAPE_TAU is 35ms; this is four of them. */
+export const MIN_QUIET = 140;
+
+export type QuietCause = 'pause' | 'unknown-word' | 'unexplained';
+
+export interface Quiet {
+  startMs: number;
+  endMs: number;
+  /** Words the aligner placed inside this stretch. Usually none — that is what quiet is. */
+  words: string[];
+  unknown: string[];
+  cause: QuietCause;
+}
+
+export function quietStretches(pkg: LipsyncPackage): Quiet[] {
+  const out: Quiet[] = [];
+  const marks = pkg.marks;
+  const oov = pkg.oovWords ?? [];
+
+  for (let i = 0; i < marks.length; i++) {
+    if (POLLY_VISEMES[marks[i].polly] !== 'rest') continue;
+    const startMs = marks[i].timeMs;
+    const endMs = i + 1 < marks.length ? marks[i + 1].timeMs : pkg.durationMs;
+
+    const words = pkg.words
+      .filter((w) => w.startMs < endMs && w.endMs > startMs)
+      .map((w) => w.word);
+    const unknown = oov
+      .filter((w) => w.startMs < endMs && w.endMs > startMs)
+      .map((w) => w.word);
+
+    // The length floor applies to pauses only. An unknown word is reported however brief
+    // its stretch is, because brevity is not evidence it is harmless — an `spn` whose
+    // audio was never really spoken can be 40ms wide, under the threshold, and skipping
+    // it would hide precisely the case this exists for.
+    if (unknown.length === 0 && endMs - startMs < MIN_QUIET) continue;
+
+    out.push({
+      startMs,
+      endMs,
+      words,
+      unknown,
+      cause: unknown.length > 0 ? 'unknown-word' : words.length > 0 ? 'unexplained' : 'pause',
+    });
+  }
+  return out;
+}
+
+/** What the mouth wore across one word, in order, without repeats. */
+export function posesDuring(pkg: LipsyncPackage, startMs: number, endMs: number): string[] {
+  const seen: string[] = [];
+  for (const m of pkg.marks) {
+    if (m.timeMs >= endMs) break;
+    if (m.timeMs + 1 < startMs) {
+      // The mark in force when the word began still counts, so keep the latest one
+      // before it rather than skipping to the first one inside.
+      seen.length = 0;
+      seen.push(POLLY_VISEMES[m.polly]);
+      continue;
+    }
+    const pose = POLLY_VISEMES[m.polly];
+    if (seen[seen.length - 1] !== pose) seen.push(pose);
+  }
+  return seen;
+}
+
+const secs = (ms: number) => `${(ms / 1000).toFixed(2)}s`;
+
+/**
+ * The whole diagnosis as plain text, ready to paste.
+ *
+ * Fenced so it survives a chat client's markdown, and ordered worst-first: the unknown
+ * words are what someone is asking about, so they go above the metadata rather than
+ * beneath it.
+ */
+export function report(pkg: LipsyncPackage): string {
+  const quiet = quietStretches(pkg);
+  const oov = pkg.oovWords ?? [];
+  const unexplained = quiet.filter((q) => q.cause === 'unexplained');
+  const pauses = quiet.filter((q) => q.cause === 'pause');
+  const L: string[] = [];
+
+  L.push('lipsync diagnostics');
+  L.push('===================');
+  L.push('');
+
+  if (oov.length > 0) {
+    L.push(`UNKNOWN WORDS (${oov.length}) — the mouth stays shut through each`);
+    for (const w of oov) {
+      L.push(`  "${w.word}"  ${secs(w.startMs)}–${secs(w.endMs)}  (${w.reason})`);
+    }
+    L.push('');
+  }
+
+  if (unexplained.length > 0) {
+    L.push(`SHUT WHILE SPEAKING, cause unknown (${unexplained.length})`);
+    for (const q of unexplained) {
+      L.push(`  ${secs(q.startMs)}–${secs(q.endMs)}  over "${q.words.join(' ')}"`);
+    }
+    L.push('');
+  }
+
+  L.push('WHAT IT WAS MADE FROM');
+  L.push(`  model      ${pkg.model}`);
+  L.push(`  language   ${pkg.language}`);
+  L.push(`  voice      ${pkg.voiceName ?? '?'} (${pkg.voiceId})`);
+  L.push(
+    `  params     stability ${pkg.params.stability}, similarity ${pkg.params.similarityBoost}, ` +
+      `style ${pkg.params.style}, speakerBoost ${pkg.params.speakerBoost}`,
+  );
+  L.push(`  duration   ${secs(pkg.durationMs)}`);
+  L.push(`  marks      ${pkg.marks.length}`);
+  L.push(`  words      ${pkg.words.length}`);
+  L.push(`  oov        ${pkg.oovCount}`);
+  L.push(`  reactions  ${pkg.reactionCount} span(s) overlaid from the timings`);
+  L.push('');
+
+  L.push('TEXT AS TYPED');
+  L.push(`  ${pkg.text.replace(/\n/g, '\n  ')}`);
+  L.push('');
+  if (pkg.script !== pkg.text) {
+    L.push('SCRIPT THE ALIGNER SAW (tags stripped)');
+    L.push(`  ${pkg.script.replace(/\n/g, '\n  ')}`);
+    L.push('');
+  }
+
+  L.push(`PAUSES (${pauses.length}) — correct, nothing to fix`);
+  L.push(
+    pauses.length
+      ? '  ' + pauses.map((q) => `${secs(q.startMs)}–${secs(q.endMs)}`).join('  ')
+      : `  none over ${MIN_QUIET}ms`,
+  );
+  L.push('');
+
+  L.push('WORD BY WORD — what the mouth wore');
+  for (const w of pkg.words) {
+    const poses = posesDuring(pkg, w.startMs, w.endMs).join(' ');
+    const flag = oov.some((o) => o.startMs === w.startMs) ? '  <-- UNKNOWN' : '';
+    L.push(
+      `  ${w.word.padEnd(16)} ${secs(w.startMs).padStart(7)}–${secs(w.endMs).padEnd(7)} ${poses}${flag}`,
+    );
+  }
+
+  return L.join('\n');
+}

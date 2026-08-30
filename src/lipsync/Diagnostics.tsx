@@ -1,6 +1,6 @@
-import { useMemo } from 'react';
-import { AlertTriangle, Stethoscope } from 'lucide-react';
-import { POLLY_VISEMES } from '../live/visemeTable';
+import { useMemo, useState } from 'react';
+import { AlertTriangle, Check, ClipboardCopy, Stethoscope } from 'lucide-react';
+import { MIN_QUIET, quietStretches, report } from './diagnose';
 import type { LipsyncPackage } from './published';
 
 /**
@@ -30,53 +30,42 @@ import type { LipsyncPackage } from './published';
  * poses rather than sitting still, and every consonant cluster would file a report. That
  * floor does NOT apply to an unknown word, which is reported at any length — a brief one
  * is not a harmless one, and the filter would otherwise hide the whole point.
+ *
+ * The classification itself lives in diagnose.ts, which also writes the plain-text
+ * version behind the copy button: the same findings, in a form that can be pasted into
+ * a message by somebody asking why their face shut its mouth.
  */
-
-/** Shorter than this is easing, not stillness. SHAPE_TAU is 35ms; this is four of them. */
-const MIN_QUIET = 140;
-
-interface Quiet {
-  startMs: number;
-  endMs: number;
-  /** Words the aligner placed inside this stretch. Usually none — that is what quiet is. */
-  words: string[];
-  unknown: string[];
-}
-
-function quietStretches(pkg: LipsyncPackage): Quiet[] {
-  const out: Quiet[] = [];
-  const marks = pkg.marks;
-
-  for (let i = 0; i < marks.length; i++) {
-    if (POLLY_VISEMES[marks[i].polly] !== 'rest') continue;
-    const start = marks[i].timeMs;
-    const end = i + 1 < marks.length ? marks[i + 1].timeMs : pkg.durationMs;
-
-    const overlapping = pkg.words.filter((w) => w.startMs < end && w.endMs > start);
-    const unknown = pkg.oovWords
-      .filter((w) => w.startMs < end && w.endMs > start)
-      .map((w) => w.word);
-
-    // The length filter applies to pauses only. An unknown word is reported however
-    // brief its stretch is, because brevity is not evidence it is harmless -- an `spn`
-    // whose audio was never really spoken can be 40ms wide, which is under the
-    // threshold, and skipping it would hide precisely the case this panel exists for.
-    if (unknown.length === 0 && end - start < MIN_QUIET) continue;
-
-    out.push({
-      startMs: start,
-      endMs: end,
-      words: overlapping.map((w) => w.word),
-      unknown,
-    });
-  }
-  return out;
-}
 
 const secs = (ms: number) => `${(ms / 1000).toFixed(2)}s`;
 
 export default function Diagnostics({ pkg }: { pkg: LipsyncPackage }) {
   const quiet = useMemo(() => quietStretches(pkg), [pkg]);
+  const [copied, setCopied] = useState(false);
+
+  async function copy() {
+    const text = report(pkg);
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      // Clipboard access can be refused — an insecure origin, a permission prompt
+      // declined. Falling back to a hidden textarea and execCommand is deprecated but
+      // still works everywhere, and a copy button that silently does nothing is worse
+      // than one leaning on an old API.
+      const box = document.createElement('textarea');
+      box.value = text;
+      box.style.position = 'fixed';
+      box.style.opacity = '0';
+      document.body.appendChild(box);
+      box.select();
+      try {
+        document.execCommand('copy');
+      } finally {
+        document.body.removeChild(box);
+      }
+    }
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 2000);
+  }
 
   const suspect = quiet.filter((q) => q.unknown.length > 0);
   // Quiet where words were spoken but none of them was unknown. Should not happen.
@@ -93,6 +82,19 @@ export default function Diagnostics({ pkg }: { pkg: LipsyncPackage }) {
           {pkg.oovWords.length > 0 && ` · ${pkg.oovWords.length} unknown word${pkg.oovWords.length === 1 ? '' : 's'}`}
         </span>
       </summary>
+
+      <button
+        type="button"
+        onClick={(event) => {
+          // Inside a <details>, a click would otherwise toggle the panel shut.
+          event.preventDefault();
+          void copy();
+        }}
+        className="mt-3 inline-flex items-center gap-2 rounded-lg border border-slate-800 px-3 py-1.5 text-xs text-slate-300 transition-colors hover:border-slate-600"
+      >
+        {copied ? <Check size={13} /> : <ClipboardCopy size={13} />}
+        {copied ? 'Copied — paste it anywhere' : 'Copy this diagnosis'}
+      </button>
 
       <div className="mt-4 flex flex-col gap-4 text-xs">
         {pkg.oovWords.length > 0 && (
