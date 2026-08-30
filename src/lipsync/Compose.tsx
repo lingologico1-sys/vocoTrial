@@ -11,9 +11,9 @@ import {
   type Quota,
 } from './cost';
 import {
-  DEFAULT_LAUGH,
+  DEFAULT_REACTIONS,
   DEFAULT_PARAMS,
-  type LaughOptions,
+  type ReactionOptions,
   type LipsyncModel,
   type LipsyncPackage,
   type VoiceParams,
@@ -74,7 +74,7 @@ export default function Compose({ onGenerated, busy, setBusy }: ComposeProps) {
   const [voiceId, setVoiceId] = useState('');
   const [model, setModel] = useState<LipsyncModel>('eleven_v3');
   const [params, setParams] = useState<VoiceParams>(DEFAULT_PARAMS);
-  const [laugh, setLaugh] = useState<LaughOptions>(DEFAULT_LAUGH);
+  const [reactions_, setReactions] = useState<ReactionOptions>(DEFAULT_REACTIONS);
   const [problem, setProblem] = useState<string | null>(null);
   const box = useRef<HTMLTextAreaElement | null>(null);
   const [quota, setQuota] = useState<Quota | null>(null);
@@ -126,7 +126,7 @@ export default function Compose({ onGenerated, busy, setBusy }: ComposeProps) {
         voiceId: voiceId.trim(),
         model,
         params,
-        laugh,
+        reactions: reactions_,
       });
       onGenerated(result);
       // The count just changed, so the panel should stop showing the old one.
@@ -360,33 +360,48 @@ export default function Compose({ onGenerated, busy, setBusy }: ComposeProps) {
         </p>
       </details>
 
-      {reactions.some((r) => r.laughing) && (
+      {reactions.length > 0 && (
         <div className="flex flex-col gap-2 rounded-lg border border-slate-800 px-3 py-2">
-          <span className="text-xs font-medium text-slate-400">How the laugh is performed</span>
+          <span className="text-xs font-medium text-slate-400">How reactions are performed</span>
           <div className="flex flex-wrap gap-x-5 gap-y-2">
-            {([
-              ['smileLeadIn', 'Smile first', `A beat of smile before it opens, on laughs over ${SMILE_LEAD_MIN_MS}ms`],
-              ['closeEyes', 'Close the eyes', 'Both lids down through the laugh'],
-            ] as const).map(([key, label, hint]) => (
-              <label key={key} className="flex items-center gap-2" title={hint}>
+            <label className="flex items-center gap-2" title="Each reaction moves the eyes the way the body does — a yawn shuts them, a sniff blinks, a gasp leaves them alone">
+              <input
+                type="checkbox"
+                checked={reactions_.eyes}
+                onChange={(e) => setReactions((r) => ({ ...r, eyes: e.target.checked }))}
+              />
+              <span className="text-xs text-slate-300">Eyes follow the reaction</span>
+            </label>
+            {reactions.some((r) => r.laughing) && (
+              <label className="flex items-center gap-2" title={`A beat of smile before a laugh opens, on spans over ${SMILE_LEAD_MIN_MS}ms`}>
                 <input
                   type="checkbox"
-                  checked={laugh[key]}
-                  onChange={(event) =>
-                    setLaugh((l) => ({ ...l, [key]: event.target.checked }))
-                  }
+                  checked={reactions_.smileLeadIn}
+                  onChange={(e) => setReactions((r) => ({ ...r, smileLeadIn: e.target.checked }))}
                 />
-                <span className="text-xs text-slate-300">{label}</span>
+                <span className="text-xs text-slate-300">Smile before a laugh</span>
               </label>
+            )}
+          </div>
+          {/* What each tag does is not a preference, so it is shown rather than offered. */}
+          <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-slate-600">
+            {reactions.map((r) => (
+              <span key={r.tag} className="font-mono">
+                {r.tag}
+                <span className="text-slate-700">
+                  {' '}
+                  {r.perform === 'pulse' ? 'pulses' : r.perform === 'arc' ? 'opens and closes' : 'holds'}
+                  {r.eyes === 'closed' ? ', eyes shut' : r.eyes === 'blink' ? ', blinks' : ''}
+                </span>
+              </span>
             ))}
           </div>
-          {/* Worth saying, because it is the part that is not a preference. */}
           <p className="text-[11px] leading-snug text-slate-600">
-            The mouth pulses either way — a laugh held as one shape reads as a scream.
-            These are judgements about a particular face rather than about phonetics,
-            which is why they are yours rather than fixed. A nod is designed and carried
-            in the package but not yet wired: the head is driven by turn-taking and
-            loudness, and teaching it a second master is its own change.
+            What each reaction does is anatomy, not preference — a laugh pulses because
+            one held shape reads as a scream, a gasp keeps its eyes open because a gasp
+            widens them and no kit has wide-eye artwork. The switch is there because
+            whether that suits a particular drawing is a different question. A nod is
+            carried in the package but not yet wired to the head.
           </p>
         </div>
       )}

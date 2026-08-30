@@ -4,7 +4,7 @@
 // No POLLY_VISEMES here any more, and its absence is the point: a reaction has no
 // phone, so there is nothing to collapse. This module names poses directly.
 import type { Viseme, VisemeMark } from '../live/visemeTable';
-import type { ExpressionSpan, LaughOptions } from './published';
+import type { ExpressionSpan, ReactionOptions } from './published';
 
 /**
  * ElevenLabs v3 audio tags, sorted by what they do to a forced alignment.
@@ -54,7 +54,33 @@ export interface Tag {
    * nothing to collapse, and naming the pose directly is the honest form.
    */
   viseme?: Viseme;
-  /** True of a laugh, which is performed rather than held. See laughMarks. */
+  /**
+   * How the span is played, for reactions.
+   *
+   *   hold   one shape for the whole span. Right when the body really does hold still:
+   *          a gasp snaps open and stays open, a gulp keeps the lips shut throughout.
+   *   pulse  alternates with `rebound`. For anything rhythmic — a laugh, panting —
+   *          where one held shape reads as a scream rather than as breathing.
+   *   arc    `edge`, then the main pose, then `edge` again. For anything with a shape
+   *          over time: a yawn opens slowly and closes slowly, a sigh parts and trails
+   *          shut. Holding the middle of one of those loses the whole gesture.
+   */
+  perform?: 'hold' | 'pulse' | 'arc';
+  /** Where a pulse falls back to between beats. */
+  rebound?: Viseme;
+  /** Where an arc begins and ends. */
+  edge?: Viseme;
+  /** Half a pulse, in ms. Panting is quicker than laughing. */
+  pulseMs?: number;
+  /**
+   * What the eyes do, decided by the body rather than by preference.
+   *
+   * `none` is a real answer and not an omission — a gasp WIDENS the eyes, and there is
+   * no wide-eye artwork in any kit, so shutting them would be worse than leaving them
+   * alone. Written out for every reaction so that the absence is visibly deliberate.
+   */
+  eyes?: 'closed' | 'blink' | 'none';
+  /** True of a laugh, which is the only thing a smile precedes. */
   laughing?: boolean;
 }
 
@@ -71,19 +97,50 @@ export const TAGS: Tag[] = [
   ...['[whispering]', '[shouting]', '[quietly]', '[loudly]', '[rushed]', '[slowly]',
     '[flatly]', '[monotone]', '[dramatic]', '[warmly]'].map(directive('Delivery')),
 
-  // Reactions, with the pose each span wears. Chosen for what the lips are doing and
-  // nothing else — a drawn mouth cannot show a throat or a nose.
-  { tag: '[laughs]', kind: 'reaction', group: 'Reactions', viseme: 'laugh', laughing: true },
-  { tag: '[giggles]', kind: 'reaction', group: 'Reactions', viseme: 'laugh', laughing: true },
-  { tag: '[gasps]', kind: 'reaction', group: 'Reactions', viseme: 'aa' },
-  { tag: '[yawn]', kind: 'reaction', group: 'Reactions', viseme: 'aa' },
-  { tag: '[panting]', kind: 'reaction', group: 'Reactions', viseme: 'aa' },
-  // An exhale through a slack, half-open mouth. Neither rounded nor wide.
-  { tag: '[sighs]', kind: 'reaction', group: 'Reactions', viseme: 'uh' },
-  { tag: '[clears throat]', kind: 'reaction', group: 'Reactions', viseme: 'uh' },
-  // Swallowing closes the lips; sniffing happens at the nose and leaves them alone.
-  { tag: '[gulps]', kind: 'reaction', group: 'Reactions', viseme: 'mbp' },
-  { tag: '[sniffs]', kind: 'reaction', group: 'Reactions', viseme: 'rest' },
+  // Reactions. Each carries how it is played and what the eyes do, both chosen from
+  // what the body actually does rather than from what is convenient.
+  //
+  // A laugh: rhythmic, eyes screwed up, and the only one a smile precedes.
+  { tag: '[laughs]', kind: 'reaction', group: 'Reactions', viseme: 'laugh',
+    perform: 'pulse', rebound: 'uh', eyes: 'closed', laughing: true },
+  { tag: '[giggles]', kind: 'reaction', group: 'Reactions', viseme: 'laugh',
+    perform: 'pulse', rebound: 'uh', eyes: 'closed', laughing: true },
+
+  // Panting is the other rhythmic one, and quicker: breaths, not syllables. Held open
+  // it is the same frozen scream a held laugh was.
+  { tag: '[panting]', kind: 'reaction', group: 'Reactions', viseme: 'aa',
+    perform: 'pulse', rebound: 'uh', pulseMs: 85, eyes: 'none' },
+
+  // A yawn is slow open, long hold, slow close — and the eyes are half of what makes
+  // one recognisable. Held `aa` with the eyes open gets the shape and misses the yawn.
+  { tag: '[yawn]', kind: 'reaction', group: 'Reactions', viseme: 'aa',
+    perform: 'arc', edge: 'uh', eyes: 'closed' },
+
+  // A sigh has a shape over time: the lips part, hold, and trail shut. The blink is
+  // what a sigh looks like as much as the mouth is.
+  { tag: '[sighs]', kind: 'reaction', group: 'Reactions', viseme: 'uh',
+    perform: 'arc', edge: 'rest', eyes: 'blink' },
+
+  // A gasp snaps open and STAYS open — the one place a held pose is literally correct.
+  // Eyes deliberately left alone: a gasp widens them, and no kit has wide-eye artwork,
+  // so shutting them would be actively wrong rather than merely incomplete.
+  { tag: '[gasps]', kind: 'reaction', group: 'Reactions', viseme: 'aa',
+    perform: 'hold', eyes: 'none' },
+
+  // Lips slightly parted, the sound made in the throat, and over quickly.
+  { tag: '[clears throat]', kind: 'reaction', group: 'Reactions', viseme: 'uh',
+    perform: 'hold', eyes: 'none' },
+
+  // Swallowing keeps the lips shut. The throat does the work and a portrait has no
+  // throat, so a closed mouth is not an approximation — it is all there is.
+  { tag: '[gulps]', kind: 'reaction', group: 'Reactions', viseme: 'mbp',
+    perform: 'hold', eyes: 'none' },
+
+  // A sniff is nasal, and `rest` was the worst answer in the table: indistinguishable
+  // from saying nothing. Compressed lips and a blink is what one looks like from the
+  // front, the nose being the part a drawing cannot move.
+  { tag: '[sniffs]', kind: 'reaction', group: 'Reactions', viseme: 'mbp',
+    perform: 'hold', eyes: 'blink' },
 
   // Pacing. The first three are silence, which the aligner handles correctly unaided.
   { tag: '[pause]', kind: 'pause', group: 'Pacing' },
@@ -93,8 +150,10 @@ export const TAGS: Tag[] = [
   // sound rather than silence: a stammer repeats a syllable the transcript has once,
   // and a hesitation fills the gap with something wordlike. Both leave audio MFA has no
   // text for, which is the definition of the hazard above.
-  { tag: '[hesitates]', kind: 'reaction', group: 'Pacing', viseme: 'uh' },
-  { tag: '[stammers]', kind: 'reaction', group: 'Pacing', viseme: 'uh' },
+  { tag: '[hesitates]', kind: 'reaction', group: 'Pacing', viseme: 'uh',
+    perform: 'hold', eyes: 'none' },
+  { tag: '[stammers]', kind: 'reaction', group: 'Pacing', viseme: 'uh',
+    perform: 'hold', eyes: 'none' },
 ];
 
 const BY_TAG = new Map(TAGS.map((t) => [t.tag.toLowerCase(), t]));
@@ -130,6 +189,11 @@ export interface Span {
   startMs: number;
   endMs: number;
   viseme: Viseme;
+  perform: NonNullable<Tag['perform']>;
+  rebound: Viseme;
+  edge: Viseme;
+  pulseMs: number;
+  eyes: NonNullable<Tag['eyes']>;
   laughing: boolean;
 }
 
@@ -143,8 +207,18 @@ export interface Span {
  */
 /** Half a pulse. ~4.5Hz, which is where a laugh sits and a little under speech. */
 const LAUGH_PULSE_MS = 110;
-/** What the jaw comes back to between pulses — half open, not shut. */
-const LAUGH_REBOUND: Viseme = 'uh';
+/**
+ * How long an arc spends arriving and leaving.
+ *
+ * The point of an arc is the *closing*: a yawn that stays wide open until the instant a
+ * word begins hands the next syllable a mouth already at full stretch. Ramping out also
+ * gives the easing something to work with, so the shape moves rather than snapping.
+ */
+const ARC_EDGE_MS = 160;
+/** Below this an arc has no room for edges and is simply held. */
+const ARC_MIN_MS = 2 * ARC_EDGE_MS + 120;
+/** How long a blink lasts. Matches what a real one takes, and Face's own BLINK_MS. */
+const BLINK_MS = 160;
 /**
  * A span shorter than this gets no lead-in smile.
  *
@@ -181,6 +255,11 @@ export function reactionSpans(
           startMs: Math.round(starts[open] * 1000),
           endMs: Math.round(ends[i] * 1000),
           viseme: tag.viseme,
+          perform: tag.perform ?? 'hold',
+          rebound: tag.rebound ?? 'uh',
+          edge: tag.edge ?? 'rest',
+          pulseMs: tag.pulseMs ?? LAUGH_PULSE_MS,
+          eyes: tag.eyes ?? 'none',
           laughing: tag.laughing === true,
         });
       }
@@ -209,47 +288,67 @@ export function reactionSpans(
  * easing means neither extreme is fully reached anyway, so the visible result is a jaw
  * moving rather than a shape flickering.
  */
-function performSpan(span: Span, options: LaughOptions): VisemeMark[] {
+function performSpan(span: Span, options: ReactionOptions): VisemeMark[] {
   const marks: VisemeMark[] = [];
   let at = span.startMs;
 
+  // A smile before a laugh, on a span long enough to carry one. Nothing else is
+  // preceded by an expression, because nothing else is anticipated the way a laugh is.
   if (span.laughing && options.smileLeadIn && span.endMs - span.startMs >= SMILE_LEAD_MIN_MS) {
     marks.push({ timeMs: at, viseme: 'smile' });
     at += SMILE_LEAD_MS;
   }
 
-  if (!span.laughing) {
-    marks.push({ timeMs: at, viseme: span.viseme });
+  const length = span.endMs - at;
+
+  if (span.perform === 'pulse') {
+    for (let i = 0; at < span.endMs; i++) {
+      marks.push({ timeMs: at, viseme: i % 2 === 0 ? span.viseme : span.rebound });
+      at += span.pulseMs;
+    }
     return marks;
   }
 
-  for (let i = 0; at < span.endMs; i++) {
-    marks.push({ timeMs: at, viseme: i % 2 === 0 ? span.viseme : LAUGH_REBOUND });
-    at += LAUGH_PULSE_MS;
+  if (span.perform === 'arc' && length >= ARC_MIN_MS) {
+    marks.push({ timeMs: at, viseme: span.edge });
+    marks.push({ timeMs: at + ARC_EDGE_MS, viseme: span.viseme });
+    marks.push({ timeMs: span.endMs - ARC_EDGE_MS, viseme: span.edge });
+    return marks;
   }
+
+  // Held, and also what a too-short arc becomes: an arc with no room for its edges is
+  // just its middle, and faking one would put three marks inside 200ms that the easing
+  // could never resolve into a gesture.
+  marks.push({ timeMs: at, viseme: span.viseme });
   return marks;
 }
 
 /** Where the eyes and head do something, given what the author asked for. */
 export function expressionSpans(
   spans: readonly Span[],
-  options: LaughOptions,
+  options: ReactionOptions,
 ): ExpressionSpan[] {
-  if (!options.closeEyes && !options.nod) return [];
+  if (!options.eyes) return [];
+
   return spans
-    .filter((s) => s.laughing)
+    .filter((s) => s.eyes !== 'none')
     .map((s) => ({
       startMs: s.startMs,
-      endMs: s.endMs,
-      eyesClosed: options.closeEyes || undefined,
-      nod: options.nod || undefined,
+      // A blink is the same flag over a short span. Clamped to the span so a blink on a
+      // reaction shorter than a blink does not outlast the thing that caused it.
+      endMs:
+        s.eyes === 'blink'
+          ? Math.min(s.endMs, s.startMs + BLINK_MS)
+          : s.endMs,
+      eyesClosed: true,
+      nod: options.nod && s.laughing ? true : undefined,
     }));
 }
 
 export function overlayReactions(
   marks: readonly VisemeMark[],
   spans: readonly Span[],
-  options: LaughOptions,
+  options: ReactionOptions,
 ): VisemeMark[] {
   if (spans.length === 0) return [...marks];
 

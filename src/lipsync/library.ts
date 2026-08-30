@@ -1,6 +1,6 @@
 import type { Quota } from './cost';
 import type {
-  LaughOptions,
+  ReactionOptions,
   LipsyncModel,
   LipsyncPackage,
   PublishedLine,
@@ -70,7 +70,7 @@ export interface GenerateRequest {
   voiceName?: string;
   model: LipsyncModel;
   params: VoiceParams;
-  laugh: LaughOptions;
+  reactions: ReactionOptions;
 }
 
 /**

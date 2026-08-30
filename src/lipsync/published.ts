@@ -60,7 +60,13 @@ export interface OovWord {
 export interface ExpressionSpan {
   startMs: number;
   endMs: number;
-  /** Both lids down, using the artwork every kit already carries for blinking. */
+  /**
+   * Both lids down, using the artwork every kit already carries for blinking.
+   *
+   * A blink is the same flag over a short span rather than a separate kind: shutting
+   * the eyes for 140ms *is* a blink, and a second mechanism would only be a second
+   * thing to keep in step with this one.
+   */
   eyesClosed?: boolean;
   /**
    * A single deliberate nod through the span.
@@ -74,24 +80,38 @@ export interface ExpressionSpan {
   nod?: boolean;
 }
 
-/** How a laugh should be performed. Set per generation, stored with the package. */
-export interface LaughOptions {
-  closeEyes: boolean;
-  nod: boolean;
+/**
+ * How reactions are performed. Set per generation, stored with the package.
+ *
+ * Three switches rather than one per tag, because what each reaction *wants* is a fact
+ * about physiology and belongs in the tag table: a yawn closes the eyes, a gasp widens
+ * them, a gulp does nothing with them. What varies between faces is only whether that
+ * reads well on this particular artwork, which is one question, not seven.
+ */
+export interface ReactionOptions {
   /**
-   * A brief smile before the laugh opens.
+   * Whether the eyes follow the reaction at all.
+   *
+   * On by default. The escape hatch exists because a laugh with the eyes screwed up is
+   * delightful on one face and unsettling on another, which is a judgement about a
+   * drawing rather than about anatomy.
+   */
+  eyes: boolean;
+  /**
+   * A brief smile before a laugh opens.
    *
    * Only on a span long enough to carry one — a short giggle that smiled first would
    * spend most of itself arriving. See SMILE_LEAD_MIN_MS in tags.ts.
    */
   smileLeadIn: boolean;
+  /** Not honoured yet — see ExpressionSpan.nod. */
+  nod: boolean;
 }
 
-export const DEFAULT_LAUGH: LaughOptions = {
-  closeEyes: true,
-  // Not honoured yet — see ExpressionSpan.nod.
-  nod: false,
+export const DEFAULT_REACTIONS: ReactionOptions = {
+  eyes: true,
   smileLeadIn: true,
+  nod: false,
 };
 
 export type LipsyncModel = 'eleven_v3' | 'eleven_multilingual_v2';
@@ -139,8 +159,8 @@ export interface LipsyncPackage {
   oovCount: number;
   /** How many reaction spans were overlaid rather than trusted to the aligner. */
   reactionCount: number;
-  /** How the laughs in this line were performed. */
-  laugh: LaughOptions;
+  /** How the reactions in this line were performed. */
+  reactions: ReactionOptions;
   /** What the eyes and head do, and when. Empty unless something asked. */
   expressions: ExpressionSpan[];
   /**

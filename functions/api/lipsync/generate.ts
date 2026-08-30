@@ -1,9 +1,9 @@
 import { json } from '../_middleware';
 import type { LipsyncEnv } from './_library';
 import {
-  DEFAULT_LAUGH,
+  DEFAULT_REACTIONS,
   DEFAULT_PARAMS,
-  type LaughOptions,
+  type ReactionOptions,
   type LipsyncModel,
   type LipsyncPackage,
   type VoiceParams,
@@ -54,8 +54,8 @@ interface GenerateBody {
   voiceName?: string;
   model?: LipsyncModel;
   params?: Partial<VoiceParams>;
-  /** How laughter is performed. See LaughOptions. */
-  laugh?: Partial<LaughOptions>;
+  /** How reactions are performed. See ReactionOptions. */
+  reactions?: Partial<ReactionOptions>;
 }
 
 const LANGUAGES = new Set(['en', 'fr', 'es']);
@@ -109,7 +109,7 @@ export async function onRequestPost(
   const voiceId = (body.voiceId ?? '').trim();
   const model = body.model ?? 'eleven_v3';
   const params: VoiceParams = { ...DEFAULT_PARAMS, ...(body.params ?? {}) };
-  const laugh: LaughOptions = { ...DEFAULT_LAUGH, ...(body.laugh ?? {}) };
+  const reactions: ReactionOptions = { ...DEFAULT_REACTIONS, ...(body.reactions ?? {}) };
 
   if (!text) return json({ error: 'Nothing to say', code: 'no_text' }, 400);
   if (!voiceId) return json({ error: 'No voice chosen', code: 'no_voice' }, 400);
@@ -236,9 +236,9 @@ export async function onRequestPost(
     oovCount: result.oovCount,
     oovWords: result.oovWords ?? [],
     reactionCount: spans.length,
-    marks: overlayReactions(marks, spans, laugh),
-    laugh,
-    expressions: expressionSpans(spans, laugh),
+    marks: overlayReactions(marks, spans, reactions),
+    reactions,
+    expressions: expressionSpans(spans, reactions),
     words: result.words ?? [],
   };
 
