@@ -6,6 +6,7 @@ import Studio from './live/Studio';
 import FaceKit from './facekit/FaceKit';
 import Teach from './teach/Teach';
 import LipSync from './lipsync/LipSync';
+import Takes from './lipsync/Takes';
 import Eleve from './eleve/Eleve';
 import PasswordGate from './PasswordGate';
 import './index.css';
@@ -51,6 +52,9 @@ const PAGES: Record<string, () => JSX.Element> = {
   // that does not play live audio, which is the whole of why it exists — see
   // src/lipsync/LipSync.tsx.
   '/lipsync': LipSync,
+  // The packages deliberately kept from /lipsync. This is a separate page because
+  // authoring one take and browsing every previous take are different jobs.
+  '/lipsync/takes': Takes,
   // The one page here that is not the workshop. See src/eleve/Eleve.tsx.
   '/eleve': Eleve,
 };

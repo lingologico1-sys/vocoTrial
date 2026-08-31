@@ -5,6 +5,7 @@ import {
   Check,
   CheckCircle2,
   Loader2,
+  Library,
   RotateCcw,
   Save,
   Upload,
@@ -449,6 +450,13 @@ export default function LipSync() {
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-2">
+            <a
+              href="/lipsync/takes"
+              className="inline-flex items-center gap-2 rounded-lg border border-slate-800 px-3 py-1.5 text-xs text-slate-400 transition-colors hover:border-slate-600 hover:text-slate-200"
+            >
+              <Library size={14} />
+              Takes
+            </a>
             <button
               type="button"
               onClick={reset}
