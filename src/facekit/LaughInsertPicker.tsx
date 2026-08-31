@@ -109,7 +109,7 @@ export default function LaughInsertPicker({ image, mouth, insert, onChange }: La
         </div>
       </div>
       <p className="mx-auto max-w-md text-xs text-slate-500">
-        Put the magenta sides just outside AA’s desired outer mouth corners rather than leaving generous skin padding. The dashed cyan area captures the wider generated mouth and corner lines, then compresses them horizontally into that final area. AA supplies everything outside it, including the jaw and chin.
+        Put the magenta sides just outside AA’s desired outer mouth corners rather than leaving generous skin padding. The dashed cyan area finds the generated pixels that differ from AA, then compresses only those mouth and corner-line changes into the final area. AA supplies the jaw, skin and chin without moving them.
       </p>
     </div>
   );

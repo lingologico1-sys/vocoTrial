@@ -566,9 +566,11 @@ export async function featherPatch(
  * The provider is free to redraw a whole portrait, but it does not get to
  * decide which of those pixels become part of the kit. AA remains the complete
  * mouth-box foundation (including its jaw and chin). A wider generated source
- * area is compressed horizontally into the smaller final insert, so the
- * boundary controls the result's width instead of merely cropping it. The wider
- * capture also brings short corner lines along rather than throwing them away.
+ * area is compared with AA and only its changed pixels are compressed into the
+ * smaller final insert. That distinction is the point: scaling the rectangular
+ * crop itself pulls unchanged jaw lines and skin shading inward with the mouth.
+ * A soft difference matte moves the new lips, teeth and corner lines while AA's
+ * surrounding face stays at its original coordinates.
  */
 export async function constrainLaughPatch(
   aa: string,
@@ -591,8 +593,9 @@ export async function constrainLaughPatch(
   const capture = laughCaptureBox(mouth, insert);
   const captureX = Math.round(capture.x - mouth.x);
   const captureY = Math.round(capture.y - mouth.y);
-  const clipped = context(insert.width, insert.height);
-  clipped.drawImage(
+  const generatedCapture = context(capture.width, capture.height);
+  const aaCapture = context(capture.width, capture.height);
+  generatedCapture.drawImage(
     generatedImage,
     captureX,
     captureY,
@@ -600,21 +603,94 @@ export async function constrainLaughPatch(
     capture.height,
     0,
     0,
+    capture.width,
+    capture.height,
+  );
+  aaCapture.drawImage(
+    aaImage,
+    captureX,
+    captureY,
+    capture.width,
+    capture.height,
+    0,
+    0,
+    capture.width,
+    capture.height,
+  );
+
+  const generatedPixels = generatedCapture.getImageData(0, 0, capture.width, capture.height);
+  const aaPixels = aaCapture.getImageData(0, 0, capture.width, capture.height);
+  let alpha = new Uint8ClampedArray(capture.width * capture.height);
+  for (let pixel = 0; pixel < alpha.length; pixel++) {
+    const i = pixel * 4;
+    const distance = Math.max(
+      Math.abs(generatedPixels.data[i] - aaPixels.data[i]),
+      Math.abs(generatedPixels.data[i + 1] - aaPixels.data[i + 1]),
+      Math.abs(generatedPixels.data[i + 2] - aaPixels.data[i + 2]),
+    );
+    // Below fourteen levels is encoding/tone noise; above thirty-two is a
+    // visible edit. The soft interval keeps antialiased lip and line edges.
+    alpha[pixel] = Math.round(
+      255 * smoothstep(14, 32, distance) * (generatedPixels.data[i + 3] / 255),
+    );
+  }
+
+  // Pull a few adjacent pixels into the matte so unchanged dark interior
+  // between changed teeth and lip edges travels with the expression rather
+  // than leaving pinholes through to AA.
+  const grown = new Uint8ClampedArray(alpha.length);
+  const grow = 3;
+  for (let y = 0; y < capture.height; y++) {
+    for (let x = 0; x < capture.width; x++) {
+      let strongest = 0;
+      for (let oy = -grow; oy <= grow; oy++) {
+        const sy = y + oy;
+        if (sy < 0 || sy >= capture.height) continue;
+        for (let ox = -grow; ox <= grow; ox++) {
+          const sx = x + ox;
+          if (sx < 0 || sx >= capture.width) continue;
+          strongest = Math.max(strongest, alpha[sy * capture.width + sx]);
+        }
+      }
+      grown[y * capture.width + x] = strongest;
+    }
+  }
+  alpha = grown;
+
+  const mask = context(capture.width, capture.height);
+  const maskPixels = mask.createImageData(capture.width, capture.height);
+  for (let pixel = 0; pixel < alpha.length; pixel++) {
+    const i = pixel * 4;
+    maskPixels.data[i] = 255;
+    maskPixels.data[i + 1] = 255;
+    maskPixels.data[i + 2] = 255;
+    maskPixels.data[i + 3] = alpha[pixel];
+  }
+  mask.putImageData(maskPixels, 0, 0);
+  const softenedMask = context(capture.width, capture.height);
+  softenedMask.filter = 'blur(1.5px)';
+  softenedMask.drawImage(mask.canvas, 0, 0);
+  softenedMask.filter = 'none';
+
+  generatedCapture.globalCompositeOperation = 'destination-in';
+  generatedCapture.drawImage(softenedMask.canvas, 0, 0);
+  generatedCapture.globalCompositeOperation = 'source-over';
+
+  const clipped = context(insert.width, insert.height);
+  clipped.drawImage(
+    generatedCapture.canvas,
+    0,
+    0,
+    capture.width,
+    capture.height,
+    0,
+    0,
     insert.width,
     insert.height,
   );
-  const softened = await featherPatch(
-    clipped.canvas.toDataURL('image/png'),
-    { x: 0, y: 0, width: insert.width, height: insert.height },
-    // This is an internal seam over an already-feathered AA patch. A full
-    // mouth-patch fade here erased the short corner lines this insert exists to
-    // preserve; four pixels hide the join without washing out nearby detail.
-    4,
-  );
-  const softenedImage = await loadImage(softened);
   const result = context(mouth.width, mouth.height);
   result.drawImage(aaImage, 0, 0, mouth.width, mouth.height);
-  result.drawImage(softenedImage, localX, localY, insert.width, insert.height);
+  result.drawImage(clipped.canvas, localX, localY, insert.width, insert.height);
   return result.canvas.toDataURL('image/png');
 }
 
