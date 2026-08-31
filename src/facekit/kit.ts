@@ -285,6 +285,30 @@ export interface FaceKit {
    * nothing already drawn has to be brought forward.
    */
   persona?: Persona;
+  /**
+   * A person shown in a setting rather than a portrait: hold the picture still.
+   *
+   * The renderer never cared what the base picture is — it draws one image and
+   * paints mouths onto rectangles — so a gentleman at a desk needs no new
+   * drawing code. What it needs is the one thing a portrait wants and a scene
+   * does not: head motion. Face.tsx moves the *whole* base on every stressed
+   * syllable, which on a head is emphasis and on a room is an earthquake, and
+   * it draws that base OVERSCAN wider than the frame so the travel cannot
+   * uncover a corner. Both are wrong here, and both switch off together,
+   * because the second exists only to pay for the first.
+   *
+   * On the kit rather than in the session's performance profile, deliberately.
+   * `motion`, `nodDepth`, `tilt` and the rest are a house style an administrator
+   * publishes once for every lesson; whether a picture can move at all is a fact
+   * about the picture. So this OVERRIDES `session.motion` — a scene held still
+   * under one profile and bobbing under another would be the same artwork
+   * failing on a setting nobody chose for it.
+   *
+   * Optional, and absent means an ordinary portrait, so no format bump: every
+   * kit written before this is a portrait and there is nothing to bring
+   * forward. See /situationmaker, which is the only page that sets it.
+   */
+  situation?: boolean;
   /** What the kit has cost to generate so far, in USD. A floor — see below. */
   spentUsd: number;
 }
@@ -439,7 +463,20 @@ export function resizeAbout<T extends Box>(box: T, size: { width: number; height
   });
 }
 
-export function newKit(name: string, base: string): FaceKit {
+/**
+ * A fresh kit around one picture.
+ *
+ * `situation` is settled here and never again. It is a fact about what the
+ * picture *is* — a person in a setting rather than a portrait — so it is
+ * decided by which page the upload arrived on and is not a switch the author
+ * can throw afterwards. Throwing it would be offering to reinterpret artwork
+ * that is already cut: every pose in a finished kit was drawn against a mouth
+ * of a particular size in a particular frame, and the flag does not change any
+ * of them, only whether the result is allowed to move. Set false, and omitted
+ * from the object rather than written as `false`, so an ordinary portrait
+ * serialises exactly as it did before this existed.
+ */
+export function newKit(name: string, base: string, situation = false): FaceKit {
   return {
     format: KIT_FORMAT,
     id: `kit-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
@@ -450,6 +487,7 @@ export function newKit(name: string, base: string): FaceKit {
     boxes: defaultBoxes(),
     patches: {},
     lashes: DEFAULT_LASH_STYLE,
+    ...(situation ? { situation: true } : {}),
     spentUsd: 0,
   };
 }

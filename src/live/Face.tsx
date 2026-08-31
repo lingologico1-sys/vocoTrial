@@ -833,7 +833,23 @@ export default function Face({
     perf.nod * nodDepth
     + laughNod * Math.min(nodDepth * LAUGH_NOD_GAIN, NOD_DEPTH_MAX)
     - perf.head * travel.rise;
-  const move = `translate(0 ${lift}) rotate(${roll} ${PIVOT_X} ${PIVOT_Y})`;
+  /*
+    A situational kit is held still. See FaceKit.situation for why that is a
+    property of the picture rather than of the session's performance profile.
+
+    Gated here, at the one line every channel arrives on, rather than at each of
+    them: `lift` and `roll` are already the sum of the rise, the swing, the nod,
+    the laugh bob and the tilt, so one identity transform switches off all five
+    and cannot be left holding a sixth that is added later.
+
+    Both terms are still computed above. Short-circuiting them would mean the
+    hooks and cadences that feed them changing shape with the kit, and a rAF
+    loop that reshapes itself when a face loads is a remount mid-sentence.
+    Cheap arithmetic, discarded — the honest cost of keeping one code path.
+  */
+  const move = kit?.situation
+    ? 'translate(0 0)'
+    : `translate(0 ${lift}) rotate(${roll} ${PIVOT_X} ${PIVOT_Y})`;
   /**
    * The two channels `hold` takes over, resolved once for both faces below.
    *
@@ -940,7 +956,17 @@ export default function Face({
       the camera. It steps once, when the feature is switched on. See
       TILT_OVERSCAN on why it does not also follow the direction switch.
     */
-    const grow = `translate(100 100) scale(${tilt.length > 0 ? TILT_OVERSCAN : OVERSCAN}) translate(-100 -100)`;
+    /*
+      And none at all for a scene, which is the second half of holding one still.
+      The overscan is not a look; it is the price of the movement above, paid so
+      a lean cannot uncover a corner. With nothing travelling there is nothing to
+      uncover, and the 10% that bought the cover is just a crop — it would eat
+      the edges of the desk the author framed, which on a situational portrait is
+      the part carrying the situation.
+    */
+    const grow = `translate(100 100) scale(${
+      kit.situation ? 1 : tilt.length > 0 ? TILT_OVERSCAN : OVERSCAN
+    }) translate(-100 -100)`;
     // Both lids are drawn from the same flag. A kit holding only one of them
     // still blinks, with one eye — visibly wrong, and better than silently
     // doing nothing while the artwork looks complete in the picker.
