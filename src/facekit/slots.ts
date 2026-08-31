@@ -713,6 +713,27 @@ export const SLOTS: Slot[] = [
    * is a rounded hole with no teeth in it at all. See ST_NARROWS for why the licence to
    * narrow is capped rather than open.
    *
+   * THE FIRST DRAFT COLLIDED WITH fv AT 0.0%, and the reason is worth keeping because it
+   * is the same mistake the fv/ee note above records, made again by someone who had just
+   * read it. That draft asked for the two bands "meeting edge to edge, separated only by
+   * a hairline of dark no thicker than the line the lips are drawn with", and then closed
+   * with "no dark cavity or opening beyond that single hairline". Two white bands with a
+   * sub-pixel gap between them are one white band; a white band with nothing dark under it
+   * is fv. The prompt named the right shape and then specified it away.
+   *
+   * So the cue is now the *count* of shapes in the opening, which survives being drawn
+   * small in a way an internal hairline does not:
+   *
+   *   fv   one    teeth, then lip
+   *   ee   two    teeth, dark strip, lip
+   *   st   three  teeth, dark line, teeth — and only then lip
+   *
+   * The dark line is the load-bearing shape, so it is pinned the way ee's strip is: as a
+   * proportion of something already in the picture ("about a third as tall as the white
+   * band above it") rather than as an adjective, and with an explicit refusal to let it
+   * close up. A proportion the generator can measure off its own output beats an adjective
+   * it has to interpret.
+   *
    * NO TONGUE, and that is not a style note. A tongue tip showing between the teeth is
    * ð/θ, and this pose is worn on every /s/ — a visible tongue here would draw a face
    * that lisps its way through every sentence. It is also why `T` stays on ee rather than
@@ -723,7 +744,7 @@ export const SLOTS: Slot[] = [
     label: 'Narrow (S / T)',
     region: 'mouth',
     prompt: mouth(
-      'Bring the teeth together and narrow the mouth a little, as when saying "s". Both rows of front teeth show as two white bands meeting edge to edge across the whole width of the opening, separated only by a hairline of dark no thicker than the line the lips are drawn with. The jaw barely moves and the corners draw inward slightly, so the mouth ends up clearly narrower than a spread one. Both lips keep their full natural thickness and their existing shape, and neither is drawn back, tucked or thinned. The result has to be plainly distinguishable from a spread mouth showing one band of teeth, because there are two white bands here and the mouth is narrower rather than wider; and from teeth resting on the lower lip, because the shape directly below the upper teeth is a second row of teeth and not lip. Show no tongue anywhere, and no dark cavity or opening beyond that single hairline.',
+      'Part the lips a little and show both rows of front teeth, as when saying "s". Inside the opening there are three shapes stacked in this order and no others: a white band of upper teeth along the top, then a clear dark line running the full width directly beneath it, then a second white band of lower teeth. Only below all three does the lower lip begin. That dark line is thin — about a third as tall as the white band above it — but it is plainly visible at a glance and never closes up or disappears. The jaw barely moves and the corners draw inward slightly, so the mouth ends up clearly narrower than a spread one. Both lips keep their full natural thickness and their existing shape, and neither is drawn back, tucked or thinned. The result has to be plainly distinguishable from teeth resting on the lower lip, because a dark line and a second row of teeth sit between the upper teeth and the lip rather than the teeth meeting the lip directly; and from a spread mouth showing one band of teeth above a dark strip, because here the dark has white below it as well as above, and the mouth is narrow rather than wide. Show no tongue anywhere, and no dark beyond that single line.',
       ST_NOTE,
     ),
   },
