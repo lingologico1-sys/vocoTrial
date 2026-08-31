@@ -760,8 +760,13 @@ export const SLOTS: Slot[] = [
    *
    * NO TONGUE, and that is not a style note. A tongue tip showing between the teeth is
    * ð/θ, and this pose is worn on every /s/ — a visible tongue here would draw a face
-   * that lisps its way through every sentence. It is also why `T` stays on ee rather than
-   * following `t` down here.
+   * that lisps its way through every sentence.
+   *
+   * That is a rule about this artwork, and it was once mistaken for a routing rule: `T`
+   * was kept on `ee` on the strength of it, as though not drawing a tongue meant ð/θ
+   * could not wear the pose. It wears it now. The mouth a dental makes — teeth together,
+   * jaw nearly shut, lips neutral — is this drawing; what it does not get is a tongue,
+   * and it never needed one. See POLLY_VISEMES in live/visemeTable.ts.
    */
   {
     id: 'st',

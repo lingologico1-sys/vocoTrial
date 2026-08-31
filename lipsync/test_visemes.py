@@ -138,16 +138,25 @@ def test_l_does_not_split_by_language():
     )
 
 
-def test_dentals_stay_clear_of_the_narrow_pose():
+def test_dentals_are_narrow_too():
     """
-    Why th did not follow t down to `st`, having been considered and rejected.
+    th gets no pose of its own, but it does get the right one of the poses there are.
 
-    What `st` draws is two rows of teeth nearly meeting. A tongue tip between them is the
-    one shape it must never show, because this pose is worn on every /s/ and a visible
-    tongue there is a lisp on every sentence. Six marks in fifty-six seconds of English
-    and none at all in French is what a separate th pose would have bought.
+    It sat on `ee` at first, kept there by an argument about the artwork -- `st` draws two
+    rows of teeth nearly meeting, a tongue tip between them is the one shape it must never
+    show, and a visible tongue on every /s/ is a lisp. All true, and all about what may be
+    *drawn*, not about where a phone should be *routed*. No tongue is drawn either way.
+
+    Asked as a routing question, ð/θ is dental -- teeth together, jaw nearly shut, lips
+    neutral -- which is what `st` is. `ee` is spread wide with a dark strip, its opposite,
+    so a face saying "the" or "with" was opening into a wide spread mouth.
+
+    The cost, asserted below so it is not discovered by surprise: /s/ and /θ/ now share a
+    pose, and "thin" and "sin" look alike. Right and ambiguous beats distinct and wrong
+    for a face someone is watching to learn how a sound is made.
     """
-    assert not check([("θ", "ee"), ("ð", "ee")], "dental")
+    assert not check([("θ", "st"), ("ð", "st")], "dental")
+    assert pose("θ") == pose("s"), "the merge this accepts"
 
 
 def test_the_six_the_original_map_dropped():

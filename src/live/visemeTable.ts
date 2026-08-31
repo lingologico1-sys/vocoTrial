@@ -119,7 +119,7 @@ export type PollyViseme =
  * somewhere to go, which is the same guarantee facekit/slots.ts gets from the
  * `Viseme` union it keys on.
  *
- * Three of Polly's distinctions are dropped because a flat patch cannot carry
+ * Two of Polly's distinctions are dropped because a flat patch cannot carry
  * them, and that was measured rather than assumed. Running patchDivergence over
  * the shipped kit puts the closest existing pair — `rest` against `mbp`, which
  * is a whole category of lip tension — at 7.9% of centre pixels, against a 4%
@@ -130,21 +130,18 @@ export type PollyViseme =
  *
  *   k     the tongue is pulled back *out of sight*, so there is no pixel that
  *         could differ from a plain open mouth
- *   T     a tongue tip on the teeth is the one genuinely new shape available,
- *         and it is ð/θ — English and Castilian only, in a face that otherwise
- *         carries no per-language artwork at all. Six marks in fifty-six seconds
- *         of English and none at all in French, which is what it would buy
  *   @     "barely open, relaxed" sits between `rest` and `uh`, nearer to each
  *         than they are to one another
  *
- * `t` was a fourth until `st` existed, and it was dropped on a true premise that
- * turned out not to be the whole one: the tongue does sit hidden behind the upper
- * teeth, so there is no tongue to draw. What that reasoning missed is that the
- * *jaw* is not hidden. /s z t d n/ are made with the teeth close to meeting, and
- * two rows of teeth nearly touching in a mouth drawn narrower is a shape a flat
- * patch can carry perfectly well — see the `st` slot in facekit/slots.ts, which is
- * written against `ee` and `fv` on exactly that pair of cues. `s` moves with it
- * for the same reason, and the two together are a quarter of all marks.
+ * `t` and `T` were both on that list until `st` existed, and both were dropped on a
+ * true premise that turned out not to be the whole one: the tongue is hidden behind
+ * the upper teeth for /t/, and drawing it between them for /θ/ would lisp every /s/
+ * that shares the pose. Neither claim is wrong. What both missed is that the *jaw* is
+ * not hidden. /s z t d n/ and /θ ð/ alike are made with the teeth close to meeting,
+ * and two rows of teeth nearly touching in a mouth drawn narrower is a shape a flat
+ * patch carries perfectly well — see the `st` slot in facekit/slots.ts, written
+ * against `ee` and `fv` on exactly that pair of cues. Together with `s` and `l` they
+ * are a quarter of all marks.
  *
  * `S` goes the other way and is the reason this file earns its keep. The
  * analyser sends every sibilant to `ee` because it sorts them by brightness;
@@ -194,10 +191,29 @@ export const POLLY_VISEMES: Record<PollyViseme, Viseme> = {
    * So `l` comes along, and the phonetics agrees rather than merely tolerating it
    * — /l/ is alveolar, made in the same place as /t d n/, with the tongue tip on
    * the same ridge and the jaw about as close.
+   *
+   * `T` JOINED LATER, CORRECTING A MISTAKE WORTH NAMING because it is an easy one to
+   * make again. It was left with the spread poses on this argument: what `st` draws is
+   * two rows of teeth nearly meeting, ð/θ is a tongue tip *between* them, and a visible
+   * tongue on every "s" would be a lisp. Every clause of that is true, and it answers a
+   * different question from the one being asked. It says what the `st` *artwork* may
+   * contain. It says nothing about which existing pose ð/θ should be routed to, and no
+   * tongue gets drawn anywhere either way.
+   *
+   * Asked properly — of the poses that exist, which is nearest? — it is not close. ð/θ
+   * is dental: teeth together, jaw nearly shut, lips neutral, which is this drawing.
+   * `ee` is spread wide with a dark strip under one band of teeth, which is its opposite.
+   * A face saying "the", "this" or "with" was opening into a wide spread mouth.
+   *
+   * The cost is that θ and /s/ now share a pose, so "thin" and "sin" look alike. That is
+   * a real loss and the smaller one: a learner watching this face to see how a sound is
+   * made is better served by a mouth that is right and ambiguous than by one that is
+   * distinct and wrong.
    */
   t: 'st',
   l: 'st',
   s: 'st',
+  T: 'st',
 
   /*
    * Near-closed and spread. A shallow slot with a band of teeth in it, which is
@@ -208,13 +224,12 @@ export const POLLY_VISEMES: Record<PollyViseme, Viseme> = {
    * ɕ and t͡ɕ are made with the lips spread or neutral. Mandarin *xi* and *shi*
    * genuinely look different, and this is the pair that carries it.
    *
-   * `T` stays here rather than following `t` to `st`, and the distinction is not
-   * arbitrary. What `st` draws is two rows of teeth nearly meeting; ð/θ is a
-   * tongue tip *between* them, which is the one shape `st` must not show — a
-   * visible tongue on every "s" is a lisp. Wrong with the spread poses is a
-   * smaller error than wrong with the narrow ones.
+   * `J` IS ALSO THE ONE THAT LOOKS LIKE IT SHOULD HAVE FOLLOWED `T` TO `st`, and must
+   * not. The alveolo-palatals are teeth-close sibilants, so the narrow pose is tempting
+   * on articulation alone. But `s` is already there, and Mandarin distinguishes *xi*
+   * from *si*: moving `J` would hand both the same mouth. Left here, the two differ,
+   * which is the whole reason this row exists.
    */
-  T: 'ee',
   J: 'ee',
   i: 'ee',
   e: 'ee',
