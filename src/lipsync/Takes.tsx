@@ -10,8 +10,14 @@ import {
 } from 'lucide-react';
 import BuildBadge from '../BuildBadge';
 import ReturnButton from '../ReturnButton';
+import { loadBundledKit } from '../facekit/bundled';
+import { fetchPublished, listPublished } from '../facekit/library';
+import type { FaceKit } from '../facekit/kit';
+import type { PublishedFace } from '../facekit/published';
+import SpeakingFace from '../live/SpeakingFace';
 import Diagnostics from './Diagnostics';
 import { audioUrl, deleteLine, fetchLine, listLines } from './library';
+import { loadPrefs, savePrefs } from './prefs';
 import type { LipsyncPackage, PublishedLine } from './published';
 
 interface OpenTake {
@@ -49,14 +55,21 @@ function duration(milliseconds: number): string {
  * what did I keep, and can I still hear it?
  */
 export default function Takes() {
+  const remembered = useState(loadPrefs)[0];
   const [lines, setLines] = useState<PublishedLine[]>([]);
   const [loadingList, setLoadingList] = useState(true);
   const [openingId, setOpeningId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [openTake, setOpenTake] = useState<OpenTake | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
+  const [kit, setKit] = useState<FaceKit | null>(null);
+  const [faces, setFaces] = useState<PublishedFace[]>([]);
+  const [faceId, setFaceId] = useState(remembered.faceId);
+  const [started, setStarted] = useState(false);
+  const audioElement = useRef<HTMLAudioElement | null>(null);
   const audioObjectUrl = useRef<string | null>(null);
   const requestNumber = useRef(0);
+  const audioTime = useRef(() => audioElement.current?.currentTime ?? 0).current;
 
   function releaseAudio() {
     if (audioObjectUrl.current) URL.revokeObjectURL(audioObjectUrl.current);
@@ -64,6 +77,40 @@ export default function Takes() {
   }
 
   useEffect(() => releaseAudio, []);
+
+  useEffect(() => {
+    loadBundledKit()
+      .then((bundled) => {
+        setKit(bundled);
+        if (remembered.faceId) {
+          fetchPublished(remembered.faceId)
+            .then(setKit)
+            .catch(() => undefined);
+        }
+      })
+      .catch(() => undefined);
+
+    listPublished()
+      .then((found) => {
+        const wearable = found.filter((face) => face.ready !== false);
+        setFaces(wearable);
+        setFaceId((id) => (id && !wearable.some((face) => face.id === id) ? '' : id));
+      })
+      .catch(() => undefined);
+  }, [remembered.faceId]);
+
+  useEffect(() => {
+    savePrefs({ faceId });
+  }, [faceId]);
+
+  async function wear(id: string) {
+    setFaceId(id);
+    try {
+      setKit(id ? await fetchPublished(id) : await loadBundledKit());
+    } catch {
+      // Keep the current face visible if a library item disappeared after listing.
+    }
+  }
 
   async function refresh() {
     setLoadingList(true);
@@ -92,6 +139,7 @@ export default function Takes() {
       releaseAudio();
       const url = found.audioBase64 ? audioUrl(found.audioBase64) : null;
       audioObjectUrl.current = url;
+      setStarted(false);
       setOpenTake({ pkg: found.package, audio: url });
     } catch (error) {
       if (request === requestNumber.current) {
@@ -115,6 +163,7 @@ export default function Takes() {
         ++requestNumber.current;
         releaseAudio();
         setOpenTake(null);
+        setStarted(false);
         setOpeningId(null);
       }
     } catch (error) {
@@ -281,13 +330,55 @@ export default function Takes() {
                   )}
                 </div>
 
-                {openTake.audio ? (
-                  <audio controls preload="metadata" src={openTake.audio} className="w-full" />
-                ) : (
-                  <div className="rounded-lg border border-amber-950 bg-amber-950/20 px-3 py-2 text-xs text-amber-300">
-                    This package is present, but its audio object is missing.
+                <div className="flex flex-col items-center gap-4 rounded-xl border border-slate-800 bg-slate-950/40 px-4 py-5">
+                  <div className="w-full max-w-[300px]">
+                    <SpeakingFace
+                      tap={null}
+                      marks={started ? openTake.pkg.marks : null}
+                      audioTime={started ? audioTime : null}
+                      expressions={started ? openTake.pkg.expressions : null}
+                      driver="scheduled"
+                      lookaheadMs={remembered.lookaheadMs}
+                      kit={kit}
+                      speaking={started}
+                    />
                   </div>
-                )}
+
+                  {openTake.audio ? (
+                    <audio
+                      ref={audioElement}
+                      controls
+                      preload="metadata"
+                      src={openTake.audio}
+                      className="w-full max-w-md"
+                      onPlay={() => setStarted(true)}
+                      onEnded={() => setStarted(false)}
+                    />
+                  ) : (
+                    <div className="rounded-lg border border-amber-950 bg-amber-950/20 px-3 py-2 text-xs text-amber-300">
+                      This package is present, but its audio object is missing.
+                    </div>
+                  )}
+
+                  <label className="flex w-full max-w-md flex-col gap-1.5">
+                    <span className="text-xs font-medium text-slate-500">Preview face</span>
+                    <select
+                      value={faceId}
+                      className="rounded-lg border border-slate-800 bg-slate-900 px-3 py-2 text-sm text-slate-200"
+                      onChange={(event) => void wear(event.target.value)}
+                    >
+                      <option value="">the deployment&rsquo;s own face</option>
+                      {faces.map((face) => (
+                        <option key={face.id} value={face.id}>
+                          {face.name || face.id}
+                        </option>
+                      ))}
+                    </select>
+                    <span className="text-[11px] text-slate-700">
+                      The take stores audio and movement, not a face. This choice is remembered for previews.
+                    </span>
+                  </label>
+                </div>
 
                 <div className="grid gap-3 text-xs sm:grid-cols-2 xl:grid-cols-4">
                   <div className="rounded-lg bg-slate-900/60 px-3 py-2.5">
