@@ -246,16 +246,6 @@ export interface FaceKit {
   boxes: Boxes;
   /** One PNG data URL per authored slot, already cropped to its region's box. */
   patches: Partial<Record<SlotId, string>>;
-  /**
-   * The only part of the mouth box a generated Laugh may replace.
-   *
-   * AA already supplies the correct jaw, chin and overall opening. Keeping this
-   * smaller rectangle independently means a provider may add the upward corners
-   * and lower teeth, but cannot broaden the lower face to make a stock grin.
-   * Optional so existing kits receive the cautious default below until an author
-   * adjusts it.
-   */
-  laughInsert?: Box;
   /** Optional glasses painted last, over the base, brows, mouths and eyelids. */
   eyewear?: EyewearLayer;
   /**
@@ -379,54 +369,6 @@ export function defaultBoxes(): Boxes {
     // the model to redesign the glasses.
     eyeLeft: { ...eye, x: Math.round(edge * 0.3) },
     eyeRight: { ...eye, x: Math.round(edge * 0.54) },
-  };
-}
-
-/**
- * A cautious first boundary for the part of AA a Laugh is allowed to edit.
- *
- * The outer mouth box intentionally includes the moving chin. A laugh needs
- * none of that latitude: AA has already established the jaw drop, so this
- * rectangle stays in the upper half around the lips and teeth. It is an opening
- * estimate, not a facial measurement, and FaceKit exposes it for adjustment.
- */
-export function defaultLaughInsert(mouth: MouthBox): Box {
-  const width = Math.round(mouth.width * 0.52);
-  const height = Math.round(mouth.height * 0.48);
-  return {
-    x: Math.round(mouth.x + (mouth.width - width) / 2),
-    y: Math.round(mouth.y + mouth.height * 0.06),
-    width,
-    height,
-  };
-}
-
-/**
- * Generated Laugh details are pulled from a wider area and fitted into the
- * author-drawn final boundary. Three quarters is intentionally visible rather
- * than subtle: the provider's recurring failure is a mouth roughly a third too
- * wide, and a 1:1 crop was the reason the first constraint changed nothing.
- */
-export const LAUGH_HORIZONTAL_SCALE = 0.74;
-
-/** The wider generated area compressed into `insert` when the patch is built. */
-export function laughCaptureBox(mouth: MouthBox, insert: Box): Box {
-  const centre = insert.x + insert.width / 2;
-  // Reduce the capture symmetrically when the desired expansion would cross a
-  // mouth-box edge. Shifting a full-width capture back inside would pull the
-  // generated mouth sideways as it was scaled into a centred destination.
-  const centredLimit = Math.floor(
-    2 * Math.min(centre - mouth.x, mouth.x + mouth.width - centre),
-  );
-  const width = Math.max(
-    insert.width,
-    Math.min(centredLimit, Math.round(insert.width / LAUGH_HORIZONTAL_SCALE)),
-  );
-  return {
-    x: Math.round(centre - width / 2),
-    y: insert.y,
-    width,
-    height: insert.height,
   };
 }
 
