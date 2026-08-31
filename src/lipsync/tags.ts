@@ -233,9 +233,26 @@ export function reactionsIn(text: string): Tag[] {
     .filter((t): t is Tag => t?.kind === 'reaction');
 }
 
-/** Words as the aligner will count them: whitespace-separated, tags already gone. */
+/**
+ * Words as the aligner will count them: whitespace-separated, tags already gone, and
+ * anything with no letter or digit in it thrown away.
+ *
+ * THE LAST CLAUSE IS THE WHOLE POINT, and it was missing. French puts a space before
+ * `?`, `!`, `;` and `:`, so "sur le mur ?" splits into nine tokens where MFA reports
+ * eight words — a bare `?` is punctuation to the aligner and never reaches its word
+ * tier. Every laugh standing after such a mark then anchored one word late, which is
+ * exactly the failure this counts against: the laugh landed after the first word of the
+ * next sentence instead of in the silence before it. Proportional rescaling in
+ * `laughTimeMs` does not save it, because a one-token disagreement spread over forty
+ * words rounds straight back to the same off-by-one.
+ */
 export function wordCount(script: string): number {
-  return script.split(/\s+/).filter(Boolean).length;
+  return script.split(/\s+/).filter(isWord).length;
+}
+
+/** A token the aligner will report — one carrying at least one letter or digit. */
+function isWord(token: string): boolean {
+  return /[\p{L}\p{N}]/u.test(token);
 }
 
 /** One laugh tag lifted out of the text, and where in the script it was standing. */
