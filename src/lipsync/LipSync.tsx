@@ -4,6 +4,7 @@ import {
   AudioLines,
   Check,
   CheckCircle2,
+  Loader2,
   RotateCcw,
   Save,
   Upload,
@@ -136,6 +137,7 @@ export default function LipSync() {
   const [showGenerationComplete, setShowGenerationComplete] = useState(false);
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [finalizing, setFinalizing] = useState(false);
   /**
    * Whether this clip has ever started playing.
    *
@@ -336,12 +338,14 @@ export default function LipSync() {
   async function keep() {
     if (!generated) return;
     setBusy(true);
+    setFinalizing(true);
     try {
       await saveLine(generated);
       setSaved(true);
     } catch (error) {
       setProblem(error instanceof Error ? error.message : 'Could not save that.');
     } finally {
+      setFinalizing(false);
       setBusy(false);
     }
   }
@@ -586,6 +590,46 @@ export default function LipSync() {
             <span className="text-slate-200">{pose}</span>
             <span className="text-slate-600">{POSE_BLURB[pose]}</span>
           </div>
+
+          {generated && (
+            <div className="flex w-full max-w-md flex-col gap-3 border-t border-slate-800 px-4 pt-5">
+              <button
+                type="button"
+                onClick={() => void keep()}
+                disabled={busy || saved}
+                className="flex w-full items-center justify-center gap-2 rounded-lg bg-sky-600 px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-sky-950/30 transition-colors hover:bg-sky-500 disabled:cursor-not-allowed disabled:bg-slate-800 disabled:text-slate-500 disabled:shadow-none"
+              >
+                {finalizing ? (
+                  <Loader2 size={17} className="animate-spin" />
+                ) : saved ? (
+                  <Check size={17} />
+                ) : (
+                  <Save size={17} />
+                )}
+                {finalizing ? 'Finalizing…' : saved ? 'Take finalized' : 'Finalize this take'}
+              </button>
+              <p className="text-center text-xs leading-relaxed text-slate-500">
+                {saved
+                  ? 'Stored in the library with this exact audio and its lip-sync timings.'
+                  : 'Keeps this exact take in the library. To change the performance, edit above and generate a new take.'}
+              </p>
+              {(spliced > 0 || generated.package.reactionCount - spliced > 0) && (
+                <div className="flex flex-wrap justify-center gap-x-3 gap-y-1">
+                  {spliced > 0 && (
+                    <span className="text-xs text-emerald-400/80">
+                      {spliced} laugh{spliced === 1 ? '' : 's'} spliced from the library
+                    </span>
+                  )}
+                  {generated.package.reactionCount - spliced > 0 && (
+                    <span className="text-xs text-amber-400/80">
+                      {generated.package.reactionCount - spliced} reaction span
+                      {generated.package.reactionCount - spliced === 1 ? '' : 's'} marked from the timings
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
         </section>
 
         <section className="grid gap-4 sm:grid-cols-2">
@@ -651,42 +695,6 @@ export default function LipSync() {
         </section>
 
         {generated && <Diagnostics pkg={generated.package} />}
-
-        {generated && (
-          <div className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-800 px-4 py-3">
-            <button
-              type="button"
-              onClick={() => void keep()}
-              disabled={busy || saved}
-              className="inline-flex items-center gap-2 rounded-lg border border-slate-700 px-3 py-1.5 text-sm text-slate-200 transition-colors hover:border-slate-500 disabled:cursor-not-allowed disabled:border-slate-900 disabled:text-slate-700"
-            >
-              {saved ? <Check size={15} /> : <Save size={15} />}
-              {saved ? 'Saved' : 'Save this line'}
-            </button>
-            <span className="text-xs text-slate-600">
-              {saved
-                ? 'In the library, with its audio and the timings it was aligned from.'
-                : 'Nothing is stored until you say so — tuning a voice should not fill a bucket.'}
-            </span>
-            {/* Spliced laughs are counted separately from the rest, because they are the
-                one kind of span that was NOT marked from the timings — its length came
-                from a clip chosen before anything was synthesised. Rolling them into the
-                same number would report the thing this page most wants to distinguish as
-                indistinguishable. */}
-            {spliced > 0 && (
-              <span className="text-xs text-emerald-400/80">
-                {spliced} laugh{spliced === 1 ? '' : 's'} spliced from the library
-              </span>
-            )}
-            {generated.package.reactionCount - spliced > 0 && (
-              <span className="text-xs text-amber-400/80">
-                {generated.package.reactionCount - spliced} reaction span
-                {generated.package.reactionCount - spliced === 1 ? '' : 's'} marked from the
-                timings
-              </span>
-            )}
-          </div>
-        )}
 
         <LaughLibrary
           // Preferences configure the next generation, including the very first one.
