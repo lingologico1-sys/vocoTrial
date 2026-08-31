@@ -373,6 +373,16 @@ Acted on, 2026-08-31:
   `functions/api/lipsync/generate.ts`. `phonesDuring` in `diagnose.ts` now returns what
   its name claims. This removes the replay barrier described under *Review corrections*
   and would have let the nine French marks in `quis'arrondissent` be classified.
+
+  Verified against a real bake of all five assets. Every speech mark carries a phone and
+  no silence mark does; `oovCount` stays 0 and `phoneCount` is unchanged at 412 / 387 /
+  288, matching the aligner counts in the corpus table above. The pair-wise collapse kept
+  15 English marks that the identifier-only rule had been folding away, all of them
+  genuine — /n/ against /d/ across "and the", /ŋ/ against /ɡ/ — which is 423 stored marks
+  becoming 438. French now stores one mark per aligned phone exactly.
+
+  Note that these files are gitignored: they are local artifacts, and the marks a lesson
+  actually ships with are built at authoring time by `functions/api/lipsync/generate.ts`.
 - **Comment corrections.** The `visemes.py` docstring named the wrong file for the pose
   table and the wrong destination for `/l/`; the `uh` fallback comment still listed `/l/`;
   the `J` block defended the whole row on an argument that covers only its sibilants; the
