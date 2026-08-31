@@ -481,30 +481,34 @@ const SMILE_SPREADS = [
  * exists because a mouth that grows wider between poses reads as inflating, and that is
  * as true of a laugh as of a speech pose.
  *
- * SO THE LICENCE IS VERTICAL ONLY, and this is the second time that lesson has been
- * learned in this file. The note above CORNERS_FIXED records ee being exempted for two
- * rounds and coming back a grin, and draws the conclusion that a generator given any
- * licence over the corners spends all of it. The first draft of this clause did not heed
- * it — it asked for corners that "travel outward" and an opening that is "both wide and
- * clearly curved", and got back a mouth stretched most of the way across the face. The
- * width allowance is withdrawn: the corners rise in place, the seam curves, and the
- * opening stays inside `aa`'s cap. A laugh is not a bigger `aa`. It is an `aa` that is
- * smiling, with both rows of teeth showing.
+ * SO THE LICENCE IS VERTICAL ONLY. Repeating "laugh", "wide" and "broad" — even in
+ * prohibitions — continued to pull generations toward the model's stock wide-grin
+ * image. This version names the drawing as a compact open smile and constrains the
+ * visible opening directly: seventy percent of the closed lip line, approximately as
+ * tall as it is wide. That is a feature the model can inspect in the supplied neutral
+ * portrait, unlike a comparison to the separately generated `aa` pose it cannot see.
  *
- * The chin is allowed to travel for JAW_DROPS' reason exactly — a dropped jaw moves it,
- * and a face that refuses has a hole cut in it.
+ * Unlike the abandoned constrained-insert experiment, this remains an ordinary full
+ * generation followed by the established crop. Holding the surrounding contours in
+ * the prompt therefore does not introduce another scaled jaw inside the mouth box.
  */
 const LAUGH_OPENS = [
-  'The corners of the mouth lift as the jaw drops, so the line of the opening curves',
-  'clearly upward at each end rather than sitting level.',
-  'The corners rise in place: they do not travel outward, and the opening does not grow',
-  'wider than a plain open mouth — what makes it a laugh is the upward curve and the',
-  'teeth, not the size.',
-  'Keep the lips the same colour, thickness and line weight as the original, and keep the',
-  'mouth centred where it is: it does not slide or tilt.',
-  'The chin and the skin between the lower lip and the chin travel downward with the jaw,',
-  'as far as the jaw opens and no further.',
-  'Do not change the nose or the cheeks, and do not move the outer edges of the jaw.',
+  'Edit only the lips, teeth and immediate expression lines to create a compact open smile.',
+  'Keep the two outer lip corners at exactly the same horizontal positions as in the',
+  'source; lift them vertically without moving either corner outward.',
+  'Centre the dark mouth opening beneath the nose. The dark opening and each tooth band',
+  'span approximately seventy percent of the original closed-mouth width.',
+  'Open primarily downward, making the visible opening approximately as tall as it is wide.',
+  'Keep the lips the same colour, thickness and line weight as the source.',
+  'Keep the cheeks, jaw outline, chin, nose, face width and surrounding skin contours',
+  'unchanged.',
+].join(' ');
+
+/** Flat source style, with the two small expression marks this pose needs retained. */
+const LAUGH_STYLE = [
+  'Use flat cel-shaded colour: no gradients, soft shading or highlights.',
+  'Draw one short, simple curved smile line immediately beside each lifted mouth corner.',
+  'Keep those two marks small and add no other creases or wrinkles.',
 ].join(' ');
 
 /**
@@ -512,12 +516,10 @@ const LAUGH_OPENS = [
  *
  * Separate from TEETH_BAND rather than replacing it because every other toothy pose
  * shows the upper row alone, and rightly — `aa` and `ee` and `fv` are speech, and speech
- * does not bare the lower teeth. A laugh does, and here it is also load-bearing. Holding
- * the laugh to `aa`'s jaw drop and `aa`'s width, as the note above LAUGH_OPENS does,
- * leaves the two poses close enough that the kit's SAME_MOUTH check may call them the
- * same drawing. The second band is the difference that does not cost size: it reads at a
- * glance, it separates the two in the contact sheet, and it is what a laughing mouth
- * actually shows.
+ * does not bare the lower teeth. This pose does, and here it is also load-bearing. A
+ * compact opening can otherwise collapse toward `aa`; the second band is the difference
+ * that does not cost size. It reads at a glance, separates the two in the contact sheet,
+ * and is what the expression actually shows.
  *
  * The flat-edge clause is stated for each band in the direction that band needs it —
  * the upper row's straight edge is its bottom, the lower row's is its top — because
@@ -547,7 +549,7 @@ const TEETH_NOTE = [CORNERS_FIXED, WIDTH_CAP, MOUTH_STYLE, TEETH_BAND, FACE_FIXE
 /** The one pose that both shows teeth and thins a lip. */
 const FV_NOTE = [MBP_COMPRESSES, WIDTH_CAP, MOUTH_STYLE, TEETH_BAND, FACE_FIXED].join(' ');
 const OPEN_NOTE = [CORNERS_FIXED, WIDTH_CAP, MOUTH_STYLE, TEETH_BAND, JAW_DROPS].join(' ');
-const LAUGH_NOTE = [LAUGH_OPENS, WIDTH_CAP, MOUTH_STYLE, LAUGH_TEETH].join(' ');
+const LAUGH_NOTE = [LAUGH_OPENS, LAUGH_STYLE, LAUGH_TEETH].join(' ');
 
 const mouth =
   (shape: string, note: string = MOUTH_NOTE) =>
@@ -701,8 +703,8 @@ export const SLOTS: Slot[] = [
    * than for a sound. `fv` was the first; the note above it explains why carrying a
    * slot early is cheaper than adding it later, and this is that argument used again.
    *
-   * WRITTEN AGAINST ITS TWO NEIGHBOURS, because they are what it will collapse into if
-   * the prompt is loose, and they are neighbours in different directions:
+   * WRITTEN TO STAY BETWEEN ITS TWO NEIGHBOURS, because they are what it will collapse
+   * into if the prompt is loose, and they are neighbours in different directions:
    *
    *   aa     the same jaw and the same width, corners level and the lower teeth hidden.
    *          An open mouth with level corners is alarm, not delight, and an `aa`
@@ -710,23 +712,18 @@ export const SLOTS: Slot[] = [
    *   smile  the same corners, lips shut. A closed-mouth laugh is a stifled one, and
    *          slots.ts keeps smile closed on purpose — see the note on that slot.
    *
-   * So both halves are asked for explicitly and neither is left to be inferred, which
-   * is the same fix rest and mbp needed when they came back as the same picture.
-   *
-   * WHAT IT IS NOT is stated too, because the first draft was all superlative — "broad
-   * laugh", "as far as a wide open mouth", corners "outward", a "wide curved shape" —
-   * five pushes toward size and no cap against any of them, and what came back was a
-   * mouth stretched across the whole face. `aa` avoided that with one clause its
-   * neighbour lacked: no wider than the closed mouth. The laugh borrows it verbatim and
-   * says outright that it is an open mouth that is smiling rather than a bigger one.
-   * That deliberately walks the pose toward `aa`; LAUGH_TEETH is what keeps them apart.
+   * Both halves are asked for explicitly and neither is left to be inferred. The prompt
+   * deliberately avoids the old superlatives and their negations; it describes a compact
+   * open smile, measures the visible opening against the source the model can see, and
+   * lets LAUGH_TEETH keep the result distinct from `aa` without purchasing that
+   * distinction with extra width.
    */
   {
     id: 'laugh',
     label: 'Laugh',
     region: 'mouth',
     prompt: mouth(
-      'Open the mouth into a laugh. Drop the jaw exactly as far as a plain open mouth and no further — an opening about as tall as the closed mouth is wide, and no wider than the closed mouth — and at the same time lift both corners so the opening rises at each end into an upward curve instead of a level oval. Show the upper teeth as one simple white band along the top and the lower teeth as a shallower white band along the bottom, with a plain dark interior between them. This is not a broad, wide or exaggerated laugh: it is an open mouth that is smiling, the same size as a plain open mouth. The result has to be plainly distinguishable from a plain open mouth, because the corners are lifted rather than level and the lower teeth show as well as the upper; and from a closed smile, because the jaw is genuinely dropped and the teeth and the dark interior are visible. No dimples and no creases.',
+      'Create a compact open smile that reads as delighted rather than surprised. Communicate the expression with lifted corners and two visible tooth bands while keeping the visible opening compact.',
       LAUGH_NOTE,
     ),
   },
