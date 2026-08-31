@@ -43,6 +43,7 @@ import {
   NEUTRALISE_BASE_PROMPT,
   SMILE_BASE_PROMPT,
   GLASSES_FREE_PREAMBLE,
+  LAUGH_FROM_OPEN_REFERENCE,
   REMOVE_GLASSES_PREAMBLE,
   REMOVE_GLASSES_PROMPT,
   BROW_BOXES,
@@ -758,17 +759,23 @@ export default function FaceKit() {
     setError(null);
 
     try {
-      // Always generated from the neutral base, even while the page is showing
-      // the smile one. The mouth and eye poses are written against a closed,
-      // relaxed rest pose, and a smile is a rest pose the face can wear — not
-      // one the poses are measured from. A kit with no neutral base yet falls
-      // back to the active base, which is the behaviour every kit had before
-      // either pose could be chosen.
+      // Generated from the neutral base even while the page is showing the
+      // smile one. The deliberate exception is laugh: an accepted AA patch is
+      // composited into the source to give the model the exact width and jaw
+      // geometry it must preserve. Without AA, laugh keeps the legacy fallback.
+      const neutralBase = kit.bases?.neutral ?? kit.base;
+      const openReference = id === 'laugh' ? kit.patches.aa : undefined;
+      const generationBase = openReference
+        ? await composite(neutralBase, [{ patch: openReference, box: kit.boxes.mouth }])
+        : neutralBase;
       const result = await generatePatch({
         modelKey,
-        base: kit.bases?.neutral ?? kit.base,
+        base: generationBase,
         box: kit.boxes[definition.region],
-        instruction: definition.prompt(kit.lashes ?? DEFAULT_LASH_STYLE, Boolean(kit.eyewear)),
+        instruction: [
+          definition.prompt(kit.lashes ?? DEFAULT_LASH_STYLE, Boolean(kit.eyewear)),
+          ...(openReference ? [LAUGH_FROM_OPEN_REFERENCE] : []),
+        ].join(' '),
         preamble: kit.eyewear ? GLASSES_FREE_PREAMBLE : undefined,
         label: definition.label,
         imageFirst,

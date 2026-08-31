@@ -549,6 +549,20 @@ const FV_NOTE = [MBP_COMPRESSES, WIDTH_CAP, MOUTH_STYLE, TEETH_BAND, FACE_FIXED]
 const OPEN_NOTE = [CORNERS_FIXED, WIDTH_CAP, MOUTH_STYLE, TEETH_BAND, JAW_DROPS].join(' ');
 const LAUGH_NOTE = [LAUGH_OPENS, WIDTH_CAP, MOUTH_STYLE, LAUGH_TEETH].join(' ');
 
+/**
+ * Added when the accepted AA patch is composited into the generation source.
+ * The exact neighbouring pose is a stronger size constraint than another
+ * adjective in a prompt the model has already ignored.
+ */
+export const LAUGH_FROM_OPEN_REFERENCE = [
+  'The input portrait already shows the accepted plain open mouth for this character.',
+  'Use that existing opening as fixed geometry: preserve its exact outer corner positions,',
+  'width, height, jaw drop and chin position. Do not enlarge, replace or redraw it as a',
+  'broader mouth. Change only the expression cues that turn it into a laugh: lift the two',
+  'corners vertically into an upward curve without moving them outward, and add the shallow',
+  'lower-teeth band described above.',
+].join(' ');
+
 const mouth =
   (shape: string, note: string = MOUTH_NOTE) =>
   (): string =>
