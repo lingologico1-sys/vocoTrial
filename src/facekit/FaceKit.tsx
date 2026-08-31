@@ -782,6 +782,10 @@ export default function FaceKit() {
 
   const run = async (id: SlotId, modelKey: string) => {
     if (!kit) return;
+    if (id === 'laugh' && !kit.patches.aa) {
+      setError('Keep an Open (AA) pose before generating Laugh');
+      return;
+    }
     const definition = slot(id);
     const key = `${id}:${modelKey}`;
     mark(key, 1);
@@ -791,7 +795,8 @@ export default function FaceKit() {
       // Generated from the neutral base even while the page is showing the
       // smile one. The deliberate exception is laugh: an accepted AA patch is
       // composited into the source to give the model the exact width and jaw
-      // geometry it must preserve. Without AA, laugh keeps the legacy fallback.
+      // geometry it must preserve. The UI and guard above require AA for Laugh,
+      // so every reachable Laugh generation takes the constrained path below.
       const neutralBase = kit.bases?.neutral ?? kit.base;
       const openReference = id === 'laugh' ? kit.patches.aa : undefined;
       const laughInsert = openReference
@@ -1198,7 +1203,35 @@ export default function FaceKit() {
   })();
 
   const accept = (id: SlotId, candidate: Candidate) => {
-    edit((current) => ({ ...current, patches: { ...current.patches, [id]: candidate.patch } }));
+    edit((current) => {
+      const patches = { ...current.patches, [id]: candidate.patch };
+      // A constrained Laugh is AA plus a smaller generated insert. Replacing
+      // AA therefore replaces part of Laugh's foundation; keeping the old
+      // composite would make the two poses disagree before either one moved.
+      if (id === 'aa') delete patches.laugh;
+      return { ...current, patches };
+    });
+    if (id === 'aa') {
+      setCandidates((current) => {
+        const next = { ...current };
+        delete next.laugh;
+        return next;
+      });
+    }
+  };
+
+  /** A Laugh made under another boundary no longer satisfies this constraint. */
+  const changeLaughInsert = (laughInsert: Box) => {
+    edit((current) => {
+      const patches = { ...current.patches };
+      delete patches.laugh;
+      return { ...current, laughInsert, patches };
+    });
+    setCandidates((current) => {
+      const next = { ...current };
+      delete next.laugh;
+      return next;
+    });
   };
 
   /** Everything cut from this portrait so far, accepted or merely offered. */
@@ -1835,6 +1868,7 @@ export default function FaceKit() {
                 const options = candidates[entry.id] ?? [];
                 const current = kit.patches[entry.id];
                 const busyKey = `${entry.id}:${MODEL_KEY}`;
+                const missingLaughReference = entry.id === 'laugh' && !kit.patches.aa;
                 const laughInsert =
                   entry.id === 'laugh' && kit.patches.aa
                     ? kit.laughInsert ?? defaultLaughInsert(kit.boxes.mouth)
@@ -1862,9 +1896,15 @@ export default function FaceKit() {
                       <div className="flex flex-wrap gap-1.5 pt-1">
                         <button
                           type="button"
-                          disabled={Boolean(busy[busyKey] || eyewearCandidate)}
+                          disabled={Boolean(
+                            busy[busyKey] || eyewearCandidate || missingLaughReference
+                          )}
                           onClick={() => void run(entry.id, MODEL_KEY)}
-                          title={findImageModel(MODEL_KEY)?.label}
+                          title={
+                            missingLaughReference
+                              ? 'Keep an Open (AA) pose first'
+                              : findImageModel(MODEL_KEY)?.label
+                          }
                           className="rounded-md border border-slate-700 px-2 py-1 text-[11px] text-slate-300 hover:border-slate-500 disabled:opacity-40"
                         >
                           {busy[busyKey] ? busyMark(busy[busyKey]) : current ? 'Again' : 'Generate'}
@@ -2008,9 +2048,7 @@ export default function FaceKit() {
                                 image={laughReference}
                                 mouth={kit.boxes.mouth}
                                 insert={laughInsert}
-                                onChange={(next) =>
-                                  edit((current) => ({ ...current, laughInsert: next }))
-                                }
+                                onChange={changeLaughInsert}
                               />
                             </div>
                           ) : (
