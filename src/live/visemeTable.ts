@@ -37,11 +37,21 @@
  * only through a boolean on Face, scheduled for idle moments. Naming it here lets a mark
  * select it, which is what a laugh needs: a face smiles a beat before it laughs, and an
  * expression that arrives at the same instant as the sound reads as a flinch.
+ *
+ * `st` is the newest, and the only one added because a *count* was wrong rather than
+ * because a shape was missing. Measured over the three alignments in lipsync/assets, `ee`
+ * was on screen for 41% of an English lesson and worn by half its marks, holding still
+ * across three or more phonemes twenty-three times a minute — which is what a mouth that
+ * does not look alive is, stated as a number. A quarter of those marks are `s` and `t`,
+ * and moving them here roughly halves `ee`'s share for the cost of one image. It fires in
+ * every language rather than only in English, because `t` is where French, Polish,
+ * Mandarin, Cantonese, Korean, Russian and Arabic all send /l/.
  */
 export type Viseme =
   | 'rest'
   | 'mbp'
   | 'fv'
+  | 'st'
   | 'ee'
   | 'uh'
   | 'aa'
@@ -109,7 +119,7 @@ export type PollyViseme =
  * somewhere to go, which is the same guarantee facekit/slots.ts gets from the
  * `Viseme` union it keys on.
  *
- * Four of Polly's distinctions are dropped because a flat patch cannot carry
+ * Three of Polly's distinctions are dropped because a flat patch cannot carry
  * them, and that was measured rather than assumed. Running patchDivergence over
  * the shipped kit puts the closest existing pair — `rest` against `mbp`, which
  * is a whole category of lip tension — at 7.9% of centre pixels, against a 4%
@@ -120,12 +130,21 @@ export type PollyViseme =
  *
  *   k     the tongue is pulled back *out of sight*, so there is no pixel that
  *         could differ from a plain open mouth
- *   t     the tongue sits behind the upper teeth, which is to say hidden
  *   T     a tongue tip on the teeth is the one genuinely new shape available,
  *         and it is ð/θ — English and Castilian only, in a face that otherwise
- *         carries no per-language artwork at all
+ *         carries no per-language artwork at all. Six marks in fifty-six seconds
+ *         of English and none at all in French, which is what it would buy
  *   @     "barely open, relaxed" sits between `rest` and `uh`, nearer to each
  *         than they are to one another
+ *
+ * `t` was a fourth until `st` existed, and it was dropped on a true premise that
+ * turned out not to be the whole one: the tongue does sit hidden behind the upper
+ * teeth, so there is no tongue to draw. What that reasoning missed is that the
+ * *jaw* is not hidden. /s z t d n/ are made with the teeth close to meeting, and
+ * two rows of teeth nearly touching in a mouth drawn narrower is a shape a flat
+ * patch can carry perfectly well — see the `st` slot in facekit/slots.ts, which is
+ * written against `ee` and `fv` on exactly that pair of cues. `s` moves with it
+ * for the same reason, and the two together are a quarter of all marks.
  *
  * `S` goes the other way and is the reason this file earns its keep. The
  * analyser sends every sibilant to `ee` because it sorts them by brightness;
@@ -158,27 +177,45 @@ export const POLLY_VISEMES: Record<PollyViseme, Viseme> = {
   B: 'mbp',
 
   /*
+   * The alveolars: teeth close to meeting, mouth narrowed rather than spread.
+   *
+   * `l` MOVED HERE WITH `t`, AND HAD TO. It used to sit with the spread poses
+   * below, under a note that is worth restating because it is the whole argument:
+   * /l/ reaches us as viseme `l` from English and as viseme `t` from French,
+   * Polish, Mandarin, Cantonese, Korean, Russian and Arabic. Split between two
+   * poses, the same sound would change shape according to which language table
+   * Polly happened to use — a difference with no counterpart in anything the
+   * speaker did — and they are better wrong together than inconsistent.
+   *
+   * That note was written when `t` and `l` both meant `ee`, so it held for free.
+   * Moving `t` here and leaving `l` behind would have broken it in the one
+   * direction it exists to forbid: an English "l" spread, a French "l" narrowed,
+   * the same phoneme wearing two mouths for no reason a listener could point at.
+   * So `l` comes along, and the phonetics agrees rather than merely tolerating it
+   * — /l/ is alveolar, made in the same place as /t d n/, with the tongue tip on
+   * the same ridge and the jaw about as close.
+   */
+  t: 'st',
+  l: 'st',
+  s: 'st',
+
+  /*
    * Near-closed and spread. A shallow slot with a band of teeth in it, which is
    * what all of these look like from the front once the tongue is discounted.
-   *
-   * `l` sits here rather than with the neutral openings, and against what the
-   * note on `uh` in visemes.ts says, for a reason that only shows up across
-   * languages: /l/ reaches us as viseme `l` from English and as viseme `t` from
-   * French, Polish, Mandarin, Cantonese, Korean, Russian and Arabic. Split
-   * between two poses, the same sound would change shape according to which
-   * language table Polly happened to use — a difference with no counterpart in
-   * anything the speaker did. They are better wrong together than inconsistent.
    *
    * `J` is the alveolo-palatal series, and it belongs here rather than with `S`
    * despite both being "sh-like" to an English ear. ʃ is protruded and rounded;
    * ɕ and t͡ɕ are made with the lips spread or neutral. Mandarin *xi* and *shi*
    * genuinely look different, and this is the pair that carries it.
+   *
+   * `T` stays here rather than following `t` to `st`, and the distinction is not
+   * arbitrary. What `st` draws is two rows of teeth nearly meeting; ð/θ is a
+   * tongue tip *between* them, which is the one shape `st` must not show — a
+   * visible tongue on every "s" is a lisp. Wrong with the spread poses is a
+   * smaller error than wrong with the narrow ones.
    */
-  t: 'ee',
   T: 'ee',
   J: 'ee',
-  l: 'ee',
-  s: 'ee',
   i: 'ee',
   e: 'ee',
   E: 'ee',
@@ -221,3 +258,23 @@ export interface VisemeMark {
   /** What the face wears for it. */
   viseme: Viseme;
 }
+
+/**
+ * Re-resolves stored marks against the table as it stands now.
+ *
+ * For packages, and only for packages. Both live parse paths — parseSpeechMarks in
+ * polly.ts and parseMfaMarks in mfa.ts — derive `viseme` from `polly` on the way in, so
+ * they are current by construction and never need this. A saved lipsync package is the
+ * one place a pose is written down and kept, which means every package baked before a
+ * mapping changed is carrying the old answer. Running them through here on load is what
+ * lets `s` and `t` reach `st` without anybody rebaking a library.
+ *
+ * THE GUARD IS THE POINT. A mark with no `polly` was never selected by a phone — it is a
+ * laugh or a smile, spliced in from an audio tag by lipsync/tags.ts, and there is nothing
+ * to recompute it from. Recomputing those would not merely be wrong, it would be
+ * destructive: `POLLY_VISEMES` has no entry to consult, so a laugh would resolve to
+ * undefined and the mouth would go blank in the middle of laughter. They keep what they
+ * were stored with, which is the only record of them there is.
+ */
+export const reposed = (marks: readonly VisemeMark[]): VisemeMark[] =>
+  marks.map((mark) => (mark.polly ? { ...mark, viseme: POLLY_VISEMES[mark.polly] } : mark));

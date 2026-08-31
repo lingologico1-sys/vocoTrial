@@ -367,6 +367,33 @@ interface FaceProps {
 const toHead = (value: number) => (value / CANVAS_EDGE) * 200;
 
 /**
+ * What a pose wears when the kit has no artwork for it.
+ *
+ * Kits are older than the pose vocabulary and always will be: a face published before a
+ * slot existed has no patch for it, and `patches` is a Partial for exactly that reason.
+ * What that costs, without a line here, is not a fallback but a hole — every patch sits at
+ * opacity 0 and the base portrait's own mouth shows through, which is a still, closed
+ * mouth in the middle of whatever was being said.
+ *
+ * A table rather than the run of `id === x && viseme === y` branches this replaces,
+ * because the branches turned out to be a list nobody was keeping. `laugh` had one.
+ * `fv` did not, and needed one just as badly — the bundled kit in public/faces has no
+ * `fv` patch, so the default face has been showing its portrait mouth on every "f" and
+ * "v" since the slot was added, about nineteen marks per English lesson, unnoticed
+ * because nothing announces a patch that paints nothing. Written down, the omission is
+ * visible; branched, it was not.
+ *
+ * Each entry names the nearest pose that every kit is known to have. `st` and `fv` fall
+ * to `ee`, the shape they are both a narrowing of; `laugh` falls to `aa`, the open vowel
+ * it is built from.
+ */
+const POSE_FALLBACK: Partial<Record<Viseme, SlotId>> = {
+  st: 'ee',
+  fv: 'ee',
+  laugh: 'aa',
+};
+
+/**
  * Every mouth pose a kit can hold, listed so all of them can stay mounted.
  *
  * Spelled out rather than read off the kit's own keys, so the set of <image>
@@ -375,9 +402,9 @@ const toHead = (value: number) => (value / CANVAS_EDGE) * 200;
  *
  * Being a plain array, this is the one place a new Viseme does not announce
  * itself: nothing here is exhaustive, so a shape left out is simply a patch
- * that never paints. `fv` is listed for that reason and no other — the audio
- * analyser cannot select it, so today it sits at opacity 0 for the whole of
- * every call, waiting for a driver that can.
+ * that never paints. `fv` and `st` are listed for that reason and no other —
+ * the audio analyser can select neither, so under it they sit at opacity 0 for
+ * the whole of every call, waiting for the mark-driven driver that can.
  */
 /**
  * How much of each mouth patch shows.
@@ -389,27 +416,27 @@ const toHead = (value: number) => (value / CANVAS_EDGE) * 200;
  *           so a mark-driven smile is not dimmed by an idle timer that is not running.
  *   mbp     carries the lip press as well as the phoneme, which is why it has never
  *           simply been "1 when selected".
- *   laugh   falls back to `aa` on a kit that has no laugh patch. Every face published
- *           before the pose existed is such a kit, and the alternative to falling back
- *           is a laugh painting nothing and the base portrait's own mouth showing
- *           through — a still, closed mouth in the middle of laughter.
+ *   fallback a pose the kit has no artwork for paints its stand-in instead. See
+ *           POSE_FALLBACK, and note the order: the fallback is consulted only when the
+ *           real patch is absent, so a kit that has the artwork is unaffected by any of
+ *           this.
  */
 function patchOpacity(
   id: SlotId,
   viseme: Viseme,
   smiled: number,
   pressed: number,
-  noLaughPatch: boolean,
+  has: (id: SlotId) => boolean,
 ): number {
   if (id === 'smile') return Math.max(smiled, viseme === 'smile' ? 1 : 0);
-  if (id === 'aa' && viseme === 'laugh' && noLaughPatch) return 1;
   if (viseme === id) return 1;
+  if (!has(viseme) && POSE_FALLBACK[viseme] === id) return 1;
   if (id === 'mbp') return pressed;
   return 0;
 }
 
 const VISEME_ORDER: SlotId[] = [
-  'rest', 'mbp', 'fv', 'ee', 'uh', 'aa', 'oh', 'laugh', 'smile',
+  'rest', 'mbp', 'fv', 'st', 'ee', 'uh', 'aa', 'oh', 'laugh', 'smile',
 ];
 
 /**
@@ -895,6 +922,8 @@ export default function Face({
    */
   if (kit) {
     const mouth = kit.boxes.mouth;
+    /** Whether this kit actually carries a pose, which is what POSE_FALLBACK turns on. */
+    const hasPatch = (id: SlotId) => Boolean(kit.patches[id]);
 
     /**
      * The overscan, as a transform about the centre of the frame.
@@ -1171,7 +1200,7 @@ export default function Face({
                   y={toHead(mouth.y)}
                   width={toHead(mouth.width)}
                   height={toHead(mouth.height)}
-                  opacity={patchOpacity(id, viseme, smiled, pressed, !kit.patches.laugh)}
+                  opacity={patchOpacity(id, viseme, smiled, pressed, hasPatch)}
                   style={
                     id === 'smile'
                       ? {

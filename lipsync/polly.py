@@ -36,11 +36,14 @@ from pathlib import Path
 
 SOURCE = Path(__file__).resolve().parent.parent / "src" / "live" / "visemeTable.ts"
 
-# The seven the artwork has. facekit/slots.ts keys its slots on this exact union, so a
+# Every pose the artwork has. facekit/slots.ts keys its slots on this exact union, so a
 # pose outside it is a pose no kit was ever generated for.
-# `laugh` is here for completeness and is never produced by POLLY_VISEMES: no phone
-# selects it, because a laugh is not a speech sound. It comes from an audio tag.
-POSES = {"rest", "mbp", "fv", "ee", "uh", "aa", "oh", "laugh"}
+# `laugh` and `smile` are here for completeness and neither is ever produced by
+# POLLY_VISEMES: no phone selects either, because neither is a speech sound. A laugh comes
+# from an audio tag, a smile from the page. `smile` was missing from this set for as long
+# as it has been a Viseme -- harmlessly, since nothing routes to it, but the set claims to
+# be the whole union and was quietly not.
+POSES = {"rest", "mbp", "fv", "st", "ee", "uh", "aa", "oh", "laugh", "smile"}
 
 _BLOCK = re.compile(
     r"export const POLLY_VISEMES\s*:\s*Record<[^>]+>\s*=\s*\{(.*?)^\};",

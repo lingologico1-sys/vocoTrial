@@ -1,3 +1,4 @@
+import { reposed } from '../live/visemeTable';
 import type { Quota } from './cost';
 import type {
   LaughKind,
@@ -113,10 +114,31 @@ export async function listLines(): Promise<PublishedLine[]> {
   return lines;
 }
 
-export function fetchLine(
+/**
+ * One saved line, with its poses re-resolved on the way in.
+ *
+ * A package is the only place a pose is written down and kept. Everything else derives
+ * one from the Polly identifier at the moment it parses — parseSpeechMarks in live/polly.ts
+ * and parseMfaMarks in live/mfa.ts both do — so everything else is current by construction
+ * and a table change reaches it for free. A package is not: it was baked once, against the
+ * table as it stood that day, and it will happily play back a mapping two revisions old.
+ *
+ * `reposed` is what closes that gap, and it is why the marks carry `polly` at all rather
+ * than only the pose the mouth ends up wearing. The identifier is the durable fact — it is
+ * what the aligner actually said — and the pose is an opinion about it that this build is
+ * entitled to revise. So a library baked before `st` existed plays with `st` in it, and
+ * nobody rebakes anything.
+ *
+ * Done here rather than in the Worker on purpose: the stored object stays exactly as it
+ * was written, so a package is still a record of what was made rather than something the
+ * server quietly rewrites underneath it. See reposed in live/visemeTable.ts for the guard
+ * that keeps spliced laughs and smiles out of it.
+ */
+export async function fetchLine(
   id: string,
 ): Promise<{ package: LipsyncPackage; audioBase64?: string }> {
-  return post<{ package: LipsyncPackage; audioBase64?: string }>('get', { id });
+  const got = await post<{ package: LipsyncPackage; audioBase64?: string }>('get', { id });
+  return { ...got, package: { ...got.package, marks: reposed(got.package.marks) } };
 }
 
 /**

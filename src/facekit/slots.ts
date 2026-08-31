@@ -327,6 +327,33 @@ const CORNERS_FIXED = [
 ].join(' ');
 
 /**
+ * The one pose that is allowed to move its corners inward, and only inward.
+ *
+ * CORNERS_FIXED cannot be reused here, and that is not a preference. Narrowing is `st`'s
+ * entire differentiating cue: what separates it from `ee` is that the mouth is drawn in
+ * where `ee` is the widest shape in the kit, and a clause pinning the corners in place
+ * forbids the one thing the pose exists to do. So this is CORNERS_FIXED with the
+ * direction reversed, in the same way MBP_COMPRESSES and SMILE_SPREADS are — each pose
+ * that needs a movement gets a note licensing that movement and no other.
+ *
+ * THE CAP IS THE WHOLE OF IT, because the warning on CORNERS_FIXED applies with the sign
+ * flipped: a generator given any licence over the corners spends all of it. Spent
+ * outward that produced a grin, twice. Spent inward it would produce a purse, and a
+ * pursed narrow mouth is `oh` — which is the pose sitting closest in width, at w: 12
+ * against this one's 17. Hence a tenth, stated as a proportion of something already in
+ * the picture rather than as an adjective, and hence the explicit refusal of rounding:
+ * the corners come in, the lips do not push forward.
+ */
+const ST_NARROWS = [
+  'Keep the lips the same colour, thickness and line weight as the original, and',
+  'keep the mouth centred exactly where it is. The outer corners draw inward a',
+  'little — each corner travels inward by at most a tenth of the width of the',
+  'closed mouth, and no further — so the mouth ends up slightly narrower than the',
+  'closed mouth it was drawn from, never wider. It does not slide, tilt or grow,',
+  'and the lips are not pursed, pouted, rounded or pushed forward.',
+].join(' ');
+
+/**
  * The ceiling, stated once, applied to every mouth pose.
  *
  * CORNERS_FIXED already forbids widening, so this looks redundant and is not. That
@@ -419,6 +446,26 @@ const TEETH_BAND = [
   'edge: no individual teeth, no dividing lines, outlines or gaps between them,',
   'and no scalloped, wavy, pointed or jagged edge anywhere along it.',
   'The band is the same plain white across its whole width.',
+].join(' ');
+
+/**
+ * The same rule for the one pose that shows two rows instead of one.
+ *
+ * Everything after the opening clause is TEETH_BAND verbatim, and deliberately so: what
+ * that note argues — that the band is a mark rather than anatomy, and that this art style
+ * has no line work fine enough to separate one tooth from the next — is not about how
+ * many rows there are. Only the count changes.
+ *
+ * It is a separate constant rather than a parameter because TEETH_BAND's first six words
+ * are load-bearing in the other direction: "one single unbroken white band" is what stops
+ * `ee` and `aa` drawing a second row they should not have. Softening it to "one or two"
+ * everywhere would trade this pose's problem for theirs.
+ */
+const TEETH_ROWS = [
+  'Draw each row of teeth as one single unbroken white band with a flat, straight',
+  'edge: no individual teeth, no dividing lines, outlines or gaps between them,',
+  'and no scalloped, wavy, pointed or jagged edge anywhere along either.',
+  'Both bands are the same plain white across their whole width.',
 ].join(' ');
 
 /** What holds still when the jaw holds still, which is most of the time. */
@@ -548,6 +595,8 @@ const MBP_NOTE = [MBP_COMPRESSES, WIDTH_CAP_SLIGHT, MOUTH_STYLE, FACE_FIXED].joi
 const TEETH_NOTE = [CORNERS_FIXED, WIDTH_CAP, MOUTH_STYLE, TEETH_BAND, FACE_FIXED].join(' ');
 /** The one pose that both shows teeth and thins a lip. */
 const FV_NOTE = [MBP_COMPRESSES, WIDTH_CAP, MOUTH_STYLE, TEETH_BAND, FACE_FIXED].join(' ');
+/** The one pose that narrows, and the only one showing both rows of teeth. */
+const ST_NOTE = [ST_NARROWS, WIDTH_CAP, MOUTH_STYLE, TEETH_ROWS, FACE_FIXED].join(' ');
 const OPEN_NOTE = [CORNERS_FIXED, WIDTH_CAP, MOUTH_STYLE, TEETH_BAND, JAW_DROPS].join(' ');
 const LAUGH_NOTE = [LAUGH_OPENS, LAUGH_STYLE, LAUGH_TEETH].join(' ');
 
@@ -635,6 +684,47 @@ export const SLOTS: Slot[] = [
     prompt: mouth(
       'Rest the upper front teeth directly on the lower lip, as when beginning to say "f". Compared with a relaxed closed mouth, the upper lip lifts only slightly, uncovering a narrow strip of upper teeth, and the lower lip draws back and tucks in under that strip so that its coloured area ends up clearly thinner than the upper lip\'s. The teeth sit against the lip along their whole width, and the mouth is not open: there is no dark gap, no dark opening and no dark shadow anywhere between the teeth and the lower lip, and no part of the inside of the mouth is visible. The mouth also stays as wide as it was, with the corners where they were and no smile or spread. The result has to be plainly distinguishable from a parted mouth with teeth showing: the only shapes here are lip, teeth and lip, with nothing dark between them.',
       FV_NOTE,
+    ),
+  },
+  /*
+   * The pose added because a number was wrong rather than because a shape was missing.
+   *
+   * `ee` was on screen for 41% of an English lesson and worn by half its marks — see the
+   * note on Viseme in live/visemeTable.ts for the measurement. A quarter of those marks
+   * are `s` and `t`, and this is where they went.
+   *
+   * WRITTEN AGAINST TWO NEIGHBOURS, NOT ONE, and that is the whole risk of the pose. It
+   * lands in the crowded end of the range — rest, mbp, fv and ee are all near-closed, and
+   * the entire measured spread from rest to ee is 15.2% of centre pixels — so the fv/ee
+   * collision recorded above is not a cautionary tale here, it is the default outcome.
+   * Both of those prompts described a white band between two lips, and both got one.
+   *
+   * So, on two cues each, against both:
+   *
+   *   vs ee    the width, and the shape count. ee is the widest thing in the kit and
+   *            spreads; this draws in. ee is one white band over a dark strip over lip;
+   *            this is two white bands with a hairline between them.
+   *   vs fv    what sits below the upper teeth. On fv that is lip, thinned and tucked,
+   *            with nothing dark anywhere. Here it is a second row of teeth, and the
+   *            lower lip keeps its full thickness.
+   *
+   * Width is the cue worth having because nothing else in the kit uses it: mbp and fv
+   * both hold their width or gain a trace, ee spreads, and only oh is narrower — and oh
+   * is a rounded hole with no teeth in it at all. See ST_NARROWS for why the licence to
+   * narrow is capped rather than open.
+   *
+   * NO TONGUE, and that is not a style note. A tongue tip showing between the teeth is
+   * ð/θ, and this pose is worn on every /s/ — a visible tongue here would draw a face
+   * that lisps its way through every sentence. It is also why `T` stays on ee rather than
+   * following `t` down here.
+   */
+  {
+    id: 'st',
+    label: 'Narrow (S / T)',
+    region: 'mouth',
+    prompt: mouth(
+      'Bring the teeth together and narrow the mouth a little, as when saying "s". Both rows of front teeth show as two white bands meeting edge to edge across the whole width of the opening, separated only by a hairline of dark no thicker than the line the lips are drawn with. The jaw barely moves and the corners draw inward slightly, so the mouth ends up clearly narrower than a spread one. Both lips keep their full natural thickness and their existing shape, and neither is drawn back, tucked or thinned. The result has to be plainly distinguishable from a spread mouth showing one band of teeth, because there are two white bands here and the mouth is narrower rather than wider; and from teeth resting on the lower lip, because the shape directly below the upper teeth is a second row of teeth and not lip. Show no tongue anywhere, and no dark cavity or opening beyond that single hairline.',
+      ST_NOTE,
     ),
   },
   {

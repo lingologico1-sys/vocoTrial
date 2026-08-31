@@ -89,6 +89,17 @@ export const VISEMES: Record<Viseme, LipShape> = {
    * no artwork.
    */
   fv: { w: 21, up: 2.8, down: 1 },
+  /**
+   * The alveolars: "s", "z", "t", "d", "n", "l". Narrow and barely open.
+   *
+   * Like `fv`, only ever selected by a text-driven driver — the analyser sorts sibilants
+   * by brightness and cannot tell an /s/ from an /iː/. And like `fv`, the drawn fallback
+   * gets the poorer half of the pose: what separates this from `ee` on a kit is two rows
+   * of teeth nearly meeting, and a two-arc mouth has no teeth to draw. Width is what is
+   * left, so it is the width that carries it — narrower than `rest` where `ee` is the
+   * widest shape in the table, which is at least the right direction and is visible.
+   */
+  st: { w: 17, up: 1.6, down: 2.4 },
   /** Spread and half open: "ee", and the sibilants that share its brightness. */
   ee: { w: 27, up: 4, down: 5.5 },
   /** Rounded and half open: "uh", "l". */
@@ -636,11 +647,11 @@ export class MouthAnalyser {
 
   /** Two openness levels at once — worth breaking the hold for. */
   private isJump(next: Viseme): boolean {
-    // `fv` sits with mbp because it is the same openness — near shut — even
-    // though nothing here can classify into it. Ranked rather than excluded so
-    // that the table stays a complete statement about the shapes.
+    // `fv` and `st` sit with mbp because they are the same openness — near shut —
+    // even though nothing here can classify into either. Ranked rather than
+    // excluded so that the table stays a complete statement about the shapes.
     const rank: Record<Viseme, number> = {
-      rest: 0, smile: 0, mbp: 1, fv: 1, ee: 2, uh: 2, aa: 3, oh: 3, laugh: 3,
+      rest: 0, smile: 0, mbp: 1, fv: 1, st: 1, ee: 2, uh: 2, aa: 3, oh: 3, laugh: 3,
     };
     return Math.abs(rank[next] - rank[this.viseme]) >= 2;
   }

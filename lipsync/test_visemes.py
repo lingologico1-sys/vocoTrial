@@ -98,9 +98,56 @@ def test_english_postalveolars_round():
         ("ʒ", "oh"),    # vision
         ("tʃ", "oh"),   # chose
         ("dʒ", "oh"),   # judge
-        ("s", "ee"),    # and the plain sibilant stays spread
-        ("z", "ee"),
+        ("s", "st"),    # and the plain sibilant is narrow, not spread
+        ("z", "st"),
     ], "postalveolar")
+
+
+def test_alveolars_are_narrow():
+    """
+    The pose `st` was added for, and the reason it was worth an image.
+
+    `ee` was on screen for 41% of an English lesson and worn by half its marks -- a mouth
+    that holds one shape through three or more phonemes, twenty-three times a minute. A
+    quarter of all marks are these, and moving them off `ee` roughly halves its share.
+    """
+    assert not check([
+        ("s", "st"),    # sue
+        ("z", "st"),    # zed
+        ("t", "st"),    # ted
+        ("d", "st"),    # did
+        ("n", "st"),    # not
+    ], "alveolar")
+
+
+def test_l_does_not_split_by_language():
+    """
+    THE CONSTRAINT THAT DECIDED WHERE /l/ WENT, and it is not about /l/ looking right.
+
+    Polly routes /l/ two ways: viseme `l` from English, viseme `t` from French, Polish,
+    Mandarin, Cantonese, Korean, Russian and Arabic. While both meant `ee` that cost
+    nothing. Moving `t` to `st` and leaving `l` behind would have split one phoneme across
+    two poses according to which language table Polly happened to use -- the same sound
+    wearing two mouths for a reason no listener could point at.
+
+    So this asserts the property rather than the destination: wherever the two go, they go
+    together. visemeTable.ts states the same rule in prose.
+    """
+    assert POLLY_VISEMES["l"] == POLLY_VISEMES["t"], (
+        f'/l/ splits by language: `l` -> {POLLY_VISEMES["l"]}, `t` -> {POLLY_VISEMES["t"]}'
+    )
+
+
+def test_dentals_stay_clear_of_the_narrow_pose():
+    """
+    Why th did not follow t down to `st`, having been considered and rejected.
+
+    What `st` draws is two rows of teeth nearly meeting. A tongue tip between them is the
+    one shape it must never show, because this pose is worn on every /s/ and a visible
+    tongue there is a lisp on every sentence. Six marks in fifty-six seconds of English
+    and none at all in French is what a separate th pose would have bought.
+    """
+    assert not check([("θ", "ee"), ("ð", "ee")], "dental")
 
 
 def test_the_six_the_original_map_dropped():
@@ -124,11 +171,11 @@ def test_dialect_phones_the_build_assertion_caught():
     is what it actually contained.
     """
     assert not check([
-        ("ʈ", "ee"),     # retroflex t, Indian English
-        ("ɖ", "ee"),     # retroflex d
-        ("ʈʲ", "ee"),    # and with modifiers normalise already strips
-        ("ʈʷ", "ee"),
-        ("ɫ", "ee"),     # dark l, "full" -- precomposed, so normalise cannot reach it
+        ("ʈ", "st"),     # retroflex t, Indian English
+        ("ɖ", "st"),     # retroflex d
+        ("ʈʲ", "st"),    # and with modifiers normalise already strips
+        ("ʈʷ", "st"),
+        ("ɫ", "st"),     # dark l, "full" -- precomposed, so normalise cannot reach it
         ("ʋ", "fv"),     # labiodental approximant: teeth still meet lip
         ("ɜ", "uh"),     # NURSE vowel, non-rhotic "bird"
         ("ɜː", "uh"),

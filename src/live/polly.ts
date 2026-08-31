@@ -75,6 +75,17 @@ const POSE_LEVEL: Record<Viseme, number> = {
   rest: 0,
   mbp: 0.2,
   fv: 0.22,
+  /**
+   * Between `fv` and `ee`, which is where the mouth is and also where the sound is.
+   *
+   * These are consonants, so the honest reading is quiet; but they are the loudest thing
+   * a nearly-shut mouth does — a sibilant carries, and a released /t/ is a burst — so
+   * they outrank the labiodental. Clear of SILENCE (0.12) by the same margin everything
+   * else here is, and for the reason given above: the lip press is gated on `level <
+   * SILENCE` being the same test as `viseme === 'rest'`, and a speaking pose that dipped
+   * under the line would be handed a mouth that looks silent while it is talking.
+   */
+  st: 0.3,
   ee: 0.45,
   uh: 0.5,
   aa: 0.95,

@@ -36,6 +36,7 @@ LOOKS = {
     "rest": "closed, relaxed, faintly upturned",
     "mbp": "lips pressed shut, thinner than rest",
     "fv": "upper teeth resting on the lower lip",
+    "st": "narrow, two rows of teeth meeting, jaw nearly shut",
     "ee": "spread, a shallow slot with a band of teeth",
     "uh": "a small soft oval, jaw barely dropped",
     "aa": "wide open, jaw dropped, teeth along the top",
