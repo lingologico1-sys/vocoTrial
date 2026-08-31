@@ -1,0 +1,7 @@
+{
+    "chat.artifacts.rules.byMemoryFilePath": {
+        "**/*plan*.md": {
+            "groupName": "Plans"
+        }
+    }
+}
