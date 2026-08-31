@@ -64,6 +64,8 @@ interface GenerateArgs {
    * the page. Absent means the order this app has always sent.
    */
   imageFirst?: boolean;
+  /** Optional Vertex sampling temperature. Omitted to retain the model default. */
+  temperature?: number;
   signal?: AbortSignal;
   onAttempt?: OnAttempt;
 }
@@ -371,6 +373,7 @@ export async function generatePatch({
   preamble = PREAMBLE,
   label,
   imageFirst,
+  temperature,
   signal,
   onAttempt,
 }: GenerateArgs): Promise<Generated> {
@@ -393,6 +396,7 @@ export async function generatePatch({
         prompt: `${preamble} ${instruction}`,
         image: flattened,
         imageFirst,
+        temperature,
       },
       run,
       modelKey,

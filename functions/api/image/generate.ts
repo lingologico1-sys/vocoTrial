@@ -39,6 +39,7 @@ interface GenerateBody {
   prompt?: unknown;
   image?: unknown;
   imageFirst?: unknown;
+  temperature?: unknown;
 }
 
 /** Strips the `data:image/png;base64,` prefix a canvas export carries. */
@@ -127,6 +128,7 @@ async function generateGemini(
   prompt: string,
   image: string,
   imageFirst: boolean,
+  temperature?: number,
 ): Promise<Attempt> {
   /*
    * WHICH PART GOES FIRST, and why it is a switch rather than a decision.
@@ -154,7 +156,10 @@ async function generateGemini(
       headers: { 'x-goog-api-key': key, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         contents: [{ role: 'user', parts }],
-        generationConfig: { responseModalities: ['IMAGE'] },
+        generationConfig: {
+          responseModalities: ['IMAGE'],
+          ...(temperature === undefined ? {} : { temperature }),
+        },
       }),
     },
   );
@@ -253,6 +258,22 @@ export async function onRequestPost(
     return json({ error: 'That image is too large to send', code: 'image_too_large' }, 413);
   }
 
+  let temperature: number | undefined;
+  if (body.temperature !== undefined) {
+    if (
+      typeof body.temperature !== 'number' ||
+      !Number.isFinite(body.temperature) ||
+      body.temperature <= 0 ||
+      body.temperature > 2
+    ) {
+      return json(
+        { error: 'Temperature must be greater than 0 and no more than 2', code: 'bad_temperature' },
+        400,
+      );
+    }
+    temperature = body.temperature;
+  }
+
   const key = vertexKey(env);
   if (!key) {
     return json({ error: `${VERTEX_KEY_NAMES} is not configured`, code: 'no_key' }, 500);
@@ -263,7 +284,14 @@ export async function onRequestPost(
 
   let attempt: Attempt;
   try {
-    attempt = await generateGemini(model, key, prompt, image, body.imageFirst === true);
+    attempt = await generateGemini(
+      model,
+      key,
+      prompt,
+      image,
+      body.imageFirst === true,
+      temperature,
+    );
   } catch (error) {
     console.error('image generate threw', model.id, error);
     return json({ error: 'The image request failed', code: 'upstream' }, 502);

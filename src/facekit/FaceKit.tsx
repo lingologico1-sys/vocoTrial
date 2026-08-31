@@ -94,6 +94,8 @@ type Candidate = {
   usd: number;
   /** Which way round the turn was sent. See `imageFirst` in the component. */
   imageFirst: boolean;
+  /** The sampling preset used for a Laugh attempt. Other slots leave this absent. */
+  laughVariation?: LaughVariation;
   /** Tokens the provider served from cache, as reported. Gemini only. */
   cached: number;
 };
@@ -119,6 +121,46 @@ const BASE_KINDS: ReadonlyArray<{ kind: BaseKind; label: string }> = [
   { kind: 'neutral', label: 'Neutral' },
   { kind: 'smile', label: 'Smile' },
 ];
+
+type LaughVariation = 'precise' | 'default' | 'varied';
+
+type LaughVariationOption = {
+  id: LaughVariation;
+  label: string;
+  /** Undefined deliberately preserves Vertex's current model default. */
+  temperature?: number;
+  hint: string;
+};
+
+/**
+ * Sampling choices for Laugh only.
+ *
+ * Temperature changes how much the model explores; it does not resize a mouth.
+ * Keeping this to three named presets makes the experiment repeatable while the
+ * middle choice remains byte-for-byte compatible with the old request.
+ */
+const LAUGH_VARIATIONS: readonly LaughVariationOption[] = [
+  {
+    id: 'precise',
+    label: 'Precise',
+    temperature: 0.2,
+    hint: 'Less variation; more likely to stay close to the source face.',
+  },
+  {
+    id: 'default',
+    label: 'Default',
+    hint: 'The original Laugh generation behavior.',
+  },
+  {
+    id: 'varied',
+    label: 'Varied',
+    temperature: 1,
+    hint: 'More variation between attempts; inspect the whole mouth and laugh lines.',
+  },
+];
+
+const laughVariationOption = (id: LaughVariation) =>
+  LAUGH_VARIATIONS.find((option) => option.id === id) ?? LAUGH_VARIATIONS[1];
 
 /**
  * Below this share of visibly differing pixels, two mouths are the same drawing.
@@ -346,6 +388,8 @@ export default function FaceKit() {
   const [ready, setReadyFlag] = useState(false);
   const [region, setRegion] = useState<BoxId>('mouth');
   const [candidates, setCandidates] = useState<Partial<Record<SlotId, Candidate[]>>>({});
+  /** A session-only sampling choice, applied to the next Laugh generation only. */
+  const [laughVariation, setLaughVariation] = useState<LaughVariation>('default');
   const [eyewearCandidate, setEyewearCandidate] = useState<EyewearCandidate | null>(null);
   const [eyewearSourceChanged, setEyewearSourceChanged] = useState(false);
   /**
@@ -753,6 +797,9 @@ export default function FaceKit() {
   const run = async (id: SlotId, modelKey: string) => {
     if (!kit) return;
     const definition = slot(id);
+    // Capture the setting before the request starts. Changing the buttons while
+    // a slow generation is running must not relabel the result after it returns.
+    const variation = id === 'laugh' ? laughVariationOption(laughVariation) : undefined;
     const key = `${id}:${modelKey}`;
     mark(key, 1);
     setError(null);
@@ -772,6 +819,7 @@ export default function FaceKit() {
         preamble: kit.eyewear ? GLASSES_FREE_PREAMBLE : undefined,
         label: definition.label,
         imageFirst,
+        temperature: variation?.temperature,
         onAttempt: (attempt) => mark(key, attempt),
       });
 
@@ -781,7 +829,10 @@ export default function FaceKit() {
       // the pictures already on screen as something they are not.
       setCandidates((current) => ({
         ...current,
-        [id]: [...(current[id] ?? []), { modelKey, imageFirst, ...result }],
+        [id]: [
+          ...(current[id] ?? []),
+          { modelKey, imageFirst, laughVariation: variation?.id, ...result },
+        ],
       }));
       // Spent whether or not the result is kept — a rejected generation still
       // billed, and a total that only counted the keepers would be a lie in the
@@ -1813,6 +1864,37 @@ export default function FaceKit() {
                           {busy[busyKey] ? busyMark(busy[busyKey]) : current ? 'Again' : 'Generate'}
                         </button>
                       </div>
+                      {entry.id === 'laugh' && (
+                        <div className="space-y-1.5 pt-2">
+                          <p className="text-[10px] uppercase tracking-wide text-slate-600">
+                            Variation
+                          </p>
+                          <div className="flex flex-wrap gap-1">
+                            {LAUGH_VARIATIONS.map((option) => {
+                              const active = laughVariation === option.id;
+                              return (
+                                <button
+                                  key={option.id}
+                                  type="button"
+                                  disabled={Boolean(busy[busyKey])}
+                                  onClick={() => setLaughVariation(option.id)}
+                                  title={option.hint}
+                                  className={`rounded-md border px-1.5 py-1 text-[10px] disabled:opacity-40 ${
+                                    active
+                                      ? 'border-violet-500 text-violet-300'
+                                      : 'border-slate-700 text-slate-400 hover:border-slate-500'
+                                  }`}
+                                >
+                                  {option.label}
+                                </button>
+                              );
+                            })}
+                          </div>
+                          <p className="max-w-[9rem] text-[10px] leading-4 text-slate-500">
+                            {laughVariationOption(laughVariation).hint} Applies to the next attempt.
+                          </p>
+                        </div>
+                      )}
                     </div>
 
                     <div className="flex flex-wrap items-start gap-2">
@@ -1836,7 +1918,11 @@ export default function FaceKit() {
                             {(() => {
                               const source = options.find((option) => option.patch === current);
                               const from = source && findImageModel(source.modelKey);
-                              return from ? ` · ${from.short}` : '';
+                              const variation =
+                                source?.laughVariation && laughVariationOption(source.laughVariation);
+                              return `${from ? ` · ${from.short}` : ''}${
+                                variation ? ` · ${variation.label.toLowerCase()}` : ''
+                              }`;
                             })()}
                           </figcaption>
                           {copies('kept').length > 0 && (
@@ -1901,6 +1987,12 @@ export default function FaceKit() {
                               {seen > 0 ? `${name} ${seen + 1}` : name}
                               {candidate.imageFirst && (
                                 <span className="text-sky-400/80"> · picture first</span>
+                              )}
+                              {candidate.laughVariation && (
+                                <span className="text-violet-400/80">
+                                  {' '}
+                                  · {laughVariationOption(candidate.laughVariation).label.toLowerCase()}
+                                </span>
                               )}
                             </figcaption>
                             {/*
