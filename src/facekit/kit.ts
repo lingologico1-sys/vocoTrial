@@ -246,6 +246,16 @@ export interface FaceKit {
   boxes: Boxes;
   /** One PNG data URL per authored slot, already cropped to its region's box. */
   patches: Partial<Record<SlotId, string>>;
+  /**
+   * The only part of the mouth box a generated Laugh may replace.
+   *
+   * AA already supplies the correct jaw, chin and overall opening. Keeping this
+   * smaller rectangle independently means a provider may add the upward corners
+   * and lower teeth, but cannot broaden the lower face to make a stock grin.
+   * Optional so existing kits receive the cautious default below until an author
+   * adjusts it.
+   */
+  laughInsert?: Box;
   /** Optional glasses painted last, over the base, brows, mouths and eyelids. */
   eyewear?: EyewearLayer;
   /**
@@ -369,6 +379,25 @@ export function defaultBoxes(): Boxes {
     // the model to redesign the glasses.
     eyeLeft: { ...eye, x: Math.round(edge * 0.3) },
     eyeRight: { ...eye, x: Math.round(edge * 0.54) },
+  };
+}
+
+/**
+ * A cautious first boundary for the part of AA a Laugh is allowed to edit.
+ *
+ * The outer mouth box intentionally includes the moving chin. A laugh needs
+ * none of that latitude: AA has already established the jaw drop, so this
+ * rectangle stays in the upper half around the lips and teeth. It is an opening
+ * estimate, not a facial measurement, and FaceKit exposes it for adjustment.
+ */
+export function defaultLaughInsert(mouth: MouthBox): Box {
+  const width = Math.round(mouth.width * 0.52);
+  const height = Math.round(mouth.height * 0.48);
+  return {
+    x: Math.round(mouth.x + (mouth.width - width) / 2),
+    y: Math.round(mouth.y + mouth.height * 0.06),
+    width,
+    height,
   };
 }
 

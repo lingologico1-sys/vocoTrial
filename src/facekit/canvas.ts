@@ -561,6 +561,55 @@ export async function featherPatch(
 }
 
 /**
+ * Builds a Laugh patch from the accepted AA patch plus a tightly bounded edit.
+ *
+ * The provider is free to redraw a whole portrait, but it does not get to
+ * decide which of those pixels become part of the kit. AA remains the complete
+ * mouth-box foundation (including its jaw and chin); only the smaller insert is
+ * copied from the generated result and feathered into it.
+ */
+export async function constrainLaughPatch(
+  aa: string,
+  generated: string,
+  mouth: Box,
+  insert: Box,
+): Promise<string> {
+  const localX = Math.round(insert.x - mouth.x);
+  const localY = Math.round(insert.y - mouth.y);
+  if (
+    localX < 0 ||
+    localY < 0 ||
+    localX + insert.width > mouth.width ||
+    localY + insert.height > mouth.height
+  ) {
+    throw new Error('The laugh edit boundary must stay inside the mouth box');
+  }
+
+  const [aaImage, generatedImage] = await Promise.all([loadImage(aa), loadImage(generated)]);
+  const clipped = context(insert.width, insert.height);
+  clipped.drawImage(
+    generatedImage,
+    localX,
+    localY,
+    insert.width,
+    insert.height,
+    0,
+    0,
+    insert.width,
+    insert.height,
+  );
+  const softened = await featherPatch(
+    clipped.canvas.toDataURL('image/png'),
+    { x: 0, y: 0, width: insert.width, height: insert.height },
+  );
+  const softenedImage = await loadImage(softened);
+  const result = context(mouth.width, mouth.height);
+  result.drawImage(aaImage, 0, 0, mouth.width, mouth.height);
+  result.drawImage(softenedImage, localX, localY, insert.width, insert.height);
+  return result.canvas.toDataURL('image/png');
+}
+
+/**
  * How much of two patches actually differ, as a share of the area compared.
  *
  * For catching the failure that is invisible in a contact sheet and fatal in

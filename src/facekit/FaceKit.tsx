@@ -5,11 +5,13 @@ import BoxPicker from './BoxPicker';
 import DiagnosticsPanel from './DiagnosticsPanel';
 import Filmstrip from './Filmstrip';
 import EyewearPanel, { type EyewearCandidate } from './EyewearPanel';
+import LaughInsertPicker from './LaughInsertPicker';
 import MotionPreview from './MotionPreview';
 import PersonaPanel from './PersonaPanel';
 import { bundledId, inlineKit, loadBundledKit } from './bundled';
 import {
   composite,
+  constrainLaughPatch,
   dataUrlToBlob,
   featherDepth,
   fileToDataUrl,
@@ -29,6 +31,7 @@ import {
   chinClearance,
   defaultBoxSize,
   defaultBrowBox,
+  defaultLaughInsert,
   newKit,
   patchFilename,
   resizeAbout,
@@ -388,6 +391,8 @@ export default function FaceKit() {
     [],
   );
   const [assembled, setAssembled] = useState<string | null>(null);
+  /** The AA-composited portrait used to place the bounded Laugh insert. */
+  const [laughReference, setLaughReference] = useState<string | null>(null);
   /**
    * Which drawn rest pose the picker is showing, when any.
    *
@@ -644,6 +649,30 @@ export default function FaceKit() {
   }, [kit]);
 
   /**
+   * AA is the geometry Laugh inherits. Kept separately from `assembled`, whose
+   * resting-mouth preview is useful for ordinary box placement but would hide
+   * the open mouth the Laugh boundary is meant to protect.
+   */
+  useEffect(() => {
+    const neutral = kit?.bases?.neutral ?? kit?.base;
+    const aa = kit?.patches.aa;
+    const mouth = kit?.boxes.mouth;
+    if (!neutral || !aa || !mouth) {
+      setLaughReference(null);
+      return;
+    }
+    let live = true;
+    composite(neutral, [{ patch: aa, box: mouth }])
+      .then((image) => {
+        if (live) setLaughReference(image);
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [kit?.base, kit?.bases?.neutral, kit?.patches.aa, kit?.boxes.mouth]);
+
+  /**
    * Compares every mouth on the page against every mouth in the kit.
    *
    * Against the *accepted* ones only, in that direction, because the question
@@ -765,10 +794,13 @@ export default function FaceKit() {
       // geometry it must preserve. Without AA, laugh keeps the legacy fallback.
       const neutralBase = kit.bases?.neutral ?? kit.base;
       const openReference = id === 'laugh' ? kit.patches.aa : undefined;
+      const laughInsert = openReference
+        ? kit.laughInsert ?? defaultLaughInsert(kit.boxes.mouth)
+        : undefined;
       const generationBase = openReference
         ? await composite(neutralBase, [{ patch: openReference, box: kit.boxes.mouth }])
         : neutralBase;
-      const result = await generatePatch({
+      const generated = await generatePatch({
         modelKey,
         base: generationBase,
         box: kit.boxes[definition.region],
@@ -780,6 +812,21 @@ export default function FaceKit() {
         imageFirst,
         onAttempt: (attempt) => mark(key, attempt),
       });
+      // The provider returned a full mouth-box patch, but the only pixels a
+      // Laugh may contribute are inside the author-approved insert. AA stays
+      // beneath it as the exact jaw, chin and width foundation.
+      const result =
+        openReference && laughInsert
+          ? {
+              ...generated,
+              patch: await constrainLaughPatch(
+                openReference,
+                generated.patch,
+                kit.boxes.mouth,
+                laughInsert,
+              ),
+            }
+          : generated;
 
       // The ordering is recorded on the candidate rather than read off the
       // toggle when the caption is drawn. The toggle is a live control and a
@@ -1035,7 +1082,7 @@ export default function FaceKit() {
     edit((current) => {
       const patches = { ...current.patches };
       for (const id of ids) delete patches[id];
-      return { ...current, patches };
+      return { ...current, patches, ...(which === 'mouth' ? { laughInsert: undefined } : {}) };
     });
     setCandidates((current) => {
       const next = { ...current };
@@ -1788,6 +1835,10 @@ export default function FaceKit() {
                 const options = candidates[entry.id] ?? [];
                 const current = kit.patches[entry.id];
                 const busyKey = `${entry.id}:${MODEL_KEY}`;
+                const laughInsert =
+                  entry.id === 'laugh' && kit.patches.aa
+                    ? kit.laughInsert ?? defaultLaughInsert(kit.boxes.mouth)
+                    : null;
                 /** Every measured distance for one thumbnail, and the subset that counts as a copy. */
                 const near = (index: number | 'kept') => distances[twinKey(entry.id, index)] ?? [];
                 const copies = (index: number | 'kept') =>
@@ -1819,6 +1870,11 @@ export default function FaceKit() {
                           {busy[busyKey] ? busyMark(busy[busyKey]) : current ? 'Again' : 'Generate'}
                         </button>
                       </div>
+                      {entry.id === 'laugh' && !kit.patches.aa && (
+                        <p className="pt-1 text-[11px] text-amber-400">
+                          Generate and keep Open (AA) first to constrain this pose.
+                        </p>
+                      )}
                     </div>
 
                     <div className="flex flex-wrap items-start gap-2">
@@ -1936,6 +1992,31 @@ export default function FaceKit() {
                         <p className="self-center text-xs text-slate-600">
                           Nothing generated for this slot yet.
                         </p>
+                      )}
+
+                      {laughInsert && (
+                        <details className="w-full rounded-lg border border-slate-800 bg-slate-900/30 p-2">
+                          <summary className="cursor-pointer text-xs text-fuchsia-300">
+                            Adjust Laugh edit boundary
+                          </summary>
+                          <p className="mt-2 text-[11px] text-slate-500">
+                            New Laugh attempts keep AA everywhere outside this rectangle.
+                          </p>
+                          {laughReference ? (
+                            <div className="mt-3">
+                              <LaughInsertPicker
+                                image={laughReference}
+                                mouth={kit.boxes.mouth}
+                                insert={laughInsert}
+                                onChange={(next) =>
+                                  edit((current) => ({ ...current, laughInsert: next }))
+                                }
+                              />
+                            </div>
+                          ) : (
+                            <p className="mt-2 text-xs text-slate-600">Preparing the AA reference…</p>
+                          )}
+                        </details>
                       )}
                     </div>
                   </div>
