@@ -3,6 +3,7 @@ import {
   ClipboardPen,
   GraduationCap,
   Layers,
+  Library,
   Smile,
   SlidersHorizontal,
 } from 'lucide-react';
@@ -66,6 +67,13 @@ const WORKSHOP: Place[] = [
     blurb:
       'A recording, the marks a forced aligner made for it, and the face wearing them. For checking an alignment before a lesson trusts it — the only page here whose mouth is driven by a file rather than by listening.',
     Icon: AudioLines,
+  },
+  {
+    href: '/lipsync/takes',
+    name: 'lipSync takes',
+    blurb:
+      'The library of finalized lip-sync takes. Play or download the audio, review the script and diagnostics, and remove takes no longer needed.',
+    Icon: Library,
   },
   {
     href: '/tutorbench',
