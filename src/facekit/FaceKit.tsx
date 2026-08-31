@@ -2140,13 +2140,30 @@ export default function FaceKit() {
             <ul className="flex flex-wrap gap-3">
               {published.map((face) => {
                 const draft = face.ready === false;
+                /*
+                  The shipped face, named as such rather than left to be guessed at.
+                  It is an ordinary library entry after `seed` runs, which is the whole
+                  point of importing it -- and that is exactly what makes it unfindable,
+                  because the one thing distinguishing it is the one thing the strip does
+                  not show. Its name is whatever public/faces/manifest.json says, so a
+                  deployment with two faces of that name offers no way to tell them apart,
+                  and the tile that needs opening is the one whose artwork is checked in.
+
+                  Asked by id, not by name, for the reason bundledId exists: the name is
+                  editable the moment this is an ordinary face and somebody will edit it.
+                */
+                const shipped = face.id === bundledId();
                 return (
                   <li key={face.id} className="space-y-1 text-center">
                     <button
                       type="button"
                       onClick={() => void openPublished(face)}
                       disabled={opening !== null}
-                      title="Open this face for editing. Save when you are done to replace what the library holds."
+                      title={
+                        shipped
+                          ? 'The face checked into public/faces/, imported. Every browser that has chosen no face wears this one. Save when you are done to replace what the library holds — the checked-in copy is separate, and changes here do not reach it.'
+                          : 'Open this face for editing. Save when you are done to replace what the library holds.'
+                      }
                       className="disabled:cursor-wait"
                     >
                       <img
@@ -2162,6 +2179,11 @@ export default function FaceKit() {
                       />
                     </button>
                     <p className="max-w-24 truncate text-[11px] text-slate-400">{face.name}</p>
+                    {shipped && (
+                      <p className="text-[10px] text-sky-400/80" title="Its artwork is checked into the repository at public/faces/, and it is what a browser wears before anyone picks anything">
+                        ships with the site
+                      </p>
+                    )}
                     {/*
                       A link rather than a checkbox, and it writes straight to
                       the index without touching the artwork — see ready.ts.

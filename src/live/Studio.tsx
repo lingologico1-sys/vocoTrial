@@ -33,7 +33,7 @@ import type { PerformanceProfile } from '../realtime/session';
 import type { SessionStatus } from '../realtime/types';
 import type { FaceKit } from '../facekit/kit';
 import { hasPersona } from '../facekit/persona';
-import { loadBundledKit } from '../facekit/bundled';
+import { bundledId, loadBundledKit } from '../facekit/bundled';
 import { listPublished } from '../facekit/library';
 import type { PublishedFace } from '../facekit/published';
 import { activeKit, publishedKit, selectFace, selectedFace } from '../facekit/store';
@@ -962,6 +962,22 @@ export default function Studio() {
               const picked = face ? chosen === face.id : chosen === null;
               const thumb = face ? face.thumb : bundled?.base;
               const draft = face?.ready === false;
+              /*
+                THE SAME FACE CAN APPEAR TWICE HERE, and saying so is cheaper than
+                preventing it. The first tile is always the bundled kit, read off
+                public/faces/; once faceKit's `seed` has run, the library holds a copy of
+                that same artwork and it arrives in `offered` as an ordinary face. Two
+                tiles, one drawing, two different fetches -- and they stay identical only
+                until somebody edits the imported one, at which point which tile you
+                picked starts to matter and nothing on screen said it ever could.
+
+                Not deduplicated, because both are real choices with different
+                consequences: the first is "whatever this deployment ships", which
+                follows a redeploy, and the second is "this face in the library", which
+                does not. Naming them is the fix; hiding one would be a guess about which
+                the reader meant.
+              */
+              const shipped = face ? face.id === bundledId() : false;
 
               return (
                 <li key={face?.id ?? 'default'} className="space-y-1 text-center">
@@ -971,10 +987,12 @@ export default function Studio() {
                     onClick={() => void wear(face?.id ?? null)}
                     title={
                       face
-                        ? draft
-                          ? `Wear ${face.name} — a draft, still being worked on in faceKit`
-                          : `Wear ${face.name}, from the shared library`
-                        : 'The face this deployment ships with, in public/faces'
+                        ? shipped
+                          ? `Wear ${face.name} — the shipped face, imported into the library. Same artwork as the first tile until somebody edits this one.`
+                          : draft
+                            ? `Wear ${face.name} — a draft, still being worked on in faceKit`
+                            : `Wear ${face.name}, from the shared library`
+                        : 'The face this deployment ships with, read straight from public/faces. Follows a redeploy, unlike the imported copy in the library.'
                     }
                     className="block disabled:cursor-not-allowed disabled:opacity-40"
                   >
@@ -999,6 +1017,11 @@ export default function Studio() {
                   <p className="max-w-16 truncate text-[10px] text-slate-500">
                     {face ? face.name : 'default'}
                   </p>
+                  {(shipped || !face) && (
+                    <p className="text-[9px] uppercase tracking-wide text-sky-400/80">
+                      {face ? 'imported' : 'shipped'}
+                    </p>
+                  )}
                   {draft && <p className="text-[9px] uppercase tracking-wide text-amber-500">draft</p>}
                 </li>
               );
