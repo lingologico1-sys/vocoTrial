@@ -734,6 +734,30 @@ export const SLOTS: Slot[] = [
    * close up. A proportion the generator can measure off its own output beats an adjective
    * it has to interpret.
    *
+   * IT SHIPS AT 3.2% AGAINST ee, FLAGGED, AND THAT IS DELIBERATE. Do not regenerate it
+   * on the strength of the orange caption alone. SAME_MOUTH is a floor for *identity* --
+   * it exists to catch a pose that came back as a copy of one already in the kit, which
+   * is a generator returning its input -- and it answers "is this the same file", not
+   * "can a person see the difference". Those two questions separate right about here.
+   *
+   * Judged the way the plan said it would be, in the Filmstrip at speaking speed rather
+   * than as a still, st and ee read apart. That is the criterion that decides, and it is
+   * also the condition the pose is used in: st <-> ee is the busiest transition in the
+   * whole kit, 162 back-to-back occurrences across the three lessons in lipsync/assets
+   * and 15.5% of every pose change. A pair alternating that often is the easiest kind of
+   * difference to see, because what the eye is best at is movement -- which is exactly
+   * what a still comparison cannot show and a share-of-differing-pixels cannot score.
+   *
+   * The metric also under-weights this pose specifically. patchDivergence insets 25% on
+   * every side, and st's cue is partly corner travel, so some of the change it was drawn
+   * for falls outside the window being counted.
+   *
+   * Worth knowing before touching the width: ST_NARROWS caps corner travel at a tenth,
+   * and loosening that cap is the obvious lever if this pose ever does need pushing
+   * further from ee. It is capped where it is because the pose sitting closest in width
+   * is oh, at w: 12 against this one's 17, and a mouth given open licence to narrow
+   * purses.
+   *
    * NO TONGUE, and that is not a style note. A tongue tip showing between the teeth is
    * ð/θ, and this pose is worn on every /s/ — a visible tongue here would draw a face
    * that lisps its way through every sentence. It is also why `T` stays on ee rather than
