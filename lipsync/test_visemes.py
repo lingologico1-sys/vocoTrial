@@ -205,6 +205,23 @@ def test_nurse_vowel_splits_on_rhoticity():
     assert visemes.to_polly("ɜ") == "@"
 
 
+def test_ash_is_open_rather_than_spread():
+    """
+    /æ/ is near-open, and it used to be drawn as a shallow slot.
+
+    `E` is the one identifier Polly gives a single phone, so this is the rare row that
+    can be moved without dragging anything else with it. It sat with the spread poses,
+    where `ee` caps the whole opening at the thickness of the upper lip -- a face saying
+    "cat" barely parting its lips. The jaw is the more visible cue, so it goes to `aa`
+    and gives up the spread to get it.
+
+    Asserted against `e` as well as by name, because the split from /ɛ/ is the
+    point: the two share a height in nothing but the old table.
+    """
+    assert pose("æ") == "aa"
+    assert pose("æ") != pose("ɛ")
+
+
 def test_normalisation():
     """Aspiration, length and tie bars carry nothing a flat patch can show."""
     assert pose("pʰ") == pose("p")
@@ -269,6 +286,34 @@ def test_marks_are_well_formed():
     assert len(marks) == 7
 
 
+def test_marks_keep_the_phone_that_selected_them():
+    """
+    The field that makes PHONE_TO_POLLY revisable, and the collapse rule it needs.
+
+    /s/ and /z/ are one identifier and two phones. Collapsed on the identifier alone
+    they became a single `s` mark, which was fine while the mark said nothing about
+    which phone it came from -- and became a false record the moment it did. So the pair
+    is compared, and "buzz saw" keeps both.
+
+    Silence is the exception in both directions: it carries no phone, and a run of MFA's
+    three spellings of it still collapses to one mark.
+    """
+    marks, _ = visemes.to_marks([
+        (0.00, 0.10, "sil"),
+        (0.10, 0.16, "sp"),
+        (0.16, 0.24, "z"),
+        (0.24, 0.32, "s"),
+        (0.32, 0.40, "s"),
+    ])
+
+    assert marks[0] == {"timeMs": 0, "polly": "sil"}, "silence carries no phone"
+    assert [m["polly"] for m in marks] == ["sil", "s", "s", "sil"]
+    assert [m.get("phone") for m in marks] == [None, "z", "s", None]
+
+    # The genuine repeat still collapses: five intervals in, one /s/ mark for the two.
+    assert len(marks) == 4
+
+
 def test_marks_close_on_a_clip_that_ends_mid_vowel():
     """Without a trailing sil the last phone is held forever."""
     marks, _ = visemes.to_marks([(0.0, 0.2, "sil"), (0.2, 0.5, "ɑ")])
@@ -278,7 +323,7 @@ def test_marks_close_on_a_clip_that_ends_mid_vowel():
 def test_marks_open_at_zero_when_the_first_phone_does_not():
     marks, _ = visemes.to_marks([(0.04, 0.30, "p")])
     assert marks[0] == {"timeMs": 0, "polly": "sil"}
-    assert marks[1] == {"timeMs": 40, "polly": "p"}
+    assert marks[1] == {"timeMs": 40, "polly": "p", "phone": "p"}
 
 
 def test_marks_open_with_speech_when_the_clip_does():
@@ -294,7 +339,7 @@ def test_marks_open_with_speech_when_the_clip_does():
     abruptly where a recording of a person almost never does.
     """
     marks, _ = visemes.to_marks([(0.0, 0.2, "p"), (0.2, 0.5, "ɑ")])
-    assert marks[0] == {"timeMs": 0, "polly": "p"}
+    assert marks[0] == {"timeMs": 0, "polly": "p", "phone": "p"}
     assert marks[-1]["polly"] == "sil"
 
 

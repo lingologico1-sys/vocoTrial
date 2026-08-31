@@ -104,11 +104,18 @@ const TAG_MARK = '·';
  * No carry-in, unlike posesDuring. The mark in force when a word began is what the mouth
  * was wearing, so that function is right to keep it; but it was produced by the word
  * before, and counting it here would credit this word with a phone it never had.
+ *
+ * IT NOW RETURNS ACTUAL PHONES, and for most of its life the name was a promise it could
+ * not keep: marks carried only the Polly identifier, so this printed `t` for /t/, /d/
+ * and /n/ alike and the column was already one collapse away from what the aligner saw.
+ * The bake keeps `phone` now, and packages older than that fall back to the identifier —
+ * still ordered, still uncollapsed, just coarser. Worth knowing when reading a column of
+ * them: a row of bare identifiers means an old package, not a strange alignment.
  */
 export function phonesDuring(pkg: LipsyncPackage, startMs: number, endMs: number): string[] {
   return pkg.marks
     .filter((m) => m.timeMs >= startMs && m.timeMs < endMs)
-    .map((m) => m.polly ?? TAG_MARK);
+    .map((m) => m.phone ?? m.polly ?? TAG_MARK);
 }
 
 /** What the mouth wore across one word, in order, without repeats. */

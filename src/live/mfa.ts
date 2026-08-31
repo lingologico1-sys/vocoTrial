@@ -46,7 +46,7 @@ export interface MfaMarkFile {
    * a visibly dead patch in it somewhere, and the number is the only warning.
    */
   oovCount?: number;
-  marks: Array<{ timeMs: number; polly: string }>;
+  marks: Array<{ timeMs: number; polly: string; phone?: string }>;
 }
 
 const IS_POLLY_VISEME = (value: unknown): value is PollyViseme =>
@@ -87,13 +87,20 @@ export function parseMfaMarks(file: MfaMarkFile | string): VisemeMark[] {
 
   for (const entry of raw) {
     if (typeof entry !== 'object' || entry === null) continue;
-    const mark = entry as { timeMs?: unknown; polly?: unknown };
+    const mark = entry as { timeMs?: unknown; polly?: unknown; phone?: unknown };
     if (typeof mark.timeMs !== 'number' || !Number.isFinite(mark.timeMs)) continue;
     if (!IS_POLLY_VISEME(mark.polly)) continue;
 
+    // `phone` is copied across rather than left behind, and this is the only place it
+    // could be. The object below is built fresh, so a field not named here is a field
+    // the package saved from these marks will not have -- which would drop exactly the
+    // provenance the bake was changed to keep. Unvalidated beyond its type on purpose:
+    // there is no closed set to check it against, and an odd string is worth more than
+    // no string when the question it answers is "what did the aligner see here".
     marks.push({
       timeMs: mark.timeMs,
       polly: mark.polly,
+      ...(typeof mark.phone === 'string' ? { phone: mark.phone } : {}),
       viseme: POLLY_VISEMES[mark.polly],
     });
   }

@@ -192,6 +192,15 @@ export const POLLY_VISEMES: Record<PollyViseme, Viseme> = {
    * — /l/ is alveolar, made in the same place as /t d n/, with the tongue tip on
    * the same ridge and the jaw about as close.
    *
+   * THAT ARGUMENT IS ABOUT POLLY, AND ONLY POLLY, which is worth saying because it
+   * reads like a claim about /l/ and is not one. It is a claim about *tables*: Polly's
+   * per-language ones disagree with each other, so a pose split between `l` and `t`
+   * would follow the voice rather than the speaker. Nothing of the sort is true on the
+   * MFA path, where PHONE_TO_POLLY in lipsync/visemes.py sends every language's /l/ to
+   * `l` outright and the split cannot arise. The destination stands on the sentence
+   * above it, which is phonetics; the consistency argument is why it was never free to
+   * be decided separately, not why it came out here.
+   *
    * `T` JOINED LATER, CORRECTING A MISTAKE WORTH NAMING because it is an easy one to
    * make again. It was left with the spread poses on this argument: what `st` draws is
    * two rows of teeth nearly meeting, ð/θ is a tongue tip *between* them, and a visible
@@ -229,11 +238,25 @@ export const POLLY_VISEMES: Record<PollyViseme, Viseme> = {
    * on articulation alone. But `s` is already there, and Mandarin distinguishes *xi*
    * from *si*: moving `J` would hand both the same mouth. Left here, the two differ,
    * which is the whole reason this row exists.
+   *
+   * WHAT THAT DEFENDS IS HALF THE ROW, and the other half is a known wrong answer. The
+   * argument above is about ɕ ʑ t͡ɕ d͡ʑ, which are sibilants and are spread. PHONE_TO_POLLY
+   * also files ç ɲ ʝ and ɟʝ here — a palatal fricative, a palatal nasal, and Spanish's
+   * two ways of writing the "y" of *yo* — none of which is a sibilant and none of which
+   * spreads the lips at all. They are neutral, which is `uh`, and drawn here they are
+   * given a wide toothy mouth on every Spanish *señor* and French *baigner*. Measured
+   * over the three alignments in lipsync/assets that is 25 to 27 marks, a little over
+   * 2%, nearly all of it Spanish.
+   *
+   * It stays wrong for now because the fix is not here. `J` is one identifier and the
+   * split is between phones, so it has to happen in PHONE_TO_POLLY — which means a Modal
+   * image rebuild and a re-alignment, and until recently could not reach a saved package
+   * at all. Marks carry their `phone` now, so this is a mapping change with a replay
+   * path rather than a one-way door; see the note on VisemeMark.phone below.
    */
   J: 'ee',
   i: 'ee',
   e: 'ee',
-  E: 'ee',
 
   /*
    * Half open, lips neither spread nor pursed. The neutral opening, and where
@@ -244,8 +267,21 @@ export const POLLY_VISEMES: Record<PollyViseme, Viseme> = {
   r: 'uh',
   '@': 'uh',
 
-  /** Wide and unrounded. */
+  /*
+   * Wide and unrounded.
+   *
+   * `E` MOVED HERE FROM THE SPREAD POSES, and the argument is the jaw. Polly files
+   * ash under its own identifier and nothing else with it, so `E` is /æ/ alone --
+   * the one front vowel that is near-open. `ee` is written as a shallow slot whose
+   * whole height is no more than the thickness of the upper lip, which is the wrong
+   * aperture by a wide margin: a face saying "cat" or "back" barely parted its lips.
+   *
+   * What the move costs is the spread, because `aa` is drawn rounded rather than wide.
+   * That is the smaller loss. Height is the more visible of the two cues at speaking
+   * speed, and it is the one /æ/ actually has.
+   */
   a: 'aa',
+  E: 'aa',
 
   /*
    * Rounded. `S` is here rather than with the sibilants above, which is the one
@@ -270,6 +306,21 @@ export interface VisemeMark {
    * mouth actually reads; this is provenance.
    */
   polly?: PollyViseme;
+  /**
+   * The phone the aligner actually read, when one did.
+   *
+   * Provenance too, and the finer-grained half of it. `polly` is already one collapse
+   * away from the recording -- /s/ and /z/ arrive as the same identifier, /ɛ/ and /e/
+   * as the same one -- so a mark alone could never say which sound produced it, and
+   * PHONE_TO_POLLY was a one-way door: reposed() below can replay a change to this
+   * file against every stored package, but a change to the Python table could only be
+   * applied by aligning the audio again, which a saved package has no path back to.
+   *
+   * Absent wherever `polly` is, and for the same reason: a laugh has no phone either.
+   * Also absent on silence, which is a gap in the tier rather than a sound. Optional
+   * besides because every package baked before the field existed simply has none.
+   */
+  phone?: string;
   /** What the face wears for it. */
   viseme: Viseme;
 }

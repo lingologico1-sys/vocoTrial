@@ -759,6 +759,7 @@ export function overlayReactions(
       out.push({
         timeMs: span.endMs,
         polly: before?.polly,
+        phone: before?.phone,
         viseme: before?.viseme ?? 'rest',
       });
     }

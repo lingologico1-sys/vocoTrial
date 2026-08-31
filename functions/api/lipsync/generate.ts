@@ -105,7 +105,7 @@ interface AlignResult {
   durationMs: number;
   oovCount: number;
   oovWords?: Array<{ word: string; startMs: number; endMs: number; reason: string }>;
-  marks: Array<{ timeMs: number; polly: string }>;
+  marks: Array<{ timeMs: number; polly: string; phone?: string }>;
   words: Array<{ word: string; startMs: number; endMs: number }>;
 }
 
@@ -411,9 +411,16 @@ export async function onRequestPost(
 
   // --- 3. Put the reactions back where the aligner could not -----------------------
   const marks: VisemeMark[] = result.marks
-    .filter((m): m is { timeMs: number; polly: PollyViseme } =>
+    .filter((m): m is { timeMs: number; polly: PollyViseme; phone?: string } =>
       Object.prototype.hasOwnProperty.call(POLLY_VISEMES, m.polly))
-    .map((m) => ({ timeMs: m.timeMs, polly: m.polly, viseme: POLLY_VISEMES[m.polly] }));
+    .map((m) => ({
+      timeMs: m.timeMs,
+      polly: m.polly,
+      // The one path that writes a package to R2, so the one place dropping this would
+      // cost something permanent: an alignment run is not repeatable from a package.
+      ...(m.phone ? { phone: m.phone } : {}),
+      viseme: POLLY_VISEMES[m.polly],
+    }));
 
   const spans = alignment
     ? reactionSpans(

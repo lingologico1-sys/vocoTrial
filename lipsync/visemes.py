@@ -2,11 +2,14 @@
 Turning MFA phone alignments into the marks vocoTrial's mouth already knows how to wear.
 
 The collapse from phones to drawn poses is NOT here. It lives in the client, in
-src/live/polly.ts, as POLLY_VISEMES -- twenty Amazon Polly viseme identifiers onto the
-seven poses a facekit actually contains, with the reasoning for each written out at
-length. That table is load-bearing and hard-won: it is why the postalveolars round to
-`oh` instead of joining the sibilants at `ee`, and why /l/ goes to `ee` so that the same
-sound does not change shape depending on which language table produced it.
+src/live/visemeTable.ts, as POLLY_VISEMES -- twenty Amazon Polly viseme identifiers onto
+the eight speech poses a facekit actually contains, with the reasoning for each written
+out at length. (It used to live in polly.ts, which is where this file's comments all
+named it and where a reader still looks; polly.ts re-exports it, so both names find the
+same table, but only one of them is where the words are.) That table is load-bearing and
+hard-won: it is why the postalveolars round to `oh` instead of joining the sibilants at
+`ee`, and why /l/ goes wherever /t/ goes -- `st` now, `ee` when this was written -- so
+that the same sound does not change shape depending on which language table produced it.
 
 So this module stops one step short. It maps MFA phones onto Polly's *identifiers* and
 lets the existing table finish the job. One collapse in the codebase rather than two in
@@ -47,7 +50,14 @@ _STRIP = dict.fromkeys(
              # a pair of closed lips, and English writes m̩ n̩ ɫ̩ for the reduced
              # endings of "rhythm", "button", "little"
         "ʲ"  # modifier j, palatalised
-        "ʷ"  # modifier w, labialised
+        "ʷ"  # modifier w, labialised -- THE ONE ENTRY HERE THAT DISCARDS SOMETHING
+             # VISIBLE. Every other modifier in this list is a tongue, a voice or a
+             # length; labialisation is rounded lips, which is the one thing a flat
+             # patch is good at. It is stripped anyway because nothing reaches it: no
+             # phone in the three pinned dictionaries carries it, so the exposure is
+             # zero marks, and un-stripping it would leave tʷ and ʈʷ unmapped and fail
+             # assert_table_covers_dictionaries at image build time. If a dictionary
+             # ever brings labialised phones, this line comes out and they get rows.
         "ˠ"  # modifier gamma, velarised
         "͡"  # combining double inverted breve, tie bar
         "͜"  # combining double breve below, tie bar
@@ -87,8 +97,8 @@ GAP = 0.05
 # Grouped by the identifier rather than by language, and that is the point: nothing here
 # is conditioned on which model produced the phone. A table complete over the union is
 # complete for each language inside it, so adding Italian later costs a few rows rather
-# than a new file. The comment above POLLY_VISEMES in polly.ts makes the same argument
-# about Polly's own per-language tables.
+# than a new file. The comment above POLLY_VISEMES in visemeTable.ts makes the same
+# argument about Polly's own per-language tables.
 PHONE_TO_POLLY = {
     # -- p: bilabials. The one consonant a drawn mouth shows plainly. -------------
     "p": "p",
@@ -127,8 +137,8 @@ PHONE_TO_POLLY = {
     "s": "s",
     "z": "s",
 
-    # -- S: postalveolars. Rounded and protruded, which is why polly.ts sends them
-    #       to `oh` rather than letting them join the sibilants above. This is the
+    # -- S: postalveolars. Rounded and protruded, which is why visemeTable.ts sends
+    #       them to `oh` rather than letting them join the sibilants above. This is the
     #       distinction the audio analyser provably cannot make, and the clearest
     #       single reason this driver is worth building.
     "ʃ": "S",          # esh
@@ -146,7 +156,7 @@ PHONE_TO_POLLY = {
     "ʝ": "J",          # curly-tail j, Spanish "y" in "yo"
 
     # -- k: velars, uvulars, glottals. Everything whose distinguishing feature is
-    #       a tongue pulled back out of sight. polly.ts records that Polly files
+    #       a tongue pulled back out of sight. visemeTable.ts records that Polly files
     #       the French uvular R under k as well.
     "k": "k",
     "g": "k",
@@ -209,7 +219,7 @@ PHONE_TO_POLLY = {
     "ɶ": "O",    # small capital OE
 
     # -- u: close rounded, including the French vowel of "tu" and the labiovelar
-    #       glides. polly.ts notes Polly sends /w/ here rather than to k.
+    #       glides. visemeTable.ts notes Polly sends /w/ here rather than to k.
     "u": "u",
     "ʊ": "u",    # upsilon
     "ʉ": "u",    # u bar
@@ -323,17 +333,30 @@ def to_marks(intervals):
     force at a given instant -- so an end time is not merely unused, it is a second
     encoding of the next mark's start that is free to disagree with it.
 
-    Runs of the same identifier are collapsed. MFA emits one interval per phone, so a
-    doubled consonant or a phone split across two intervals would otherwise repeat an
-    entry that says exactly what the one before it said.
+    Runs are collapsed. MFA emits one interval per phone, so a doubled consonant or a
+    phone split across two intervals would otherwise repeat an entry that says exactly
+    what the one before it said.
 
-    Collapsing stops at the identifier and deliberately does not go as far as the pose.
-    Adjacent marks often do share a pose -- /s/, /l/ and /i/ are three identifiers that
-    all draw as `ee` -- and squeezing those out would need POLLY_VISEMES over here,
-    which is the duplication this whole arrangement exists to avoid. The cost of leaving
-    them is a couple of extra entries in a binary search over a few hundred, and the
-    gain is that `polly` stays a faithful record of what was actually articulated, which
-    is what VisemeMark keeps the field for.
+    COLLAPSING COMPARES THE PHONE AS WELL AS THE IDENTIFIER, and it did not always. On
+    the identifier alone, a /s/ followed by a /z/ became one `s` mark -- which was
+    harmless while `polly` was the only thing a mark carried, and became a lie the
+    moment `phone` joined it, because the surviving mark would name the first phone and
+    silently stand for the second as well. Comparing the pair costs a handful of extra
+    entries across a lesson, all of them at word boundaries, and buys a `phone` field
+    that means what it says.
+
+    Collapsing still stops short of the pose, deliberately. Adjacent marks often do
+    share one -- /s/, /l/ and /i/ are three identifiers that all draw as `ee` -- and
+    squeezing those out would need POLLY_VISEMES over here, which is the duplication
+    this whole arrangement exists to avoid.
+
+    `phone` IS PROVENANCE, and the reason it is worth the bytes is that PHONE_TO_POLLY
+    is otherwise a one-way door. A change to POLLY_VISEMES replays against stored marks
+    for free -- reposed() in visemeTable.ts does it on every load -- but a change to the
+    table above could only ever be applied by running the aligner again, and a saved
+    package has no audio path back to one. Keeping the phone means the two halves of the
+    pipeline are equally revisable. Silence carries none: no phone produced it, which is
+    the same reason a laugh carries no `polly`.
 
     :param intervals: (start_seconds, end_seconds, phone) triples, in time order.
     :returns: (marks, oov_count)
@@ -341,6 +364,7 @@ def to_marks(intervals):
     marks = []
     oov = 0
     last = None
+    last_phone = None
     end = 0.0
     previous_stop = None
 
@@ -363,14 +387,23 @@ def to_marks(intervals):
             if last != "sil":
                 marks.append({"timeMs": round(previous_stop * 1000), "polly": "sil"})
                 last = "sil"
+                last_phone = None
         previous_stop = stop
 
         polly = to_polly(text)
+        # Silence is not articulated, so it carries no phone -- and holding that
+        # invariant is also what keeps a run of `sil`, `sp` and `spn` collapsing into
+        # the one mark it always did.
+        phone = None if polly == "sil" else normalise(text)
         end = max(end, stop)
-        if polly == last:
+        if polly == last and phone == last_phone:
             continue
-        marks.append({"timeMs": round(start * 1000), "polly": polly})
+        mark = {"timeMs": round(start * 1000), "polly": polly}
+        if phone is not None:
+            mark["phone"] = phone
+        marks.append(mark)
         last = polly
+        last_phone = phone
 
     # Open at rest rather than holding the first phone early. Polly stamps a `sil` at
     # time zero on most utterances and MarkMouth falls back to 'rest' before the first

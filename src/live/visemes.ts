@@ -102,7 +102,7 @@ export const VISEMES: Record<Viseme, LipShape> = {
   st: { w: 17, up: 1.6, down: 2.4 },
   /** Spread and half open: "ee", and the sibilants that share its brightness. */
   ee: { w: 27, up: 4, down: 5.5 },
-  /** Rounded and half open: "uh", "l". */
+  /** Rounded and half open: "uh". (/l/ left for `st` with the alveolars.) */
   uh: { w: 15, up: 6, down: 7.5 },
   /** Spread and wide: "aa". */
   aa: { w: 23, up: 10, down: 14 },
