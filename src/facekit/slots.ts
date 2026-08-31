@@ -565,7 +565,9 @@ export const LAUGH_FROM_OPEN_REFERENCE = [
   'up while leaving the middle of the opening and its dimensions unchanged.',
   'Keep the existing upper teeth as one unbroken flat white band. Add one shallower unbroken',
   'flat white band of lower teeth along the bottom, with the existing dark interior between',
-  'the bands. Draw no individual teeth, dividing lines, dimples, creases or wrinkles.',
+  'the bands. Draw no individual teeth or dividing lines. Add one or two short, simple',
+  'upward laugh lines immediately outside each lifted corner, matching the portrait’s line',
+  'weight and flat illustration style; do not extend them across the cheeks.',
   'Keep the lips’ existing colour, thickness and line weight, using flat cel-shaded colour',
   'with no gradients, soft shading or highlights. Change nothing else.',
 ].join(' ');

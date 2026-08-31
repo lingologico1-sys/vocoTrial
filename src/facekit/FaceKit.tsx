@@ -2040,7 +2040,7 @@ export default function FaceKit() {
                             Adjust Laugh edit boundary
                           </summary>
                           <p className="mt-2 text-[11px] text-slate-500">
-                            New Laugh attempts keep AA everywhere outside this rectangle.
+                            New Laugh attempts squeeze a wider generated area into this rectangle and keep AA everywhere outside it.
                           </p>
                           {laughReference ? (
                             <div className="mt-3">

@@ -1,5 +1,5 @@
 import { CANVAS_EDGE } from './imageModels';
-import type { Box } from './kit';
+import { laughCaptureBox, type Box } from './kit';
 
 /**
  * The pixel work, and the reason this page can produce a face that does not
@@ -565,8 +565,10 @@ export async function featherPatch(
  *
  * The provider is free to redraw a whole portrait, but it does not get to
  * decide which of those pixels become part of the kit. AA remains the complete
- * mouth-box foundation (including its jaw and chin); only the smaller insert is
- * copied from the generated result and feathered into it.
+ * mouth-box foundation (including its jaw and chin). A wider generated source
+ * area is compressed horizontally into the smaller final insert, so the
+ * boundary controls the result's width instead of merely cropping it. The wider
+ * capture also brings short corner lines along rather than throwing them away.
  */
 export async function constrainLaughPatch(
   aa: string,
@@ -586,13 +588,16 @@ export async function constrainLaughPatch(
   }
 
   const [aaImage, generatedImage] = await Promise.all([loadImage(aa), loadImage(generated)]);
+  const capture = laughCaptureBox(mouth, insert);
+  const captureX = Math.round(capture.x - mouth.x);
+  const captureY = Math.round(capture.y - mouth.y);
   const clipped = context(insert.width, insert.height);
   clipped.drawImage(
     generatedImage,
-    localX,
-    localY,
-    insert.width,
-    insert.height,
+    captureX,
+    captureY,
+    capture.width,
+    capture.height,
     0,
     0,
     insert.width,
@@ -601,6 +606,10 @@ export async function constrainLaughPatch(
   const softened = await featherPatch(
     clipped.canvas.toDataURL('image/png'),
     { x: 0, y: 0, width: insert.width, height: insert.height },
+    // This is an internal seam over an already-feathered AA patch. A full
+    // mouth-patch fade here erased the short corner lines this insert exists to
+    // preserve; four pixels hide the join without washing out nearby detail.
+    4,
   );
   const softenedImage = await loadImage(softened);
   const result = context(mouth.width, mouth.height);

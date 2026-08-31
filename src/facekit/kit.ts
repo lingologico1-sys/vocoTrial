@@ -402,6 +402,35 @@ export function defaultLaughInsert(mouth: MouthBox): Box {
 }
 
 /**
+ * Generated Laugh details are pulled from a wider area and fitted into the
+ * author-drawn final boundary. Three quarters is intentionally visible rather
+ * than subtle: the provider's recurring failure is a mouth roughly a third too
+ * wide, and a 1:1 crop was the reason the first constraint changed nothing.
+ */
+export const LAUGH_HORIZONTAL_SCALE = 0.74;
+
+/** The wider generated area compressed into `insert` when the patch is built. */
+export function laughCaptureBox(mouth: MouthBox, insert: Box): Box {
+  const centre = insert.x + insert.width / 2;
+  // Reduce the capture symmetrically when the desired expansion would cross a
+  // mouth-box edge. Shifting a full-width capture back inside would pull the
+  // generated mouth sideways as it was scaled into a centred destination.
+  const centredLimit = Math.floor(
+    2 * Math.min(centre - mouth.x, mouth.x + mouth.width - centre),
+  );
+  const width = Math.max(
+    insert.width,
+    Math.min(centredLimit, Math.round(insert.width / LAUGH_HORIZONTAL_SCALE)),
+  );
+  return {
+    x: Math.round(centre - width / 2),
+    y: insert.y,
+    width,
+    height: insert.height,
+  };
+}
+
+/**
  * A starting rectangle for one brow, offered rather than assumed.
  *
  * Deliberately not part of `defaultBoxes`, so that neither a new kit nor an

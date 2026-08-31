@@ -1,6 +1,6 @@
 import { useRef } from 'react';
 import { CANVAS_EDGE } from './imageModels';
-import type { Box, MouthBox } from './kit';
+import { laughCaptureBox, type Box, type MouthBox } from './kit';
 
 interface LaughInsertPickerProps {
   image: string;
@@ -33,6 +33,7 @@ function insideMouth(next: Box, mouth: MouthBox): Box {
  */
 export default function LaughInsertPicker({ image, mouth, insert, onChange }: LaughInsertPickerProps) {
   const frame = useRef<HTMLDivElement>(null);
+  const capture = laughCaptureBox(mouth, insert);
 
   const begin = (event: React.PointerEvent, resize: boolean) => {
     event.preventDefault();
@@ -74,6 +75,19 @@ export default function LaughInsertPicker({ image, mouth, insert, onChange }: La
       >
         <img src={image} alt="" draggable={false} className="pointer-events-none h-full w-full" />
         <div
+          className="pointer-events-none absolute border border-dashed border-cyan-400/70"
+          style={{
+            left: percent(capture.x),
+            top: percent(capture.y),
+            width: percent(capture.width),
+            height: percent(capture.height),
+          }}
+        >
+          <span className="absolute -bottom-5 left-0 whitespace-nowrap text-[10px] text-cyan-300/80">
+            generated details captured
+          </span>
+        </div>
+        <div
           onPointerDown={(event) => begin(event, false)}
           className="absolute cursor-move border-2 border-fuchsia-400"
           style={{
@@ -84,7 +98,7 @@ export default function LaughInsertPicker({ image, mouth, insert, onChange }: La
           }}
         >
           <span className="absolute -top-6 left-0 whitespace-nowrap text-xs font-medium text-fuchsia-300">
-            Laugh edit boundary
+            final Laugh area
           </span>
           <button
             type="button"
@@ -95,7 +109,7 @@ export default function LaughInsertPicker({ image, mouth, insert, onChange }: La
         </div>
       </div>
       <p className="mx-auto max-w-md text-xs text-slate-500">
-        Keep the whole open mouth, both corners and a little skin inside this boundary. The accepted AA pose supplies everything outside it, including the jaw and chin.
+        Put the magenta sides just outside AA’s desired outer mouth corners rather than leaving generous skin padding. The dashed cyan area captures the wider generated mouth and corner lines, then compresses them horizontally into that final area. AA supplies everything outside it, including the jaw and chin.
       </p>
     </div>
   );
