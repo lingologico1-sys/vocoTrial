@@ -37,13 +37,21 @@
     }
   },
   "lashes": "none",
+  "persona": {
+    "fullName": "Malik Ndiaye",
+    "bio": "My name is Malik Ndiaye. I’m twenty-four years old and live in Lyon, sharing a bright top-floor apartment near the Saône with my childhood friend and a very demanding ginger cat named Biscotte. By day, I work as an apprentice landscape designer, planning green corridors for urban neighborhoods. When I'm off the clock, I spend my weekends cycling along the riverbanks and hunting through dusty crates at neighborhood flea markets for rare funk and jazz vinyl. I firmly believe you can judge the entire soul of a town simply by the quality and crust of its local bakery."
+  },
   "patches": {
     "rest": "mouth-rest.png",
     "mbp": "mouth-mbp.png",
+    "fv": "mouth-fv.png",
+    "st": "mouth-st.png",
     "ee": "mouth-ee.png",
     "uh": "mouth-uh.png",
     "aa": "mouth-aa.png",
     "oh": "mouth-oh.png",
+    "laugh": "mouth-laugh.png",
+    "smile": "mouth-smile.png",
     "eyeLeftClosed": "eyeLeft-eyeLeftClosed.png",
     "eyeRightClosed": "eyeRight-eyeRightClosed.png"
   }

@@ -122,6 +122,18 @@ default face until that is done.
 the filmstrip rather than on the still metric. No code change beyond two manifest
 entries.
 
+> **Closed, 2026-08-31.** The shipped kit now carries all ten mouth poses. Measured with
+> the same `patchDivergence` the page uses, `st` sits at **15.21%** against `ee` — the
+> previous kit shipped at 3.2% — and `fv` at **7.26%**, against a 4% floor. The generated
+> `st` carries its separation entirely on the second band of lower teeth rather than on
+> width, which is what finding 1 argued for, reached without editing `ST_NARROWS`.
+>
+> `laugh` and `smile` arrived in the same pass and were also absent before. `smile`
+> against `rest` measures **2.02%**, under the floor: a closed-lipped smile drawn from a
+> closed mouth is the hardest pair in the kit, and it is still an improvement on no patch
+> at all, which painted the portrait's own mouth. Worth regenerating when convenient.
+> `POSE_FALLBACK` should no longer fire for any pose on this face.
+
 ### 1. `st` invents inward corner movement to distinguish the artwork
 
 **Affected phones:** `/s z t d n l θ ð/` and mapped variants.  
