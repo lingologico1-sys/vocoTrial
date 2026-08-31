@@ -772,10 +772,9 @@ export default function FaceKit() {
         modelKey,
         base: generationBase,
         box: kit.boxes[definition.region],
-        instruction: [
-          definition.prompt(kit.lashes ?? DEFAULT_LASH_STYLE, Boolean(kit.eyewear)),
-          ...(openReference ? [LAUGH_FROM_OPEN_REFERENCE] : []),
-        ].join(' '),
+        instruction: openReference
+          ? LAUGH_FROM_OPEN_REFERENCE
+          : definition.prompt(kit.lashes ?? DEFAULT_LASH_STYLE, Boolean(kit.eyewear)),
         preamble: kit.eyewear ? GLASSES_FREE_PREAMBLE : undefined,
         label: definition.label,
         imageFirst,
