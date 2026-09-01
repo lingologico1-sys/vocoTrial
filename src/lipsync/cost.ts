@@ -24,6 +24,17 @@ import { TAGS } from './tags';
 const BRACKETED = /\[[^\]\n]*\]/g;
 const KNOWN = new Set(TAGS.map((t) => t.tag.toLowerCase()));
 
+/**
+ * An accent tag, which is known without being in the table.
+ *
+ * TAGS is a fixed palette and an accent is not: the whole point of the accent field is
+ * that the author names one, so there is no list to check membership against. Without
+ * this every generation made with an accent would report its own tag as unrecognised,
+ * and `unknownTags` would stop meaning "you may have mistyped something" — which is the
+ * only reason it is reported.
+ */
+const ACCENT = /^\[[^\]\n]*\baccent\b[^\]\n]*\]$/i;
+
 export interface Cost {
   /** Everything sent to ElevenLabs. This is what is billed. */
   total: number;
@@ -40,7 +51,7 @@ export function costOf(text: string): Cost {
     total: text.length,
     tagChars: found.reduce((n, t) => n + t.length, 0),
     tagCount: found.length,
-    unknownTags: found.filter((t) => !KNOWN.has(t.toLowerCase())),
+    unknownTags: found.filter((t) => !KNOWN.has(t.toLowerCase()) && !ACCENT.test(t)),
   };
 }
 

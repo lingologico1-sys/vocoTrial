@@ -88,6 +88,15 @@ export interface GenerateRequest {
   voiceName?: string;
   voiceGender: VoiceGender;
   model: LipsyncModel;
+  /**
+   * An accent to hold the voice to, as typed. Omitted or empty asks for none.
+   *
+   * Sent as the author's words rather than as a finished tag, so that the server owns
+   * both how it is written and where it is placed. The alternative — building the tag
+   * here and posting text with it already in it — would put the accent into the saved
+   * package's `text`, which published.ts is explicit about keeping as the author's line.
+   */
+  accent?: string;
   params: VoiceParams;
   reactions: ReactionOptions;
 }

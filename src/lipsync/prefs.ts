@@ -33,6 +33,14 @@ export interface LipsyncPrefs {
   voiceName?: string;
   voiceGender?: VoiceGender;
   model: LipsyncModel;
+  /**
+   * The accent to hold the voice to, as typed. Empty means none is asked for.
+   *
+   * Remembered rather than retyped for the same reason the voice ID is: a bench that
+   * is testing one accented voice is testing it across a dozen sittings, and an accent
+   * silently reverting to none between them looks like the feature not working.
+   */
+  accent: string;
   params: VoiceParams;
   reactions: ReactionOptions;
   /** The published face worn, by id. Empty string is the deployment's own face. */
@@ -107,6 +115,7 @@ export const DEFAULT_PREFS: LipsyncPrefs = {
   voiceId: '',
   voiceName: '',
   model: 'eleven_v3',
+  accent: '',
   params: DEFAULT_PARAMS,
   reactions: DEFAULT_REACTIONS,
   faceId: '',
@@ -161,6 +170,7 @@ function validate(saved: Partial<LipsyncPrefs>): LipsyncPrefs {
         ? saved.voiceGender
         : undefined,
     model: oneOf(saved.model, MODELS, DEFAULT_PREFS.model),
+    accent: str(saved.accent, DEFAULT_PREFS.accent),
     params: {
       stability: bounded(params.stability, 0, 1, DEFAULT_PARAMS.stability),
       similarityBoost: bounded(params.similarityBoost, 0, 1, DEFAULT_PARAMS.similarityBoost),

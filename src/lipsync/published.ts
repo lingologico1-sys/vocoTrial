@@ -229,6 +229,41 @@ export const DEFAULT_PARAMS: VoiceParams = {
   speakerBoost: true,
 };
 
+/**
+ * The knobs set where an accent survives, which the defaults above do not.
+ *
+ * WHY THERE IS A PRESET AT ALL. v3 is tuned for clarity, and clarity is measured against
+ * a standard baseline — so a voice with a regional accent gets read back with the accent
+ * sanded off, and the accent tag alone does not always rescue it. Three of the four
+ * settings are fighting it, and none of them is obviously the culprit from its label.
+ *
+ * stability 0.0 is the one that matters and the one nobody would guess. v3 does not take
+ * a continuous stability: it rounds to 0.0, 0.5 or 1.0 — Creative, Natural, Robust — so
+ * the 0.05-step slider offers twenty-one positions with three effects, and everything
+ * from 0.26 to 0.74 is the same Natural. ElevenLabs' own v3 guide says Robust "reduces
+ * responsiveness to directional instructions", which is the accent tag being ignored;
+ * Creative is the setting that keeps the voice's range, accent included. So the default
+ * 0.5 is not a middle ground here, it is one of three discrete choices and the wrong one.
+ *
+ * similarity 0.90 pulls the read toward the original recording, and if the voice was
+ * cloned from accented audio then the accent is what it is being pulled toward.
+ *
+ * style 0.30 rather than 0.0 exaggerates the voice's own manner, which is where an
+ * accent lives — and 0.30 rather than higher because THIS IS THE ONE THAT COSTS
+ * SOMETHING. Style up and stability down together make a more variable read, and a more
+ * variable read aligns worse; on this page the mouth is the product, so the preset takes
+ * the smaller half of that trade and leaves the slider free for anyone who wants more.
+ *
+ * None of it can invent an accent the voice does not have. If the voice was cloned or
+ * designed on standard audio, these numbers change how freely it reads and nothing else.
+ */
+export const ACCENT_PARAMS: VoiceParams = {
+  stability: 0.0,
+  similarityBoost: 0.9,
+  style: 0.3,
+  speakerBoost: true,
+};
+
 /** One line, with everything needed to play it and everything needed to judge it. */
 export interface LipsyncPackage {
   id: string;
@@ -257,6 +292,15 @@ export interface LipsyncPackage {
    * laugh library, where it was the same string as `text`.
    */
   spoken?: string;
+  /**
+   * The accent asked for, as it was typed in the field.
+   *
+   * Carried for the same reason `laughs` is: `spoken` shows the tag on every line, but
+   * not whether that came from an author typing it or from the accent field applying it,
+   * and a take that reads well is worth being able to reproduce. Absent means no accent
+   * was asked for — or that the take predates the field.
+   */
+  accent?: string;
   /** Tags stripped. What the aligner was given, and the only text MFA ever saw. */
   script: string;
   language: 'en' | 'fr' | 'es';

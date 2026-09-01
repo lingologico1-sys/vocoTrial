@@ -26,12 +26,20 @@ import {
   type Quota,
 } from './cost';
 import {
+  ACCENT_PARAMS,
   type ReactionOptions,
   type LipsyncModel,
   type LipsyncPackage,
   type VoiceParams,
 } from './published';
-import { SMILE_LEAD_MIN_MS, TAGS, reactionsIn, stripTags, type Tag } from './tags';
+import {
+  SMILE_LEAD_MIN_MS,
+  TAGS,
+  applyAccent,
+  reactionsIn,
+  stripTags,
+  type Tag,
+} from './tags';
 import { scriptWarnings } from './warnings';
 import { loadPrefs, loadVoiceGender, savePrefs, saveVoiceGender } from './prefs';
 
@@ -113,6 +121,7 @@ export default function Compose({ onGenerated, onVoiceChange, busy, setBusy }: C
   );
   const [lookingUpVoice, setLookingUpVoice] = useState(false);
   const [model, setModel] = useState<LipsyncModel>(remembered.model);
+  const [accent, setAccent] = useState(remembered.accent);
   const [params, setParams] = useState<VoiceParams>(remembered.params);
   const [reactions_, setReactions] = useState<ReactionOptions>(remembered.reactions);
   const [problem, setProblem] = useState<string | null>(null);
@@ -140,10 +149,11 @@ export default function Compose({ onGenerated, onVoiceChange, busy, setBusy }: C
       voiceName,
       voiceGender,
       model,
+      accent,
       params,
       reactions: reactions_,
     });
-  }, [text, language, voiceId, voiceName, voiceGender, model, params, reactions_]);
+  }, [text, language, voiceId, voiceName, voiceGender, model, accent, params, reactions_]);
 
   // Voice labels are optional in ElevenLabs, so lookup can fill this control but never
   // replace it. A missing label leaves the two-button choice waiting for the author.
@@ -183,7 +193,28 @@ export default function Compose({ onGenerated, onVoiceChange, busy, setBusy }: C
   }, []);
 
   const tagsAllowed = model === 'eleven_v3';
-  const cost = useMemo(() => costOf(text), [text]);
+  /**
+   * The accent actually in force, which on v2 is none whatever the field says.
+   *
+   * The field is left enabled and filled on v2 rather than cleared, for the same reason
+   * the tag palette is disabled rather than hidden there: switching models to hear the
+   * difference and finding the accent silently wiped is worse than being told it does
+   * not apply. The same rule runs server-side in generate.ts; this copy exists so the
+   * cost panel can be right before a take is spent finding out.
+   */
+  const accentUsed = tagsAllowed ? accent.trim() : '';
+  /**
+   * Billed on what will be SENT, not on what was typed.
+   *
+   * The accent tag is repeated on every line and every one of those characters is
+   * charged, so a panel counting the raw script would understate a long accented line by
+   * a few hundred characters — which is exactly the surprise cost.ts exists to prevent.
+   * Slightly conservative on purpose: covered laughs are lifted out server-side, so the
+   * real send is a little shorter than this. Over rather than under is the right way for
+   * an estimate against a quota to be wrong.
+   */
+  const billed = useMemo(() => applyAccent(text, accentUsed), [text, accentUsed]);
+  const cost = useMemo(() => costOf(billed), [billed]);
   const script = useMemo(() => stripTags(text), [text]);
   const reactions = useMemo(() => (tagsAllowed ? reactionsIn(text) : []), [text, tagsAllowed]);
   const warnings = useMemo(() => scriptWarnings(script), [script]);
@@ -275,6 +306,9 @@ export default function Compose({ onGenerated, onVoiceChange, busy, setBusy }: C
         voiceName: voiceName || undefined,
         voiceGender,
         model,
+        // Sent as typed. The server writes the tag and places it, so that this panel and
+        // generate.ts cannot disagree about the wording — see applyAccent in tags.ts.
+        accent: accentUsed || undefined,
         params,
         reactions: reactions_,
       });
@@ -512,9 +546,69 @@ export default function Compose({ onGenerated, onVoiceChange, busy, setBusy }: C
         <summary className="cursor-pointer text-xs font-medium text-slate-400">
           Voice parameters
         </summary>
+        {/*
+          * The accent, above the sliders because it is the thing that decides what they
+          * should be. It is not a slider itself: the sliders are how freely the voice
+          * reads and this is what it should read as, and putting a text field in the grid
+          * with them would suggest they are the same kind of setting.
+          */}
+        <div className="mt-3 flex flex-col gap-2 rounded-lg border border-slate-800 px-3 py-2">
+          <label className="flex flex-col gap-1">
+            <span className="text-xs text-slate-400">Accent</span>
+            <input
+              type="text"
+              value={accent}
+              maxLength={40}
+              onChange={(event) => setAccent(event.target.value)}
+              placeholder="French-African"
+              className="rounded border border-slate-800 bg-slate-950 px-2 py-1 text-sm text-slate-200 placeholder:text-slate-700"
+            />
+          </label>
+          <p className="text-[11px] leading-snug text-slate-600">
+            {accentUsed ? (
+              <>
+                Sent as <code className="text-slate-400">[strong {accentUsed} accent]</code>{' '}
+                at the head of every line — restated each time because v3 drifts back to
+                its own baseline over a paragraph. The aligner never sees it, so the mouth
+                is unaffected; the characters are billed, and the count below includes them.
+              </>
+            ) : model === 'eleven_v3' ? (
+              <>
+                Left empty, the voice reads in whatever accent it was built with. v3 is
+                tuned for clarity and sands regional accents toward a standard baseline,
+                which is what this is for. It cannot add an accent the voice does not have.
+              </>
+            ) : (
+              <>
+                Not applied on multilingual v2, which reads tags aloud instead of acting
+                on them. Kept as typed, and back in force on v3.
+              </>
+            )}
+          </p>
+        </div>
+
+        {/*
+          * A button, not a mode. It moves the sliders and then gets out of the way, so
+          * the sliders stay the only account of what will be sent — a toggle that forced
+          * them would leave two things on this panel claiming to say what the stability
+          * is, and the visible one would be the one that was wrong.
+          */}
+        <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1">
+          <button
+            type="button"
+            onClick={() => setParams(ACCENT_PARAMS)}
+            className="rounded border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:border-slate-500"
+          >
+            Optimize for accents
+          </button>
+          <span className="text-[11px] text-slate-600">
+            Sets stability 0, similarity 0.90, style 0.30. Tune from there.
+          </span>
+        </div>
+
         <div className="mt-3 grid gap-3 sm:grid-cols-2">
           {([
-            ['stability', 'Stability', 'Higher is more consistent, lower more expressive'],
+            ['stability', 'Stability', 'v3 rounds this to 0 (creative), 0.5 or 1 (robust)'],
             ['similarityBoost', 'Similarity', 'How close to the original voice'],
             ['style', 'Style exaggeration', 'Amplifies the voice&rsquo;s own manner'],
           ] as const).map(([key, label, hint]) => (
@@ -550,7 +644,10 @@ export default function Compose({ onGenerated, onVoiceChange, busy, setBusy }: C
         <p className="mt-3 text-[11px] leading-snug text-slate-600">
           These reach ElevenLabs untouched and change nothing about the alignment. Very
           low stability makes a more variable read, which is harder to align well, but
-          that is a consequence of the audio rather than of the setting.
+          that is a consequence of the audio rather than of the setting &mdash; which is
+          why the accent preset raises style only as far as 0.30. On v3 stability is not
+          continuous: it rounds to 0, 0.5 or 1, so anything between 0.26 and 0.74 is the
+          same middle setting, and 1 makes the voice stop responding to tags at all.
         </p>
       </details>
 

@@ -770,3 +770,64 @@ export function overlayReactions(
   // a pose against an identical one and because a laugh mark has no identifier at all.
   return out.filter((m, i) => i === 0 || m.viseme !== out[i - 1].viseme);
 }
+
+/**
+ * An accent, written as the tag v3 answers to.
+ *
+ * Normalised rather than taken as typed, because the field it comes from is free text
+ * and "French-African", "french african accent" and "[strong French-African accent]"
+ * are all things somebody reasonably types meaning one thing.
+ *
+ * THE BRACKETS ARE UNWRAPPED, NOT DELETED, and the difference is a bug this had. Removing
+ * whole bracketed runs — which is what stripTags does, correctly, for the aligner — turns
+ * a pasted-back tag into the empty string, so the one input most likely to be pasted here
+ * is the one that silently asks for no accent at all. Only the bracket characters go; what
+ * was inside them is the answer.
+ *
+ * Then the scaffolding is peeled off either end so it is not said twice: a leading
+ * "strong"/"thick"/"heavy" and a trailing "accent" are exactly what this function is
+ * about to add back, and `[strong strong French-African accent accent]` is not a prompt.
+ *
+ * `strong` and not `thick`: both are documented, and ElevenLabs' own v3 guide writes the
+ * form as `[strong X accent]`, so this follows the wording their examples are drawn from
+ * rather than a synonym that may or may not have been trained on.
+ */
+export function accentTag(accent: string): string {
+  const cleaned = accent
+    .replace(/[[\]]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/^(?:strong|thick|heavy)\s+/i, '')
+    .replace(/\s+accent$/i, '')
+    .trim();
+  return cleaned ? `[strong ${cleaned} accent]` : '';
+}
+
+/**
+ * The text as ElevenLabs should receive it, with the accent restated on every line.
+ *
+ * PER LINE, AND THAT IS THE EXPENSIVE CHOICE MADE DELIBERATELY. One tag at the top of a
+ * script is what the docs show and it is not what a long script gets: v3 drifts back
+ * toward its baseline over a paragraph, so a line three sentences down is read in the
+ * voice's default accent no matter what the first line asked for. Restating it is the
+ * only thing that holds. It costs roughly thirty characters a line of billed quota,
+ * which is real money on a plan measured in characters — see cost.ts, which counts this
+ * string rather than the author's so the panel shows the true figure before it is spent.
+ *
+ * A line that already opens with an accent tag is left alone, so that someone who has
+ * been typing the tag by hand does not get it twice.
+ *
+ * NOT APPLIED ON multilingual v2, and the caller is where that is decided. v2 does not
+ * read tags, it reads *text*, so an accent tag there is a voice saying the words "strong
+ * French-African accent" out loud in the middle of a lesson. Same hazard the laugh lift
+ * in generate.ts already guards against, and the same answer: send nothing.
+ */
+export function applyAccent(text: string, accent: string): string {
+  const tag = accentTag(accent);
+  if (!tag) return text;
+  const opener = /^\s*\[[^\]\n]*\baccent\b[^\]\n]*\]/i;
+  return text
+    .split('\n')
+    .map((line) => (line.trim() && !opener.test(line) ? `${tag} ${line}` : line))
+    .join('\n');
+}

@@ -11,6 +11,7 @@ import {
   nameFrom,
 } from '../../../src/lipsync/published';
 import {
+  applyAccent,
   expressionSpans,
   laughSpan,
   laughTimeMs,
@@ -92,12 +93,17 @@ interface GenerateBody {
   voiceName?: string;
   voiceGender?: VoiceGender;
   model?: LipsyncModel;
+  /** An accent to hold the voice to, as the author typed it. See applyAccent. */
+  accent?: string;
   params?: Partial<VoiceParams>;
   /** How reactions are performed. See ReactionOptions. */
   reactions?: Partial<ReactionOptions>;
 }
 
 const LANGUAGES = new Set(['en', 'fr', 'es']);
+
+/** Long enough for "West African French" and short enough that a pasted script is not one. */
+const MAX_ACCENT_CHARS = 40;
 const MODELS = new Set<LipsyncModel>(['eleven_v3', 'eleven_multilingual_v2']);
 
 /** What the aligner sends back. Its shape is fixed by lipsync/lip_sync_api.py. */
@@ -269,6 +275,11 @@ export async function onRequestPost(
   const voiceId = (body.voiceId ?? '').trim();
   const voiceGender = body.voiceGender;
   const model = body.model ?? 'eleven_v3';
+  // Capped rather than validated against a list, because there is no list: an accent is
+  // whatever the author names. The cap is the only thing worth enforcing — this string is
+  // repeated on every line of the script, so a pasted paragraph in the accent field would
+  // multiply into a large and entirely wasted quota spend before anything refused it.
+  const accent = (body.accent ?? '').trim().slice(0, MAX_ACCENT_CHARS);
   const params: VoiceParams = { ...DEFAULT_PARAMS, ...(body.params ?? {}) };
   const reactions: ReactionOptions = { ...DEFAULT_REACTIONS, ...(body.reactions ?? {}) };
 
@@ -327,6 +338,16 @@ export async function onRequestPost(
     return json({ error: 'That is all tags and no words', code: 'no_script' }, 400);
   }
 
+  // The accent goes on last, after the laughs have been lifted out, so that a line left
+  // holding nothing but a laugh does not get an accent tag stapled to it and slip past
+  // the emptiness check above as a "line" made entirely of stage direction.
+  //
+  // v3 ONLY, and for the same reason the laugh lift is unconditional there. v2 does not
+  // read tags, it reads text — an accent tag on that model is a voice saying the words
+  // "strong French-African accent" out loud at the top of every line. Nothing about that
+  // is recoverable, so v2 gets the accent it would have had anyway, which is the voice's.
+  const sent = model === 'eleven_v3' ? applyAccent(spoken, accent) : spoken;
+
   // --- 1. Synthesise, keeping the timings the synthesiser stamped -------------------
   const speech = await fetch(
     `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}` +
@@ -338,9 +359,10 @@ export async function onRequestPost(
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        // `spoken`, not `text`: the laugh tags we are covering ourselves never reach the
-        // model, which is what makes its output deterministic where they used to be.
-        text: spoken,
+        // `sent`, not `text`: the laugh tags we are covering ourselves never reach the
+        // model — which is what makes its output deterministic where they used to be —
+        // and the accent tags, which nobody typed, are added on the way out.
+        text: sent,
         model_id: model,
         voice_settings: {
           stability: params.stability,
@@ -496,7 +518,10 @@ export async function onRequestPost(
     createdAt: Date.now(),
     name: nameFrom(script),
     text,
-    spoken,
+    // What ElevenLabs was actually asked to say, accent tags included — the field means
+    // "what was sent", and after applyAccent that is no longer `spoken`.
+    spoken: sent,
+    accent: accent || undefined,
     script,
     language: language as LipsyncPackage['language'],
     voiceId,
