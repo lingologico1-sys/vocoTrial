@@ -381,6 +381,30 @@ export default function Compose({ onGenerated, onVoiceChange, busy, setBusy }: C
     return { fromLibrary: spliced, fromTimings: timed, dropped: gone, byTag };
   }, [reactions, covered, text, tagsAllowed]);
 
+  /**
+   * What would become of each clip-capable tag, whether or not it is in the line yet.
+   *
+   * THIS USED TO WAIT FOR THE TAG TO BE TYPED, on the reasoning that its fate was
+   * hypothetical until then. That was wrong: the answer is settled by the kind, the
+   * library and the model, and typing the tag changes none of the three. Withholding it
+   * meant the palette stayed silent at exactly the moment it was useful — before somebody
+   * spends a tag on a reaction that is going to be dropped.
+   *
+   * Empty until a voice is chosen, because coverage is per voice and "nothing is covered"
+   * would otherwise read as a library problem rather than an unanswered question.
+   */
+  const fate = useMemo(() => {
+    const out = new Map<string, Fate>();
+    if (!voiceId.trim()) return out;
+    const coveredSet = new Set(covered);
+    for (const tag of TAGS) {
+      const kind = tag.clip ? clipKindOf(tag.tag) : null;
+      if (!kind) continue;
+      out.set(tag.tag, coveredSet.has(kind) ? 'spliced' : tagsAllowed ? 'timed' : 'gone');
+    }
+    return out;
+  }, [covered, voiceId, tagsAllowed]);
+
   /** Inserts at the cursor rather than appending — a tag placed mid-line is the point. */
   function insert(tag: string) {
     const el = box.current;
@@ -640,7 +664,7 @@ export default function Compose({ onGenerated, onVoiceChange, busy, setBusy }: C
                 onClick={() => insert(t.tag)}
                 title={
                   t.clip
-                    ? `${FATE_HINT[byTag.get(t.tag) ?? 'unused']} Recorded clips are spliced into the finished audio, so this works on either model.`
+                    ? `${FATE_HINT[fate.get(t.tag) ?? 'unused']} Recorded clips are spliced into the finished audio, so this works on either model.`
                     : t.kind === 'reaction'
                       ? 'Makes sound the transcript has no words for. Its span is marked from the timings rather than aligned.'
                       : t.kind === 'pause'
@@ -650,11 +674,17 @@ export default function Compose({ onGenerated, onVoiceChange, busy, setBusy }: C
                 className={`rounded-md border px-2 py-0.5 font-mono text-[11px] transition-colors disabled:cursor-not-allowed disabled:border-slate-900 disabled:text-slate-700 ${KIND_STYLE[t.kind]}`}
               >
                 {t.tag}
-                {/* Only once the tag is in the line, because before that its fate is a
-                    hypothetical and eight permanent badges would be noise. */}
-                {byTag.get(t.tag) && (
-                  <span className={`ml-1 ${FATE_STYLE[byTag.get(t.tag)!]}`}>
-                    {FATE_MARK[byTag.get(t.tag)!]}
+                {/* On every clip-capable tag once a voice is known, not only the ones
+                    already typed. See `fate`. A tag in the line is marked a little
+                    brighter, so the palette answers "what can I use" and "what is in this
+                    line" at once without needing two marks. */}
+                {fate.get(t.tag) && (
+                  <span
+                    className={`ml-1 ${FATE_STYLE[fate.get(t.tag)!]} ${
+                      byTag.has(t.tag) ? '' : 'opacity-50'
+                    }`}
+                  >
+                    {FATE_MARK[fate.get(t.tag)!]}
                   </span>
                 )}
               </button>
@@ -668,11 +698,12 @@ export default function Compose({ onGenerated, onVoiceChange, busy, setBusy }: C
           already handles. Grey tags cost nothing.
         </p>
         <p className="text-[11px] leading-snug text-slate-600">
-          Once a reaction is in the line it is marked with what will happen to it:{' '}
+          Each reaction is marked with what would happen to it in this voice:{' '}
           <span className={FATE_STYLE.spliced}>{FATE_MARK.spliced}</span> spliced from your
           library, <span className={FATE_STYLE.timed}>{FATE_MARK.timed}</span> left for the
           model to perform, <span className={FATE_STYLE.gone}>{FATE_MARK.gone}</span> no
-          recording for this voice, so it will be dropped.
+          recording for this voice, so it would be dropped. The marks brighten for the ones
+          actually in your line.
         </p>
       </div>
 
