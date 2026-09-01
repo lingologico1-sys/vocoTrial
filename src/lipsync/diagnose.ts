@@ -1,5 +1,6 @@
 import type { LipsyncPackage } from './published';
 import { isMergedWord } from './warnings';
+import { wordCount } from './tags';
 
 /**
  * Working out why the mouth did what it did, and writing it down so it can be sent.
@@ -201,7 +202,10 @@ export function report(pkg: LipsyncPackage): string {
   );
   L.push(`  duration   ${secs(pkg.durationMs)}`);
   L.push(`  marks      ${pkg.marks.length}`);
-  L.push(`  words      ${pkg.words.length}`);
+  L.push(`  words      ${pkg.words.length} from the aligner, ${wordCount(pkg.script)} in the script` +
+    (pkg.words.length === wordCount(pkg.script)
+      ? ''
+      : `   <-- REACTION ANCHORS RESCALED BY ${(pkg.words.length / wordCount(pkg.script)).toFixed(2)}x`));
   L.push(`  oov        ${pkg.oovCount}`);
   const spliced = pkg.laughs ?? [];
   L.push(

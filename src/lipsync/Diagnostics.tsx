@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { AlertTriangle, Check, ClipboardCopy, Stethoscope } from 'lucide-react';
 import { MIN_QUIET, quietStretches, report } from './diagnose';
 import type { LipsyncPackage } from './published';
+import { wordCount } from './tags';
 
 /**
  * Why the mouth did that.
@@ -40,6 +41,9 @@ const secs = (ms: number) => `${(ms / 1000).toFixed(2)}s`;
 
 export default function Diagnostics({ pkg }: { pkg: LipsyncPackage }) {
   const quiet = useMemo(() => quietStretches(pkg), [pkg]);
+  // The count clipTimeMs measures the aligner's against. Recomputed rather than stored:
+  // it is a pure function of the script the package already carries.
+  const scriptWords = useMemo(() => wordCount(pkg.script), [pkg.script]);
   const [copied, setCopied] = useState(false);
 
   async function copy() {
@@ -235,7 +239,17 @@ export default function Diagnostics({ pkg }: { pkg: LipsyncPackage }) {
 
         <div className="flex flex-wrap gap-x-5 gap-y-1 border-t border-slate-900 pt-3 font-mono text-[11px] text-slate-600">
           <span>{pkg.marks.length} marks</span>
-          <span>{pkg.words.length} words</span>
+          {/* BOTH COUNTS, because the disagreement is the interesting number and neither
+              one alone shows it. clipTimeMs rescales every reaction anchor by the ratio
+              between them, so when they part company a spliced clip does not land where
+              the tag stood. MFA merges tokens across some punctuation — see isMergedWord
+              in warnings.ts — which makes this the thing to look at after adding one. */}
+          <span className={scriptWords === pkg.words.length ? undefined : 'text-amber-400/80'}>
+            {pkg.words.length} words
+            {scriptWords === pkg.words.length
+              ? ''
+              : ` — but ${scriptWords} in the script, so reaction anchors were rescaled by ${(pkg.words.length / scriptWords).toFixed(2)}×`}
+          </span>
           <span>{secs(pkg.durationMs)} aligned</span>
           <span>{pkg.model}</span>
           <span>{pkg.language}</span>
