@@ -4,9 +4,11 @@ import { scanMp3 } from '../functions/api/lipsync/_mp3.ts';
 import { silence } from '../functions/api/lipsync/generate.ts';
 import { addRoom, roomWarnings } from '../src/lipsync/warnings.ts';
 import {
+  chosenFor,
   eligible,
   pick,
   preferredFor,
+  treatmentOf,
   type ReactionLibraryIndex,
   type ReactionRender,
   type ReactionSource,
@@ -180,6 +182,64 @@ assert.equal(
   0,
   'the start of a take reports no gap rather than a measured one',
 );
+
+// --- the panel and the generator resolve through one function ----------------------------
+//
+// The bug this pins: LaughLibrary worked out "which version does this voice use" with a
+// rule of its own, and when the per-kind default arrived only eligible() learned about it.
+// A sniff with both treatments then played its conversion in the panel and spliced its
+// recording. Anything that can answer this question must answer it the same way.
+{
+  const both = (kind: ReactionClipKind): ReactionLibraryIndex => {
+    const s = source(`s-${kind}`, 'female', kind);
+    return {
+      sources: [s],
+      renders: [
+        render(`${kind}-original`, s.id, 'original', undefined, kind),
+        render(`${kind}-voice`, s.id, 'voice-converted', 'voice-f', kind),
+      ],
+    };
+  };
+
+  for (const kind of REACTION_CLIP_KINDS) {
+    const lib = both(kind);
+    const panel = chosenFor(lib, lib.sources[0], 'voice-f');
+    const generated = eligible(lib, kind, 'voice-f', 'female');
+    assert.deepEqual(
+      [panel?.id],
+      generated.map((r) => r.id),
+      `[${kind}] resolves the same for the panel and for generation`,
+    );
+    // And that answer is the kind's stated default, not whichever happens to exist.
+    assert.equal(
+      treatmentOf(panel!),
+      preferredFor(kind),
+      `[${kind}] uses its declared default when both treatments exist`,
+    );
+  }
+
+  // An explicit per-voice choice outranks the kind, in both directions.
+  const lib = both('sniffs');
+  assert.equal(treatmentOf(chosenFor(lib, lib.sources[0], 'voice-f')!), 'original');
+  lib.sources[0].preferredTreatmentByVoice = { 'voice-f': 'voice-converted' };
+  assert.equal(
+    treatmentOf(chosenFor(lib, lib.sources[0], 'voice-f')!),
+    'voice-converted',
+    'the author overrides the kind for one voice',
+  );
+  assert.deepEqual(
+    eligible(lib, 'sniffs', 'voice-f', 'female').map((r) => r.id),
+    ['sniffs-voice'],
+    'and generation follows that override too',
+  );
+
+  // Another voice is unaffected by that choice and falls back to the recording.
+  assert.equal(
+    treatmentOf(chosenFor(lib, lib.sources[0], 'other-f')!),
+    'original',
+    'a preference is per voice, not per source',
+  );
+}
 
 // --- room, and the punctuation offered to buy it -----------------------------------------
 {

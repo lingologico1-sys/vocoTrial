@@ -21,6 +21,7 @@ import {
   toWav,
 } from './audioTrim';
 import {
+  chosenFor,
   eligible,
   originalFor,
   preferredFor,
@@ -456,16 +457,15 @@ export default function LaughLibrary({
                 treatmentOf(render) === 'voice-converted' &&
                 render.voiceId === voiceId,
             );
-            const preferred = source.preferredTreatmentByVoice?.[voiceId];
-            const active: ClipTreatment = preferred === 'original' && original
-              ? 'original'
-              : here
-                ? 'voice-converted'
-                : 'original';
-            // The play button beside the treatment toggle auditions what this voice will
-            // actually use. Keeping it pointed at `here` made both toggle positions sound
-            // voice-converted even though the saved preference (and generation) changed.
-            const activeRender = active === 'original' ? original : here;
+            // ASKED, NOT RE-DERIVED. This row used to work out the answer itself with a
+            // rule of its own, which was right until the per-kind default arrived and then
+            // silently was not: a sniff with both treatments played its conversion here,
+            // labelled the toggle from that, and spliced the recording. chosenFor is what
+            // generate.ts resolves through, so the panel cannot disagree with the take.
+            const activeRender = chosenFor(library, source, voiceId);
+            const active: ClipTreatment = activeRender
+              ? treatmentOf(activeRender)
+              : 'original';
             return (
               <div
                 key={source.id}
@@ -484,8 +484,11 @@ export default function LaughLibrary({
                 <span className="min-w-0 flex-1 truncate text-xs text-slate-300">
                   {source.label}
                 </span>
+                {/* The length of what will actually be spliced. It read `here` before,
+                    so a row set to its original still showed the conversion's duration —
+                    and duration is the one number on this row that changes the take. */}
                 <span className="shrink-0 font-mono text-[11px] text-slate-600">
-                  {secs(here?.durationMs ?? source.durationMs)}
+                  {secs(activeRender?.durationMs ?? source.durationMs)}
                 </span>
                 {/* The recording, for comparing against the conversion — the only way to
                     judge whether the voice changer treated the laugh well. */}
@@ -524,15 +527,22 @@ export default function LaughLibrary({
                     make original
                   </button>
                 ) : null}
-                {here ? (
-                  <div className="flex shrink-0 items-center gap-1">
+                {/* THREE SEPARATE QUESTIONS, and they used to be one. The whole group hung
+                    off `here`, so a source with only a recording — now the ordinary case
+                    for the six breath and throat kinds, which default to the recording and
+                    give nobody a reason to convert — had no play button for the thing it
+                    was about to splice. Play asks "is there something to hear", the toggle
+                    asks "is there a choice to make", and render asks "is a conversion
+                    missing". Those have different answers. */}
+                <div className="flex shrink-0 items-center gap-1">
+                  {activeRender && (
                     <button
                       type="button"
-                      onClick={() => void audition((activeRender ?? here).id, 'render')}
+                      onClick={() => void audition(activeRender.id, 'render')}
                       title={
                         active === 'original'
-                          ? 'Play the selected original performance'
-                          : `Play the selected version in ${voiceName ?? 'this voice'}`
+                          ? 'Play the recording, which is what this voice will splice'
+                          : `Play the conversion, which is what ${voiceName ?? 'this voice'} will splice`
                       }
                       className={`rounded-md border p-1 transition-colors ${
                         active === 'voice-converted'
@@ -542,43 +552,52 @@ export default function LaughLibrary({
                     >
                       <Play size={12} />
                     </button>
-                    {original && voiceGender && (
-                      <button
-                        type="button"
-                        onClick={() => void choose(
-                          source.id,
-                          active === 'original' ? 'voice-converted' : 'original',
-                        )}
-                        disabled={busy}
-                        title="Choose which version this voice uses"
-                        className="rounded-md border border-slate-800 px-1.5 py-1 text-[10px] text-slate-400 disabled:text-slate-700"
-                      >
-                        use {active === 'original' ? 'voice' : 'original'}
-                      </button>
-                    )}
-                  </div>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => void renderFor(source.id)}
-                    disabled={
-                      busy ||
-                      !voiceId ||
-                      !voiceGender ||
-                      !source.gender ||
-                      source.gender !== voiceGender
-                    }
-                    title="Convert this laugh into the voice this page is using. Costs credits."
-                    className="inline-flex shrink-0 items-center gap-1 rounded-md border border-slate-700 px-2 py-1 text-[10px] text-slate-300 transition-colors hover:border-slate-500 disabled:cursor-not-allowed disabled:border-slate-900 disabled:text-slate-700"
-                  >
-                    {working === source.id ? (
-                      <Loader2 size={11} className="animate-spin" />
-                    ) : (
-                      <Wand2 size={11} />
-                    )}
-                    render for this voice
-                  </button>
-                )}
+                  )}
+                  {here && original && voiceGender && (
+                    <button
+                      type="button"
+                      onClick={() => void choose(
+                        source.id,
+                        active === 'original' ? 'voice-converted' : 'original',
+                      )}
+                      disabled={busy}
+                      title={
+                        active === 'original'
+                          ? `Switch this voice to the conversion. The recording is the default for a ${source.kind}.`
+                          : 'Switch this voice back to the recording as provided.'
+                      }
+                      className="rounded-md border border-slate-800 px-1.5 py-1 text-[10px] text-slate-400 disabled:text-slate-700"
+                    >
+                      use {active === 'original' ? 'voice' : 'original'}
+                    </button>
+                  )}
+                  {!here && (
+                    <button
+                      type="button"
+                      onClick={() => void renderFor(source.id)}
+                      disabled={
+                        busy ||
+                        !voiceId ||
+                        !voiceGender ||
+                        !source.gender ||
+                        source.gender !== voiceGender
+                      }
+                      title={
+                        preferredFor(source.kind) === 'original'
+                          ? `Convert into this voice. Costs credits — and a ${source.kind} keeps using the recording unless you then pick the conversion, because speech-to-speech has little to work with in one.`
+                          : 'Convert into the voice this page is using. Costs credits.'
+                      }
+                      className="inline-flex shrink-0 items-center gap-1 rounded-md border border-slate-700 px-2 py-1 text-[10px] text-slate-300 transition-colors hover:border-slate-500 disabled:cursor-not-allowed disabled:border-slate-900 disabled:text-slate-700"
+                    >
+                      {working === source.id ? (
+                        <Loader2 size={11} className="animate-spin" />
+                      ) : (
+                        <Wand2 size={11} />
+                      )}
+                      render for this voice
+                    </button>
+                  )}
+                </div>
                 <span
                   className="shrink-0 font-mono text-[10px] text-slate-700"
                   title="How many voices this laugh has been rendered into"

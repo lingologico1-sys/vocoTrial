@@ -218,6 +218,46 @@ export interface SplicedClip {
  * unvoiced material it was never trained on and the recording is likelier to be the better
  * sound. See `prefer` in tags.ts, where the per-kind answer lives.
  */
+/**
+ * The one render this voice would actually splice for this source, if any.
+ *
+ * THE SINGLE ANSWER TO "WHICH VERSION AM I GETTING", and it exists because there were
+ * briefly two. `eligible` decided it here for generation while LaughLibrary decided it
+ * again for the panel, and when the per-kind default arrived only one of them learned
+ * about it — so a sniff with both treatments played its conversion in the panel, labelled
+ * the toggle from that, and then spliced the recording. Anything asking this question now
+ * asks this function.
+ *
+ * The order is: the author's ear for this voice, then what the kind of sound asks for,
+ * then whichever exists. That last fallback is not a failure case — a kind that prefers a
+ * conversion nobody has rendered yet should play the recording rather than play nothing.
+ *
+ * Gender is NOT considered here, because it is a question about eligibility rather than
+ * about treatment, and the two callers need it at different moments. `eligible` gates on
+ * it before asking; the panel has already filtered the rows it draws.
+ */
+export function chosenFor(
+  library: ReactionLibraryIndex,
+  source: ReactionSource,
+  voiceId: string,
+): ReactionRender | undefined {
+  const converted = library.renders.find(
+    (render) =>
+      render.sourceId === source.id &&
+      treatmentOf(render) === 'voice-converted' &&
+      render.voiceId === voiceId,
+  );
+  // Sources from the previous version have no gender and no original derivative. Their
+  // exact-voice conversions remain usable until the source is explicitly classified.
+  if (!source.gender) return converted;
+
+  const original = originalFor(library.renders, source.id);
+  const wanted = source.preferredTreatmentByVoice?.[voiceId] ?? preferredFor(source.kind);
+  if (wanted === 'original' && original) return original;
+  if (wanted === 'voice-converted' && converted) return converted;
+  return converted ?? original;
+}
+
 export function eligible(
   library: ReactionLibraryIndex,
   kind: ReactionClipKind,
@@ -228,30 +268,11 @@ export function eligible(
 
   for (const source of library.sources) {
     if (source.kind !== kind) continue;
-    const converted = library.renders.find(
-      (render) =>
-        render.sourceId === source.id &&
-        treatmentOf(render) === 'voice-converted' &&
-        render.voiceId === voiceId,
-    );
-    // Sources from the previous version have no gender and no original derivative. Their
-    // exact-voice conversions remain usable until the source is explicitly classified.
-    if (!source.gender) {
-      if (converted) selected.push(converted);
-      continue;
-    }
-    if (!voiceGender || source.gender !== voiceGender) continue;
-
-    const original = originalFor(library.renders, source.id);
-    // The author's ear for this voice first, then what the kind of sound asks for, and
-    // only then whichever exists. Falling through to "whichever exists" is not a failure
-    // case: a preference for a conversion nobody has rendered yet should play the
-    // recording rather than play nothing.
-    const wanted = source.preferredTreatmentByVoice?.[voiceId] ?? preferredFor(kind);
-    if (wanted === 'original' && original) selected.push(original);
-    else if (wanted === 'voice-converted' && converted) selected.push(converted);
-    else if (converted) selected.push(converted);
-    else if (original) selected.push(original);
+    // A classified source has to match the pool. An unclassified legacy one is exact-voice
+    // only, which chosenFor enforces by returning nothing but its conversion.
+    if (source.gender && (!voiceGender || source.gender !== voiceGender)) continue;
+    const chosen = chosenFor(library, source, voiceId);
+    if (chosen) selected.push(chosen);
   }
 
   // Harvested legacy clips have no source. They remain exact-voice renders and bypass the
