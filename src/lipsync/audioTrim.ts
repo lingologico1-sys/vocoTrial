@@ -121,6 +121,79 @@ export function proposeBounds(buffer: AudioBuffer): { startMs: number; endMs: nu
 }
 
 /**
+ * The level of generated ElevenLabs speech, as an RMS over its loud windows.
+ *
+ * MEASURED, NOT GUESSED, and worth saying how. Taken from `mp3_44100_128` takes of ordinary
+ * lesson lines at the default voice settings, averaging the windows above the same -32dB
+ * relative floor `proposeBounds` uses — so it is the level of the speech itself rather than
+ * of the speech plus its pauses, which is the number a clip should be compared against.
+ *
+ * A REFERENCE AND NOT A TARGET. Nothing in this file applies gain, and that is deliberate
+ * rather than unfinished — see `levelOf`.
+ */
+const SPEECH_RMS = 0.13;
+
+/**
+ * How loud the selection is, in dB relative to generated speech.
+ *
+ * WHY THIS ONLY MEASURES. The obvious feature here is normalisation: match the clip to the
+ * speech and a phone recording stops sounding pasted in. It is the wrong default, and
+ * wrong in a way that gets worse the better it works. A breathy sound's character *is* its
+ * quietness — a sniff pulled up to speech level is not integrated, it is a loud wet noise
+ * where a sniff used to be, and the same is true of a sigh. A gasp is *supposed* to sit
+ * above the line. Across the six new kinds, the sounds a normaliser would move furthest
+ * are precisely the ones it would ruin.
+ *
+ * So the panel shows the number and the author decides. That is not a smaller version of
+ * normalising; it is the useful half of it. "Your sniff is 14dB under the line" is a fact
+ * somebody can act on in either direction, and acting on it in the wrong direction is
+ * exactly what the automatic version would have done for them.
+ *
+ * Null when the selection is silent, which is a real answer: there is no level, rather
+ * than a level of zero to be reported as minus infinity.
+ */
+export function levelOf(buffer: AudioBuffer, fromMs: number, toMs: number): number | null {
+  const samples = mono(buffer);
+  const rate = buffer.sampleRate;
+  const from = Math.max(0, Math.floor((fromMs / 1000) * rate));
+  const to = Math.min(samples.length, Math.ceil((toMs / 1000) * rate));
+  if (to <= from) return null;
+
+  const window = Math.max(1, Math.round((WINDOW_MS / 1000) * rate));
+  const levels: number[] = [];
+  for (let at = from; at + window <= to; at += window) {
+    let sum = 0;
+    for (let i = at; i < at + window; i++) sum += samples[i] * samples[i];
+    levels.push(Math.sqrt(sum / window));
+  }
+  if (levels.length === 0) return null;
+
+  // The loud part only, against the same relative floor the trim uses. Averaging the whole
+  // selection would report the pause inside a two-beat laugh as part of its loudness, and
+  // rank a clip quieter for having a gap in it.
+  const peak = Math.max(...levels);
+  if (peak === 0) return null;
+  const floor = peak * 10 ** (FLOOR_DB / 20);
+  const loud = levels.filter((l) => l >= floor);
+  if (loud.length === 0) return null;
+
+  const rms = Math.sqrt(loud.reduce((sum, l) => sum + l * l, 0) / loud.length);
+  return 20 * Math.log10(rms / SPEECH_RMS);
+}
+
+/** The loudest single sample in the selection, for the clipping warning. */
+export function peakOf(buffer: AudioBuffer, fromMs: number, toMs: number): number {
+  const samples = mono(buffer);
+  const rate = buffer.sampleRate;
+  const from = Math.max(0, Math.floor((fromMs / 1000) * rate));
+  const to = Math.min(samples.length, Math.ceil((toMs / 1000) * rate));
+
+  let peak = 0;
+  for (let i = from; i < to; i++) peak = Math.max(peak, Math.abs(samples[i]));
+  return peak;
+}
+
+/**
  * A slice of the buffer as a 16-bit mono PCM WAV.
  *
  * Mono because a laugh is one mouth and the conversion returns mono anyway, so carrying a

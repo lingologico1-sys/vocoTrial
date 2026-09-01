@@ -11,7 +11,15 @@ import {
   renderClip,
   LipsyncError,
 } from './library';
-import { decodeFile, proposeBounds, toBase64, toMp3, toWav } from './audioTrim';
+import {
+  decodeFile,
+  levelOf,
+  peakOf,
+  proposeBounds,
+  toBase64,
+  toMp3,
+  toWav,
+} from './audioTrim';
 import {
   eligible,
   originalFor,
@@ -389,6 +397,22 @@ export default function LaughLibrary({
   // What a conversion would be doing for this kind, shown next to the option so that
   // "why is the original selected" has an answer where the choice is made.
   const prefers = preferredFor(kind);
+
+  /**
+   * How this selection sits against generated speech, and whether it is near clipping.
+   *
+   * Shown and not acted on. See levelOf in audioTrim.ts for why normalising these
+   * automatically would destroy the sounds it moved furthest — a sniff is quiet because a
+   * sniff is quiet, and matching it to the line makes it something else.
+   */
+  const level = useMemo(
+    () => (picked && span > 0 ? levelOf(picked.buffer, fromMs, toMs) : null),
+    [picked, fromMs, toMs, span],
+  );
+  const peak = useMemo(
+    () => (picked && span > 0 ? peakOf(picked.buffer, fromMs, toMs) : 0),
+    [picked, fromMs, toMs, span],
+  );
   // Opposite-gender sources have no useful action for this voice: they cannot be used raw
   // and the server will not convert them across pools. Unknown legacy sources remain so
   // they can be classified and given an original derivative.
@@ -685,6 +709,35 @@ export default function LaughLibrary({
                 <Play size={12} />
                 hear selection
               </button>
+
+              {/* Against generated speech, because that is what it will be spliced into.
+                  A number rather than a correction: see levelOf. */}
+              {level !== null && (
+                <div className="flex flex-col gap-0.5">
+                  <span className="text-[11px] uppercase tracking-wide text-slate-600">
+                    Level
+                  </span>
+                  <span className="font-mono text-xs text-slate-300">
+                    {level >= 0 ? '+' : ''}
+                    {level.toFixed(1)} dB
+                    <span className="ml-1 font-sans text-[11px] text-slate-600">
+                      vs speech
+                    </span>
+                  </span>
+                  <span className="text-[11px] leading-snug text-slate-600">
+                    {Math.abs(level) < 4
+                      ? 'About the level of the line it will sit in.'
+                      : level < 0
+                        ? 'Quieter than the line. Right for a sniff or a gulp; check it is not simply a distant recording.'
+                        : 'Louder than the line. Right for a gasp; worth a listen for anything else.'}
+                  </span>
+                  {peak > 0.99 && (
+                    <span className="text-[11px] leading-snug text-amber-500">
+                      Peaks at full scale — this may already be clipped in the source.
+                    </span>
+                  )}
+                </div>
+              )}
 
               <label className="flex flex-col gap-1">
                 <span className="text-[11px] uppercase tracking-wide text-slate-600">Kind</span>
