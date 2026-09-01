@@ -1,11 +1,11 @@
 import { reposed } from '../live/visemeTable';
 import type { Quota } from './cost';
 import type {
-  LaughKind,
-  LaughLibraryIndex,
-  LaughRender,
-  LaughSource,
-  LaughTreatment,
+  ClipTreatment,
+  ReactionClipKind,
+  ReactionLibraryIndex,
+  ReactionRender,
+  ReactionSource,
   VoiceGender,
 } from './laughs';
 import type {
@@ -173,13 +173,13 @@ export function deleteLine(id: string): Promise<unknown> {
 /**
  * The laugh library.
  *
- * Split in two the way the store is: a laugh you provided is a `LaughSource` and belongs to
- * no voice, while a `LaughRender` is that laugh converted into one particular voice and is
+ * Split in two the way the store is: a sound you provided is a `ReactionSource` and belongs
+ * to no voice, while a `ReactionRender` is that sound rendered for one particular voice and is
  * the thing the splice actually uses. Importing does both at once; `renderClip` is how an
  * existing laugh reaches a second voice. See src/lipsync/laughs.ts.
  */
-export function listClips(): Promise<LaughLibraryIndex> {
-  return post<LaughLibraryIndex>('laughs/list');
+export function listClips(): Promise<ReactionLibraryIndex> {
+  return post<ReactionLibraryIndex>('laughs/list');
 }
 
 export interface ImportRequest {
@@ -187,7 +187,7 @@ export interface ImportRequest {
   audioBase64: string;
   /** The same samples encoded for the MP3 splice, with no re-performance. */
   rawMp3Base64: string;
-  kind: LaughKind;
+  kind: ReactionClipKind;
   gender: VoiceGender;
   label?: string;
   /** Present only when the author also requests an exact-voice conversion. */
@@ -210,10 +210,10 @@ export interface ImportRequest {
 export function importClip(
   request: ImportRequest,
 ): Promise<{
-  source: LaughSource;
-  original: LaughRender;
-  converted?: LaughRender;
-  render: LaughRender;
+  source: ReactionSource;
+  original: ReactionRender;
+  converted?: ReactionRender;
+  render: ReactionRender;
   conversionError?: { error: string; code: string; detail?: string };
   audioBase64: string;
 }> {
@@ -227,7 +227,7 @@ export function renderClip(request: {
   voiceName?: string;
   voiceGender: VoiceGender;
   removeBackgroundNoise?: boolean;
-}): Promise<{ render: LaughRender; audioBase64: string }> {
+}): Promise<{ render: ReactionRender; audioBase64: string }> {
   return changed(post('laughs/render', request));
 }
 
@@ -236,7 +236,7 @@ export function addOriginalClip(request: {
   sourceId: string;
   gender: VoiceGender;
   rawMp3Base64: string;
-}): Promise<{ render: LaughRender; gender: VoiceGender }> {
+}): Promise<{ render: ReactionRender; gender: VoiceGender }> {
   return changed(post('laughs/original', request));
 }
 
@@ -245,8 +245,8 @@ export function preferClip(request: {
   sourceId: string;
   voiceId: string;
   voiceGender: VoiceGender;
-  treatment: LaughTreatment;
-}): Promise<{ source: LaughSource }> {
+  treatment: ClipTreatment;
+}): Promise<{ source: ReactionSource }> {
   return changed(post('laughs/prefer', request));
 }
 

@@ -1,7 +1,7 @@
 import { INDEX_KEY, type PublishedLine } from '../../../src/lipsync/published';
 import {
   LAUGHS_INDEX_KEY,
-  type LaughLibraryIndex,
+  type ReactionLibraryIndex,
 } from '../../../src/lipsync/laughs';
 
 /**
@@ -78,7 +78,7 @@ export function writeIndex(bucket: R2Bucket, lines: PublishedLine[]): Promise<un
  * of the migration. Nothing rewrites them — an untouched library keeps working, and the
  * next import writes the new shape around it.
  */
-export async function readClips(bucket: R2Bucket): Promise<LaughLibraryIndex> {
+export async function readClips(bucket: R2Bucket): Promise<ReactionLibraryIndex> {
   const object = await bucket.get(LAUGHS_INDEX_KEY);
   if (!object) return { sources: [], renders: [] };
 
@@ -95,9 +95,9 @@ export async function readClips(bucket: R2Bucket): Promise<LaughLibraryIndex> {
         : [];
     return {
       sources: Array.isArray(parsed.sources)
-        ? (parsed.sources as LaughLibraryIndex['sources'])
+        ? (parsed.sources as ReactionLibraryIndex['sources'])
         : [],
-      renders: renders as LaughLibraryIndex['renders'],
+      renders: renders as ReactionLibraryIndex['renders'],
     };
   } catch {
     return { sources: [], renders: [] };
@@ -106,7 +106,7 @@ export async function readClips(bucket: R2Bucket): Promise<LaughLibraryIndex> {
 
 export function writeClips(
   bucket: R2Bucket,
-  library: LaughLibraryIndex,
+  library: ReactionLibraryIndex,
 ): Promise<unknown> {
   return bucket.put(LAUGHS_INDEX_KEY, JSON.stringify(library), {
     httpMetadata: { contentType: 'application/json' },

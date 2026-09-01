@@ -5,7 +5,7 @@ import {
   laughRenderKey,
   laughSourceKey,
   treatmentOf,
-  type LaughRender,
+  type ReactionRender,
   type VoiceGender,
 } from '../../../../src/lipsync/laughs';
 
@@ -109,7 +109,7 @@ export async function onRequestPost(
     return json(rest, status);
   }
 
-  const render: LaughRender = {
+  const render: ReactionRender = {
     id: crypto.randomUUID(),
     createdAt: Date.now(),
     sourceId,

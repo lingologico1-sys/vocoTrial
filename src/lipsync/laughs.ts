@@ -1,22 +1,33 @@
 /**
- * The laugh library: performances you provide, used as recorded or re-performed into one
- * exact voice, and spliced in place of whatever ElevenLabs would have done with the tag.
+ * The reaction library: performances you provide, used as recorded or re-performed into
+ * one exact voice, and spliced in place of whatever ElevenLabs would have done with the
+ * tag.
  *
- * WHY THERE IS A LIBRARY AT ALL. `[laughs]` and `[giggles]` are v3 *audio tags*, which are
- * advisory. The model decides per generation whether to render one, so the same line gives
- * an audible laugh on one take and silence on the next — and nothing downstream can tell
- * which happened, because `reactionSpans` reads the laugh's span off the tag's character
- * timings whether or not any sound was made. A face then laughs over speech. On
- * `eleven_multilingual_v2` it is worse than unreliable: that model ignores tags entirely,
- * so a laugh is not merely inconsistent, it is impossible.
+ * WHY THERE IS A LIBRARY AT ALL, and the answer is now two answers. On `eleven_v3` these
+ * are *audio tags*, which are advisory: the model decides per generation whether to render
+ * one, so the same line gives an audible laugh on one take and silence on the next — and
+ * nothing downstream can tell which happened, because `reactionSpans` reads the span off
+ * the tag's character timings whether or not any sound was made. A face then laughs over
+ * speech.
  *
- * WHERE THE LAUGHS COME FROM, AND WHY THAT CHANGED. The first version of this harvested
+ * On `eleven_multilingual_v2` the case is stronger and different in kind. That model does
+ * not read tags at all, and generate.ts strips every one of them out of what it is asked
+ * to say, so a reaction tag there makes no sound whatsoever. The library is not an
+ * improvement on the model's attempt; it is the only reason these exist on the model that
+ * holds an accent. That is what makes it worth recording eight kinds rather than two.
+ *
+ * WHERE THE CLIPS COME FROM, AND WHY THAT CHANGED. The first version of this harvested
  * clips out of takes where the model happened to laugh well. That assumed the model has
  * varied, good laughs to harvest; it has roughly one mediocre one per voice, so a library
  * built that way could never be better than the thing it replaced. So you provide the
- * laugh — recorded on a phone, or from a sound library. The browser makes a splice-ready
+ * sound — recorded on a phone, or from a sound library. The browser makes a splice-ready
  * MP3 without changing that performance. Speech-to-speech remains an optional second
  * treatment when matching the exact tutor matters more than preserving the recording.
+ *
+ * WHICH TREATMENT WINS IS A FACT ABOUT THE SOUND, not a global default, and it is written
+ * in the tag table rather than here — see `prefer` in tags.ts. Speech-to-speech is a
+ * *speech* model: it has a vowel to work with in a laugh or a yawn and nothing at all in a
+ * 200ms throat click, so a gulp defaults to the recording as made.
  *
  * A SOURCE IS NOT A RENDER, and keeping them apart is the whole shape of this file. A
  * converted clip belongs to exactly one voice. An original belongs to a male or female
@@ -25,27 +36,25 @@
  * WHAT MAKES THE SPLICE FREE is that both treatments produce `mp3_44100_128`, the same
  * format as text-to-speech. ElevenLabs encodes converted clips; a dynamically loaded LAME
  * encoder handles originals in the browser. The Worker scans both before storage.
+ *
+ * WHY THE STORED NAMES STILL SAY "LAUGH". The R2 keys, the route paths and the package
+ * field below were written when this held two kinds, and they are data rather than code —
+ * renaming them means migrating every stored object and every saved take to buy nothing a
+ * reader of this comment does not already know. The types say what they mean; the keys say
+ * where things are.
  */
 
-/** The two tags this applies to, and the only two. See TAGS in tags.ts. */
-export type LaughKind = 'laughs' | 'giggles';
+import { tagForKind, type ReactionClipKind, type ClipTreatment } from './tags';
+
+// Re-exported so that callers reaching for a library type do not have to know the tag
+// table owns two of them. See the note on ClipTreatment in tags.ts for why it lives there.
+export type { ReactionClipKind, ClipTreatment };
 
 /** The two vocal pools an original recording can belong to. */
 export type VoiceGender = 'male' | 'female';
 
-/** How the MP3 that is actually spliced was made. Absent on legacy voice renders. */
-export type LaughTreatment = 'original' | 'voice-converted';
-
-export const LAUGH_KINDS: LaughKind[] = ['laughs', 'giggles'];
-
-/** `[laughs]` -> 'laughs'. Null for every other tag, which is most of them. */
-export function laughKindOf(tag: string): LaughKind | null {
-  const inner = tag.trim().toLowerCase().replace(/^\[|\]$/g, '');
-  return inner === 'laughs' || inner === 'giggles' ? inner : null;
-}
-
 /**
- * A laugh you provided, trimmed and kept. Belongs to no voice.
+ * A reaction you provided, trimmed and kept. Belongs to no voice.
  *
  * This is the thing worth keeping. It is stored as WAV rather than as the file you picked
  * because what is kept is your *selection* — and a selection cannot be cut out of a
@@ -53,7 +62,7 @@ export function laughKindOf(tag: string): LaughKind | null {
  * to draw the trim. A header over those samples is a WAV, and speech-to-speech accepts
  * one, so the format never needs converting on this side at all.
  */
-export interface LaughSource {
+export interface ReactionSource {
   id: string;
   createdAt: number;
   /**
@@ -62,9 +71,11 @@ export interface LaughSource {
    * Fixed at import rather than chosen per render, because it is a fact about the sound.
    * A giggle is a laugh with the mouth shut, and the face commits to a closed smile before
    * it hears anything — so a big open laugh filed under `giggles` is a shut mouth over a
-   * wide sound in every voice it is ever rendered into, not just the first.
+   * wide sound in every voice it is ever rendered into, not just the first. The same trap
+   * is wider now: a gulp filed under `sniffs` blinks, and a yawn filed under `gasps`
+   * loses the arc that makes it read as a yawn at all.
    */
-  kind: LaughKind;
+  kind: ReactionClipKind;
   /**
    * Which voices may use the recording without re-performing it.
    *
@@ -73,10 +84,13 @@ export interface LaughSource {
    */
   gender?: VoiceGender;
   /**
-   * Per-voice audition choice. A conversion wins by default once it exists; recording an
-   * explicit `original` here lets the author keep the source performance for that voice.
+   * Per-voice audition choice, and the only thing that outranks the kind's own default.
+   *
+   * The default lives in the tag table (`prefer` in tags.ts) because it is a fact about
+   * the sound. This is the author overriding it for one voice after hearing both, which is
+   * the one piece of evidence the table cannot have.
    */
-  preferredTreatmentByVoice?: Record<string, LaughTreatment>;
+  preferredTreatmentByVoice?: Record<string, ClipTreatment>;
   label: string;
   durationMs: number;
   bytes: number;
@@ -90,7 +104,7 @@ export interface LaughSource {
  * this voice" on every request; denormalising means that stays a scan of one flat list
  * instead of a join, and `eligible` and `pick` keep the shape they already had.
  */
-export interface LaughRender {
+export interface ReactionRender {
   id: string;
   createdAt: number;
   /**
@@ -104,10 +118,10 @@ export interface LaughRender {
    */
   sourceId?: string;
   /** `original` is the source performance encoded to splice format, not re-performed. */
-  treatment?: LaughTreatment;
+  treatment?: ClipTreatment;
   /** Copied from the source; absent on harvested legacy clips. */
   gender?: VoiceGender;
-  kind: LaughKind;
+  kind: ReactionClipKind;
   label: string;
   /**
    * The voice this was rendered into, and the only voice it may be spliced into.
@@ -128,39 +142,65 @@ export const laughSourceKey = (id: string) => `laughs/sources/${id}.wav`;
 export const laughRenderKey = (id: string) => `laughs/renders/${id}.mp3`;
 
 /** Both halves of the library, as one stored object. */
-export interface LaughLibraryIndex {
-  sources: LaughSource[];
-  renders: LaughRender[];
+export interface ReactionLibraryIndex {
+  sources: ReactionSource[];
+  renders: ReactionRender[];
 }
 
-export function treatmentOf(render: LaughRender): LaughTreatment {
+export function treatmentOf(render: ReactionRender): ClipTreatment {
   return render.treatment === 'original' ? 'original' : 'voice-converted';
+}
+
+/**
+ * Which treatment a kind of sound wants when nobody has said otherwise.
+ *
+ * Reads the tag table rather than keeping a second list, so a kind added there arrives
+ * here with its answer already attached. `voice-converted` for anything the table does not
+ * mark, which preserves what this did before the field existed.
+ */
+export function preferredFor(kind: ReactionClipKind): ClipTreatment {
+  return tagForKind(kind)?.prefer ?? 'voice-converted';
 }
 
 /** The one original-performance derivative belonging to a source, when it has one. */
 export function originalFor(
-  renders: readonly LaughRender[],
+  renders: readonly ReactionRender[],
   sourceId: string,
-): LaughRender | undefined {
+): ReactionRender | undefined {
   return renders.find(
     (render) => render.sourceId === sourceId && treatmentOf(render) === 'original',
   );
 }
 
 /**
- * A laugh that was spliced in, recorded on the package.
+ * A reaction that was spliced in, recorded on the package.
  *
  * `atMs` is on the *final* timeline — where a listener hears it, not where it was going to
- * go before earlier laughs pushed it along. The label is copied rather than referenced so
+ * go before earlier clips pushed it along. The label is copied rather than referenced so
  * that deleting a clip does not make an old package unable to describe itself.
  */
-export interface SplicedLaugh {
+export interface SplicedClip {
   clipId: string;
-  kind: LaughKind;
+  kind: ReactionClipKind;
   label: string;
   atMs: number;
+  /**
+   * How long the audible clip is — the pad NOT included.
+   *
+   * THE PAD IS EXCLUDED ON PURPOSE, and putting it in was the obvious mistake. This pair
+   * of numbers is what `clipSpan` builds the face's span from, so a duration carrying
+   * 78ms of silence at each end would hold the mouth in a gulp through the quiet before
+   * and after it. `atMs` likewise points at the first frame of real sound, not at the
+   * start of the insertion.
+   *
+   * What the timeline was shifted by is `durationMs + 2 * padMs`, derived where it is
+   * needed rather than stored, so that these two fields keep meaning exactly what a
+   * listener would say they mean.
+   */
   durationMs: number;
-  treatment?: LaughTreatment;
+  /** Silence added either side to keep the clip off the words. Absent when there was room. */
+  padMs?: number;
+  treatment?: ClipTreatment;
 }
 
 /**
@@ -169,14 +209,22 @@ export interface SplicedLaugh {
  * Both filters are hard. A giggle standing in for a laugh is the wrong gesture at the wrong
  * length, and the face is already committed to whichever the author typed. A render from
  * another voice is another person.
+ *
+ * WHERE TWO TREATMENTS EXIST, the kind decides which is offered unless the author has said
+ * otherwise for this voice. That order — author, then kind, then whatever there is — is the
+ * one behavioural change this file has had since the six new kinds arrived, and it matters
+ * because the old rule was "a conversion always wins". True of a laugh, whose timbre is
+ * most of what identifies it; false of a sniff, where speech-to-speech is being handed
+ * unvoiced material it was never trained on and the recording is likelier to be the better
+ * sound. See `prefer` in tags.ts, where the per-kind answer lives.
  */
 export function eligible(
-  library: LaughLibraryIndex,
-  kind: LaughKind,
+  library: ReactionLibraryIndex,
+  kind: ReactionClipKind,
   voiceId: string,
   voiceGender?: VoiceGender,
-): LaughRender[] {
-  const selected: LaughRender[] = [];
+): ReactionRender[] {
+  const selected: ReactionRender[] = [];
 
   for (const source of library.sources) {
     if (source.kind !== kind) continue;
@@ -195,8 +243,13 @@ export function eligible(
     if (!voiceGender || source.gender !== voiceGender) continue;
 
     const original = originalFor(library.renders, source.id);
-    const preferred = source.preferredTreatmentByVoice?.[voiceId];
-    if (preferred === 'original' && original) selected.push(original);
+    // The author's ear for this voice first, then what the kind of sound asks for, and
+    // only then whichever exists. Falling through to "whichever exists" is not a failure
+    // case: a preference for a conversion nobody has rendered yet should play the
+    // recording rather than play nothing.
+    const wanted = source.preferredTreatmentByVoice?.[voiceId] ?? preferredFor(kind);
+    if (wanted === 'original' && original) selected.push(original);
+    else if (wanted === 'voice-converted' && converted) selected.push(converted);
     else if (converted) selected.push(converted);
     else if (original) selected.push(original);
   }
@@ -233,12 +286,12 @@ export function eligible(
  * back to whatever generate.ts decides the tag should do without one.
  */
 export function pick(
-  library: LaughLibraryIndex,
-  kind: LaughKind,
+  library: ReactionLibraryIndex,
+  kind: ReactionClipKind,
   voiceId: string,
   voiceGender?: VoiceGender,
   random: () => number = Math.random,
-): LaughRender | null {
+): ReactionRender | null {
   const options = eligible(library, kind, voiceId, voiceGender);
   if (options.length === 0) return null;
   return options[Math.floor(random() * options.length) % options.length];
@@ -246,13 +299,13 @@ export function pick(
 
 /** Which voices a source has already been rendered into. */
 export function renderedVoices(
-  renders: readonly LaughRender[],
+  renders: readonly ReactionRender[],
   sourceId: string,
 ): Set<string> {
   return new Set(
     renders
       .filter(
-        (render): render is LaughRender & { voiceId: string } =>
+        (render): render is ReactionRender & { voiceId: string } =>
           render.sourceId === sourceId &&
           treatmentOf(render) === 'voice-converted' &&
           Boolean(render.voiceId),

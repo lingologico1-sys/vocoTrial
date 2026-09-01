@@ -5,7 +5,6 @@
 // phone, so there is nothing to collapse. This module names poses directly.
 import type { Viseme, VisemeMark } from '../live/visemeTable';
 import type { ExpressionSpan, ReactionOptions } from './published';
-import { laughKindOf, type LaughKind } from './laughs';
 
 /**
  * ElevenLabs v3 audio tags, sorted by what they do to a forced alignment.
@@ -39,12 +38,57 @@ import { laughKindOf, type LaughKind } from './laughs';
 
 export type TagKind = 'directive' | 'pause' | 'reaction';
 
+/**
+ * How the MP3 that actually gets spliced was made.
+ *
+ * DEFINED HERE RATHER THAN IN laughs.ts, WHERE IT IS MOSTLY USED, because the tag table's
+ * `prefer` field needs it and this module deliberately imports nothing from the library.
+ * tags.ts is the leaf — it is pulled into a Worker by functions/api/lipsync — so every
+ * edge points at it and none point out. laughs.ts re-exports this for its own callers.
+ */
+export type ClipTreatment = 'original' | 'voice-converted';
+
 export interface Tag {
   /** Exactly as it must appear in the text, brackets included. */
   tag: string;
   kind: TagKind;
   /** Which group the picker files it under. */
   group: 'Emotions' | 'Delivery' | 'Reactions' | 'Pacing';
+  /**
+   * True of a reaction that can be replaced by a recording somebody provided.
+   *
+   * THIS FLAG IS THE KIND SET. REACTION_CLIP_KINDS is derived from it, so adding a tag to
+   * the library is one field here rather than an edit in four files that have to agree.
+   * A row carrying it must also carry a `viseme`, because a spliced clip builds its span
+   * from this table and a span with no pose is a clip nothing can draw — asserted in
+   * scripts/laughs.ts rather than left to convention.
+   *
+   * Not every reaction has it, and the omissions are deliberate. `[panting]` is rhythmic
+   * and pulses rather than holding, so one recording cannot stand in for a span of
+   * arbitrary length. `[hesitates]` and `[stammers]` are wordlike and language-specific:
+   * a recorded English "um" spliced into a French lesson is worse than the model's own
+   * attempt, which at least hesitates in the right language.
+   */
+  clip?: true;
+  /**
+   * Which treatment this sound defaults to when nobody has chosen one for the voice.
+   *
+   * Per kind rather than per category, because "unvoiced" is not the cut that matters.
+   * Speech-to-speech is a *speech* model: it has plenty to work with in a yawn, which is
+   * voiced and sustained, and nothing at all in a 200ms throat click. So a yawn defaults
+   * to a conversion and a gulp to the recording as made. An author's explicit per-voice
+   * choice still wins over this — see preferredTreatmentByVoice in laughs.ts.
+   */
+  prefer?: ClipTreatment;
+  /**
+   * Whether background-noise removal is on by default when converting this kind.
+   *
+   * ElevenLabs' isolation model is trained to remove everything that is not speech, and a
+   * sniff *is* not speech. On a laugh it takes a room off and occasionally softens the
+   * edges; on a breath sound it can remove the clip. Off by default for anything breathy,
+   * and still available for a recording with an audible room behind it.
+   */
+  denoise?: boolean;
   /**
    * For reactions only: the pose its span wears.
    *
@@ -127,7 +171,8 @@ export const TAGS: Tag[] = [
   // held and `laughBob` dips the head through the span. See LAUGH_NOD_GAIN in
   // headMotion.ts, and `nod` below, which is what turns it on.
   { tag: '[laughs]', kind: 'reaction', group: 'Reactions', viseme: 'laugh',
-    perform: 'hold', eyes: 'closed', laughing: true },
+    perform: 'hold', eyes: 'closed', laughing: true,
+    clip: true, prefer: 'voice-converted', denoise: true },
   // A giggle: the same gesture as a laugh, one size down and with the mouth shut. It
   // was a literal alias of [laughs] until now — same open pose, same closed eyes, same
   // bob — which meant the palette offered a distinction it did not draw.
@@ -149,7 +194,8 @@ export const TAGS: Tag[] = [
   // shallower — see GIGGLE_BOB_GAIN in headMotion.ts, which is where the depth lives,
   // because depth is a fact about playback and this table is a fact about the body.
   { tag: '[giggles]', kind: 'reaction', group: 'Reactions', viseme: 'smile',
-    perform: 'hold', eyes: 'none', giggling: true },
+    perform: 'hold', eyes: 'none', giggling: true,
+    clip: true, prefer: 'voice-converted', denoise: true },
 
   // Panting keeps the pulse, and is the only thing left that has one. It survives the
   // argument above because it alternates between two poses that differ only in how far
@@ -161,34 +207,46 @@ export const TAGS: Tag[] = [
 
   // A yawn is slow open, long hold, slow close — and the eyes are half of what makes
   // one recognisable. Held `aa` with the eyes open gets the shape and misses the yawn.
+  // Voiced and sustained, which is why this is the one of the six that defaults to a
+  // conversion: there is a vowel in a yawn for a speech model to carry into the voice.
   { tag: '[yawn]', kind: 'reaction', group: 'Reactions', viseme: 'aa',
-    perform: 'arc', edge: 'uh', eyes: 'closed' },
+    perform: 'arc', edge: 'uh', eyes: 'closed',
+    clip: true, prefer: 'voice-converted', denoise: true },
 
   // A sigh has a shape over time: the lips part, hold, and trail shut. The blink is
   // what a sigh looks like as much as the mouth is.
   { tag: '[sighs]', kind: 'reaction', group: 'Reactions', viseme: 'uh',
-    perform: 'arc', edge: 'rest', eyes: 'blink' },
+    perform: 'arc', edge: 'rest', eyes: 'blink',
+    clip: true, prefer: 'original', denoise: false },
 
   // A gasp snaps open and STAYS open — the one place a held pose is literally correct.
   // Eyes deliberately left alone: a gasp widens them, and no kit has wide-eye artwork,
   // so shutting them would be actively wrong rather than merely incomplete.
+  // The attack IS the gasp, and a conversion is liable to smear it, so the recording
+  // stands as made unless somebody auditions a conversion and prefers it.
   { tag: '[gasps]', kind: 'reaction', group: 'Reactions', viseme: 'aa',
-    perform: 'hold', eyes: 'none' },
+    perform: 'hold', eyes: 'none',
+    clip: true, prefer: 'original', denoise: false },
 
   // Lips slightly parted, the sound made in the throat, and over quickly.
   { tag: '[clears throat]', kind: 'reaction', group: 'Reactions', viseme: 'uh',
-    perform: 'hold', eyes: 'none' },
+    perform: 'hold', eyes: 'none',
+    clip: true, prefer: 'original', denoise: false },
 
   // Swallowing keeps the lips shut. The throat does the work and a portrait has no
   // throat, so a closed mouth is not an approximation — it is all there is.
   { tag: '[gulps]', kind: 'reaction', group: 'Reactions', viseme: 'mbp',
-    perform: 'hold', eyes: 'none' },
+    perform: 'hold', eyes: 'none',
+    clip: true, prefer: 'original', denoise: false },
 
   // A sniff is nasal, and `rest` was the worst answer in the table: indistinguishable
   // from saying nothing. Compressed lips and a blink is what one looks like from the
   // front, the nose being the part a drawing cannot move.
+  // Nasal, unvoiced, and the kind most easily destroyed by noise removal — a sniff is
+  // exactly what an isolation model is trained to consider noise. See `denoise` above.
   { tag: '[sniffs]', kind: 'reaction', group: 'Reactions', viseme: 'mbp',
-    perform: 'hold', eyes: 'blink' },
+    perform: 'hold', eyes: 'blink',
+    clip: true, prefer: 'original', denoise: false },
 
   // Pacing. The first three are silence, which the aligner handles correctly unaided.
   { tag: '[pause]', kind: 'pause', group: 'Pacing' },
@@ -205,6 +263,53 @@ export const TAGS: Tag[] = [
 ];
 
 const BY_TAG = new Map(TAGS.map((t) => [t.tag.toLowerCase(), t]));
+
+/**
+ * A reaction the library can stand in for, named without its brackets.
+ *
+ * WRITTEN OUT AS A UNION AND ALSO DERIVED BELOW, which looks like saying it twice and is
+ * not. The union is what every signature downstream is checked against, so it has to be a
+ * type; the derived list is what runs, so it has to come from the table or the table stops
+ * being the single place a kind is added. scripts/laughs.ts asserts the two agree, which
+ * is the only moment they could ever disagree.
+ *
+ * The values are the tag text, so `[clears throat]` is the kind `'clears throat'`, space
+ * included. That reads oddly in a type and is right in every other respect: `clipKindOf`
+ * unwraps a tag to get here and `clipSpan` re-wraps to look the row back up, so a kind is
+ * exactly a tag with its brackets off and no mapping table is needed in between.
+ */
+export type ReactionClipKind =
+  | 'laughs'
+  | 'giggles'
+  | 'yawn'
+  | 'sighs'
+  | 'gasps'
+  | 'clears throat'
+  | 'gulps'
+  | 'sniffs';
+
+/** Every kind the library can hold, in palette order. Derived; see ReactionClipKind. */
+export const REACTION_CLIP_KINDS: ReactionClipKind[] = TAGS.filter((t) => t.clip).map(
+  (t) => t.tag.slice(1, -1) as ReactionClipKind,
+);
+
+/**
+ * `[sighs]` -> 'sighs'. Null for every other tag, which is still most of them.
+ *
+ * Case and surrounding space are forgiven because this reads what an author typed, and a
+ * tag inserted by the palette sits next to tags that were not.
+ */
+export function clipKindOf(tag: string): ReactionClipKind | null {
+  const inner = tag.trim().toLowerCase().replace(/^\[|\]$/g, '');
+  return (REACTION_CLIP_KINDS as string[]).includes(inner)
+    ? (inner as ReactionClipKind)
+    : null;
+}
+
+/** The table row for a kind, which is where its pose and its defaults live. */
+export function tagForKind(kind: ReactionClipKind): Tag | undefined {
+  return BY_TAG.get(`[${kind}]`);
+}
 
 /** Any bracketed run, whether or not it is a tag this build knows. */
 const BRACKETED = /\[[^\]\n]*\]/g;
@@ -243,7 +348,7 @@ export function reactionsIn(text: string): Tag[] {
  * tier. Every laugh standing after such a mark then anchored one word late, which is
  * exactly the failure this counts against: the laugh landed after the first word of the
  * next sentence instead of in the silence before it. Proportional rescaling in
- * `laughTimeMs` does not save it, because a one-token disagreement spread over forty
+ * `clipTimeMs` does not save it, because a one-token disagreement spread over forty
  * words rounds straight back to the same off-by-one.
  */
 export function wordCount(script: string): number {
@@ -255,9 +360,9 @@ function isWord(token: string): boolean {
   return /[\p{L}\p{N}]/u.test(token);
 }
 
-/** One laugh tag lifted out of the text, and where in the script it was standing. */
-export interface LaughTag {
-  kind: LaughKind;
+/** One reaction tag lifted out of the text, and where in the script it was standing. */
+export interface ClipTag {
+  kind: ReactionClipKind;
   tag: string;
   /**
    * How many script words precede it.
@@ -268,28 +373,48 @@ export interface LaughTag {
    * are still there, still spoken, and still measured.
    */
   wordsBefore: number;
+  /**
+   * Where this tag stood among the lifted ones, counting from zero.
+   *
+   * NEEDED BECAUSE `wordsBefore` IS NOT UNIQUE. Two tags with nothing between them —
+   * "[sighs] [yawn]" — precede exactly the same words, so they resolve to the same
+   * millisecond and the sort that orders insertions cannot separate them. Today they
+   * come out right anyway, because Array.prototype.sort has been stable since ES2019 and
+   * nothing between here and the splice reorders the list. That is true, and it is an
+   * invariant nothing states and nothing tests — the kind of thing that stays true until
+   * somebody adds a filter. Sorting on (atMs, index) says it outright.
+   */
+  index: number;
 }
 
 /**
- * The text with laugh tags lifted out, and a note of where each one stood.
+ * The text with library-covered reaction tags lifted out, and a note of where each stood.
  *
- * WHY ONLY THESE TWO. Every other tag still goes to ElevenLabs untouched, and should:
- * `[whispering]` changes how words are said and works, `[pause]` inserts silence the
- * aligner reads correctly on its own, and `[sighs]` makes a sound we have no library for
- * and no reason to replace. It is specifically `[laughs]` and `[giggles]` that are being
- * taken over, because they are the two that we can now do better ourselves — and taking
- * them out of the prompt is most of why that works. The model stops being asked for a
- * laugh, so it stops sometimes deciding not to give one, and what it returns is clean
- * speech with a known gap in the sense rather than a coin flip in the audio.
+ * WHY THESE AND NOT EVERY TAG. A directive changes how words are said and costs nothing,
+ * so `[whispering]` stays. A pause inserts silence the aligner reads correctly unaided,
+ * so `[pause]` stays. What gets lifted is the set the library can put a real recording in
+ * place of — see `clip` in the Tag table — because for those the model is either
+ * unreliable or, on multilingual v2, silent. Taking the tag out of the prompt is most of
+ * why the replacement works: the model stops being asked for a sound, so it stops
+ * sometimes deciding not to make one, and what it returns is clean speech with a known
+ * gap in the sense rather than a coin flip in the audio.
  *
  * WHAT THIS COSTS, said plainly because it is the one real regression. With the tag gone,
- * ElevenLabs has no reason to leave room where the laugh goes, so a laugh in the middle
- * of an unpunctuated clause is spliced into continuous speech and reads as an
- * interruption. Punctuation on either side is what buys the room back, and it is the
- * author's to place — which is why this is documented rather than worked around by, say,
- * substituting an ellipsis, a thing v3 reads as hesitation and would perform.
+ * ElevenLabs has no reason to leave room where the reaction goes, so one in the middle of
+ * an unpunctuated clause is spliced into continuous speech and reads as an interruption.
+ *
+ * THIS BITES HARDER THAN IT DID FOR LAUGHS, which is the thing to know before adding a
+ * kind. A laugh usually stands at a sentence boundary, where there is room whether or not
+ * anybody arranged for it; `[gulps]`, `[sniffs]` and `[clears throat]` are most natural
+ * mid-clause, which is exactly where there is none.
+ *
+ * There are two answers to that and they are deliberately different in kind. Punctuation
+ * either side asks the model to leave room, and is the author's to place — warnings.ts
+ * spots the omission and offers the rewrite. Padding the splice takes the room instead of
+ * asking for it and needs nothing from the model; see PAD_MS in generate.ts. Neither one
+ * substitutes an ellipsis, which v3 reads as hesitation and would perform.
  */
-export function splitLaughs(
+export function splitClips(
   text: string,
   /**
    * Which kinds to lift, which is which kinds the library can actually cover.
@@ -300,21 +425,22 @@ export function splitLaughs(
    * this build did before the library existed, so the floor is the old behaviour instead
    * of a laugh that silently never happens at all.
    */
-  kinds: readonly LaughKind[],
-): { spoken: string; laughs: LaughTag[] } {
-  const laughs: LaughTag[] = [];
+  kinds: readonly ReactionClipKind[],
+): { spoken: string; clips: ClipTag[] } {
+  const clips: ClipTag[] = [];
   let spoken = '';
   let read = 0;
 
   for (const match of text.matchAll(BRACKETED)) {
-    const kind = laughKindOf(match[0]);
+    const kind = clipKindOf(match[0]);
     if (kind === null || !kinds.includes(kind)) continue;
-    laughs.push({
+    clips.push({
       kind,
       tag: match[0],
       // Counted over the script, not the raw text, so that directive tags standing
       // between here and the start are not mistaken for words the aligner will report.
       wordsBefore: wordCount(stripTags(text.slice(0, match.index))),
+      index: clips.length,
     });
     spoken += text.slice(read, match.index);
     read = match.index + match[0].length;
@@ -325,56 +451,82 @@ export function splitLaughs(
     // Only the run of spaces a removed tag leaves behind is tidied. Newlines and the
     // author's own spacing are left alone: this is going to a model that reads
     // punctuation for prosody, and reflowing it would change the read.
-    laughs,
+    clips,
     spoken: spoken.replace(/[ \t]{2,}/g, ' ').replace(/[ \t]+([,.!?;:])/g, '$1').trim(),
   };
 }
 
 /**
- * Where in the audio a lifted laugh belongs, from the words the aligner did measure.
+ * Where in the audio a lifted reaction belongs, from the words the aligner did measure,
+ * and how much room there was for it.
  *
  * THE MIDPOINT OF THE GAP, not the end of the word before or the start of the one after.
- * A laugh butted against the last phoneme of the previous word clips its own onset; one
+ * A clip butted against the last phoneme of the previous word clips its own onset; one
  * butted against the next word leaves no room for the mouth to arrive. Splitting the
  * silence gives the gesture a boundary on both sides, and where there is no silence at
  * all — two words run together — the midpoint degenerates to that instant, which is the
  * honest answer rather than a fabricated pause.
  *
+ * `gapMs` IS RETURNED BECAUSE THE CALLER CANNOT RECOVER IT. The midpoint is the same
+ * number whether it splits 400ms of silence or 0ms of none, so the one fact that decides
+ * whether a reaction will sound placed or interrupting is destroyed by the very average
+ * that positions it. Measured here, it does two jobs downstream: the splice pads a gap
+ * too small to hold a clip, and the audio report prints it so "why did my sniff cut the
+ * sentence in half" has an answer on the page rather than in somebody's ear.
+ *
+ * Zero in both degenerate branches, and that is a claim about room rather than a missing
+ * measurement — at the very start or the very end of a take there is no gap between two
+ * words to divide, so there is nothing the pad should be reasoning about.
+ *
  * INDICES ARE RESCALED WHEN THE COUNTS DISAGREE, which is a real case and not a
  * defensive flourish. `wordsBefore` counts whitespace-separated tokens; MFA counts what
  * its dictionary considers words, and in French a clitic like "l'école" can come back as
- * two. Taking the index literally would then put every laugh after that point one word
+ * two. Taking the index literally would then put every clip after that point one word
  * early, and the error accumulates down the line. Scaling proportionally spreads the
  * disagreement instead of concentrating it at the end, and the exact case — the counts
  * agreeing, which is nearly every English line — is unaffected because the ratio is 1.
+ *
+ * That rescale is also why warnings.ts is careful about inserting punctuation: MFA merges
+ * tokens across some of it (see isMergedWord), so a comma added between two words can
+ * lower `words.length` and move every anchor in the line.
  */
-export function laughTimeMs(
-  laugh: LaughTag,
+export function clipTimeMs(
+  clip: ClipTag,
   scriptWordCount: number,
   words: ReadonlyArray<{ startMs: number; endMs: number }>,
   durationMs: number,
-): number {
-  if (words.length === 0) return Math.max(0, Math.round(durationMs / 2));
+): { atMs: number; gapMs: number } {
+  if (words.length === 0) {
+    return { atMs: Math.max(0, Math.round(durationMs / 2)), gapMs: 0 };
+  }
 
   const scaled =
     scriptWordCount > 0 && scriptWordCount !== words.length
-      ? Math.round((laugh.wordsBefore * words.length) / scriptWordCount)
-      : laugh.wordsBefore;
+      ? Math.round((clip.wordsBefore * words.length) / scriptWordCount)
+      : clip.wordsBefore;
   const index = Math.max(0, Math.min(words.length, scaled));
 
   // Before the first word: at the very top of the clip. Whatever silence ElevenLabs put
-  // in front of the speech stays in front of the laugh, which is where it belongs.
-  if (index === 0) return 0;
+  // in front of the speech stays in front of the reaction, which is where it belongs.
+  if (index === 0) return { atMs: 0, gapMs: 0 };
   // After the last word: at the end, not at the last word's end — a clip usually has a
-  // moment of decay after the final phoneme, and cutting into it to place a laugh would
-  // truncate the sentence to fit the gesture.
-  if (index >= words.length) return Math.max(words[words.length - 1].endMs, durationMs);
+  // moment of decay after the final phoneme, and cutting into it to place a reaction
+  // would truncate the sentence to fit the gesture.
+  if (index >= words.length) {
+    return { atMs: Math.max(words[words.length - 1].endMs, durationMs), gapMs: 0 };
+  }
 
-  return Math.round((words[index - 1].endMs + words[index].startMs) / 2);
+  // Negative where MFA reports overlapping words, which it occasionally does; clamped so
+  // that a nonsense gap reads as no room rather than as room the pad would then skip.
+  const gapMs = Math.max(0, words[index].startMs - words[index - 1].endMs);
+  return {
+    atMs: Math.round((words[index - 1].endMs + words[index].startMs) / 2),
+    gapMs,
+  };
 }
 
 /**
- * The span a laugh clip occupies, built from a length we chose rather than one we found.
+ * The span a spliced clip occupies, built from a length we chose rather than one we found.
  *
  * This is the payoff of the whole exercise, and it is worth being explicit about what
  * changed. `reactionSpans` below measures a span off ElevenLabs' character timings —
@@ -384,8 +536,12 @@ export function laughTimeMs(
  * `laughBob` — takes a `Span` and cannot tell which of the two it was handed, which is
  * exactly why nothing downstream had to change.
  */
-export function laughSpan(kind: LaughKind, startMs: number, durationMs: number): Span | null {
-  const tag = BY_TAG.get(`[${kind}]`);
+export function clipSpan(
+  kind: ReactionClipKind,
+  startMs: number,
+  durationMs: number,
+): Span | null {
+  const tag = tagForKind(kind);
   if (!tag?.viseme) return null;
   return spanFrom(tag, startMs, startMs + durationMs);
 }

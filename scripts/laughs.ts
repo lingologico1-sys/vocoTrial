@@ -1,18 +1,33 @@
 import assert from 'node:assert/strict';
 import { Mp3Encoder } from '@breezystack/lamejs';
 import { scanMp3 } from '../functions/api/lipsync/_mp3.ts';
+import { silence } from '../functions/api/lipsync/generate.ts';
 import {
   eligible,
   pick,
-  type LaughLibraryIndex,
-  type LaughRender,
-  type LaughSource,
+  preferredFor,
+  type ReactionLibraryIndex,
+  type ReactionRender,
+  type ReactionSource,
 } from '../src/lipsync/laughs.ts';
+import {
+  REACTION_CLIP_KINDS,
+  TAGS,
+  clipKindOf,
+  clipSpan,
+  clipTimeMs,
+  splitClips,
+  type ReactionClipKind,
+} from '../src/lipsync/tags.ts';
 
-const source = (id: string, gender?: 'male' | 'female'): LaughSource => ({
+const source = (
+  id: string,
+  gender?: 'male' | 'female',
+  kind: ReactionClipKind = 'laughs',
+): ReactionSource => ({
   id,
   createdAt: 1,
-  kind: 'laughs',
+  kind,
   gender,
   label: id,
   durationMs: 500,
@@ -21,15 +36,16 @@ const source = (id: string, gender?: 'male' | 'female'): LaughSource => ({
 const render = (
   id: string,
   sourceId: string | undefined,
-  treatment: LaughRender['treatment'],
+  treatment: ReactionRender['treatment'],
   voiceId?: string,
-): LaughRender => ({
+  kind: ReactionClipKind = 'laughs',
+): ReactionRender => ({
   id,
   sourceId,
   treatment,
   voiceId,
   createdAt: 1,
-  kind: 'laughs',
+  kind,
   label: id,
   durationMs: 500,
   bytes: 100,
@@ -38,7 +54,7 @@ const render = (
 const female = source('female', 'female');
 const male = source('male', 'male');
 const legacy = source('legacy');
-const library: LaughLibraryIndex = {
+const library: ReactionLibraryIndex = {
   sources: [female, male, legacy],
   renders: [
     render('female-original', female.id, 'original'),
@@ -71,6 +87,125 @@ assert.equal(
   'female-original',
   'the explicit original preference wins for one voice',
 );
+delete female.preferredTreatmentByVoice;
+
+// --- the table is the kind set ---------------------------------------------------------
+//
+// REACTION_CLIP_KINDS is derived from TAGS while the union is written by hand, so this is
+// the one moment the two could disagree. Adding a kind to the union and forgetting the
+// table flag, or the reverse, is caught here rather than as a tag that silently does
+// nothing.
+assert.deepEqual(
+  [...REACTION_CLIP_KINDS].sort(),
+  ['clears throat', 'gasps', 'giggles', 'gulps', 'laughs', 'sighs', 'sniffs', 'yawn'],
+  'the derived kind set matches the ReactionClipKind union',
+);
+for (const kind of REACTION_CLIP_KINDS) {
+  // A clip builds its face span from this table, so a row with no pose is a reaction that
+  // splices audio and draws nothing.
+  assert.ok(
+    clipSpan(kind, 0, 500),
+    `[${kind}] has a viseme, so a spliced clip has a pose to wear`,
+  );
+  assert.equal(clipKindOf(`[${kind}]`), kind, `[${kind}] round-trips through clipKindOf`);
+}
+assert.equal(clipKindOf('[whispering]'), null, 'a directive is not a clip kind');
+assert.equal(clipKindOf('[panting]'), null, 'a reaction without a clip flag is not one');
+assert.equal(clipKindOf('  [CLEARS THROAT] '), 'clears throat', 'case and space forgiven');
+for (const tag of TAGS) {
+  if (!tag.clip) continue;
+  assert.equal(tag.kind, 'reaction', `${tag.tag} is a reaction if it is spliceable`);
+}
+
+// --- per-kind treatment defaults -------------------------------------------------------
+assert.equal(preferredFor('laughs'), 'voice-converted', 'a laugh carries timbre worth converting');
+assert.equal(preferredFor('gulps'), 'original', 'a throat click has nothing for a speech model');
+assert.equal(preferredFor('yawn'), 'voice-converted', 'a yawn is voiced and sustained');
+
+const sniffLib: ReactionLibraryIndex = {
+  sources: [source('s-sniff', 'female', 'sniffs')],
+  renders: [
+    render('sniff-original', 's-sniff', 'original', undefined, 'sniffs'),
+    render('sniff-voice', 's-sniff', 'voice-converted', 'voice-f', 'sniffs'),
+  ],
+};
+assert.deepEqual(
+  eligible(sniffLib, 'sniffs', 'voice-f', 'female').map((c) => c.id),
+  ['sniff-original'],
+  'a sniff prefers the recording even where an exact conversion exists',
+);
+assert.deepEqual(
+  eligible(sniffLib, 'laughs', 'voice-f', 'female').map((c) => c.id),
+  [],
+  'kinds do not stand in for one another',
+);
+
+// A kind whose preferred treatment has not been rendered still plays the other one, rather
+// than falling through to nothing.
+const yawnLib: ReactionLibraryIndex = {
+  sources: [source('s-yawn', 'female', 'yawn')],
+  renders: [render('yawn-original', 's-yawn', 'original', undefined, 'yawn')],
+};
+assert.deepEqual(
+  eligible(yawnLib, 'yawn', 'voice-f', 'female').map((c) => c.id),
+  ['yawn-original'],
+  'a preference for a conversion nobody rendered falls back to the recording',
+);
+
+// --- anchors and source order ------------------------------------------------------------
+const split = splitClips('one [sighs] [yawn] two', REACTION_CLIP_KINDS);
+assert.deepEqual(
+  split.clips.map((c) => [c.kind, c.wordsBefore, c.index]),
+  [['sighs', 1, 0], ['yawn', 1, 1]],
+  'adjacent tags share an anchor and are told apart by source order alone',
+);
+assert.equal(split.spoken, 'one two', 'the lifted tags leave the words behind');
+
+const words = [
+  { startMs: 0, endMs: 300 },
+  { startMs: 800, endMs: 1100 },
+];
+const mid = clipTimeMs(split.clips[0], 2, words, 1100);
+assert.deepEqual(mid, { atMs: 550, gapMs: 500 }, 'the midpoint of the gap, and the gap');
+
+const runOn = clipTimeMs(split.clips[0], 2, [
+  { startMs: 0, endMs: 300 },
+  { startMs: 300, endMs: 600 },
+], 600);
+assert.deepEqual(runOn, { atMs: 300, gapMs: 0 }, 'two words run together leave no room');
+
+assert.equal(
+  clipTimeMs({ kind: 'sighs', tag: '[sighs]', wordsBefore: 0, index: 0 }, 2, words, 1100).gapMs,
+  0,
+  'the start of a take reports no gap rather than a measured one',
+);
+
+// --- the pad is real MP3 ----------------------------------------------------------------
+//
+// The pad is built from a hand-written frame header rather than encoded, so nothing but
+// this check stands between a wrong constant and silence that does not decode. It is
+// spliced without a sameFormat guard — it IS the format by construction — which makes a
+// mistake here a corrupt take rather than a skipped clip.
+const pad = silence(3);
+const padScan = scanMp3(pad);
+assert.ok(padScan, 'the hand-built silent frames scan as MP3');
+assert.equal(padScan.frames.length, 3, 'every frame in the pad is found');
+assert.deepEqual(
+  {
+    version: padScan.format.version,
+    layer: padScan.format.layer,
+    sampleRate: padScan.format.sampleRate,
+    bitrateKbps: padScan.format.bitrateKbps,
+    channelMode: padScan.format.channelMode,
+  },
+  { version: 3, layer: 1, sampleRate: 44_100, bitrateKbps: 128, channelMode: 3 },
+  'the pad matches SPLICE_MP3 exactly, so it joins speech without a codec',
+);
+assert.ok(
+  padScan.durationMs >= 75 && padScan.durationMs <= 80,
+  `three frames is about 78ms (got ${padScan.durationMs}ms)`,
+);
+assert.equal(silence(0).length, 0, 'no frames is no bytes, not one empty frame');
 
 // The dependency's undocumented channel mode is the one field the format name cannot
 // guarantee. Pin it with an executable check because a mismatch is silently skipped at
@@ -110,4 +245,4 @@ assert.ok(
   `encoder delay and flush padding stay bounded (got ${scan.durationMs}ms for 1000ms)`,
 );
 
-console.log('laugh selection checks passed');
+console.log('reaction library checks passed');

@@ -11,27 +11,27 @@ import {
   nameFrom,
 } from '../../../src/lipsync/published';
 import {
+  REACTION_CLIP_KINDS,
   applyAccent,
+  clipSpan,
+  clipTimeMs,
   expressionSpans,
-  laughSpan,
-  laughTimeMs,
   overlayReactions,
   reactionSpans,
-  splitLaughs,
+  splitClips,
   stripTags,
   wordCount,
+  type ReactionClipKind,
   type Span,
 } from '../../../src/lipsync/tags';
 import {
-  LAUGH_KINDS,
   eligible,
   laughRenderKey,
   pick,
   shiftPast,
   treatmentOf,
-  type LaughRender,
-  type LaughKind,
-  type SplicedLaugh,
+  type ReactionRender,
+  type SplicedClip,
   type VoiceGender,
 } from '../../../src/lipsync/laughs';
 import { lookupVoice } from './_voice';
@@ -122,6 +122,63 @@ interface ElevenAlignment {
   character_end_times_seconds: number[];
 }
 
+/**
+ * Silence, as MP3 frames this build can splice, built rather than stored.
+ *
+ * WHY A PAD EXISTS AT ALL. A lifted tag is a tag the model never saw, so it had no reason
+ * to leave room where the reaction goes. For a laugh that was survivable — a laugh
+ * usually stands at a sentence boundary, which has room whether or not anyone arranged
+ * it. `[gulps]`, `[sniffs]` and `[clears throat]` are most natural mid-clause, which is
+ * exactly where there is none, and a clip butted against two words with no quiet between
+ * them does not read as a reaction. It reads as an edit.
+ *
+ * Punctuation in the script is the other answer and the better-sounding one, because it
+ * makes the model actually phrase around the gap — but it is a request, it can be
+ * declined, and it is the author's to write. This one needs nothing from anybody: we own
+ * the bytes, so we can put the quiet in ourselves.
+ *
+ * BUILT, NOT STORED, and not fetched. An all-zero Layer III frame decodes to silence, so
+ * the whole asset is a 4-byte header and 413 zeros — small enough that a literal blob
+ * would be less readable than the code that describes it, and this way the format is
+ * stated in a form that cannot drift from SPLICE_MP3. Not an R2 object for a sharper
+ * reason: spliceLaughs skips silently when a stored object has gone, which for the pad
+ * would mean padding quietly stopping happening with nothing to see.
+ */
+const SILENT_FRAME_BYTES = 417;
+
+/**
+ * One frame of MPEG1 Layer III, 44.1kHz, 128kbps, mono, no CRC — matching SPLICE_MP3.
+ *
+ * 0xFF 0xFB is the sync word with version 11 (MPEG1) and layer 01 (III); 0x90 is bitrate
+ * index 9 (128kbps) with sample-rate index 00 (44.1kHz) and no padding; 0xC0 is channel
+ * mode 11 (mono). 417 is the frame length _mp3.ts computes for exactly these fields, so a
+ * disagreement here would be caught by its own scan rather than by a listener.
+ */
+export function silence(frames: number): Uint8Array {
+  const bytes = new Uint8Array(frames * SILENT_FRAME_BYTES);
+  for (let at = 0; at < bytes.length; at += SILENT_FRAME_BYTES) {
+    bytes[at] = 0xff;
+    bytes[at + 1] = 0xfb;
+    bytes[at + 2] = 0x90;
+    bytes[at + 3] = 0xc0;
+    // The remaining 413 bytes stay zero, which is a valid frame decoding to silence.
+  }
+  return bytes;
+}
+
+/** Frames of silence put either side of a clip that has no room of its own. ~78ms. */
+const PAD_FRAMES = 3;
+
+/**
+ * Below this much quiet between the two words, a clip gets padded.
+ *
+ * Set at roughly what the pad itself provides, so the question it asks is "is there
+ * already at least as much room as I would be adding?". Above it a reaction has somewhere
+ * to sit and more silence would only slow the line down; below it, including the common
+ * case of exactly zero, it does not.
+ */
+const PAD_MIN_GAP_MS = 160;
+
 /** A format as a person would read it out, for the diagnostics panel. */
 const describe = (f: Mp3Format) =>
   `${(f.sampleRate / 1000).toFixed(1)}kHz ${f.bitrateKbps}kbps ` +
@@ -150,6 +207,13 @@ function toBase64(bytes: Uint8Array): string {
  * request; shifting marks by the request instead would leave them permanently
  * disagreeing with the audio for no reason at all. See _mp3.ts.
  *
+ * THE PAD IS PART OF THE INSERTION AND NOT PART OF THE CLIP, which is the one place these
+ * two timelines are easy to conflate. `insertions` counts the pad, because the buffer grew
+ * by it and everything downstream has to move by it. `placed` does not: its `atMs` points
+ * past the leading pad at the first frame of real sound and its `durationMs` is the clip
+ * alone, because that pair becomes the face's span and a span stretched over the silence
+ * would hold a gulp through the quiet at either end of it.
+ *
  * EVERY REFUSAL IS SILENT AND EVERY REFUSAL IS SAFE. A clip whose object has gone, or
  * which will not scan, or whose format does not match the speech, is skipped — the line
  * comes back with one fewer laugh rather than with a 502, and because a skipped clip is
@@ -160,15 +224,15 @@ function toBase64(bytes: Uint8Array): string {
  */
 async function spliceLaughs(
   audio: Uint8Array,
-  wanted: ReadonlyArray<{ clip: LaughRender; atMs: number }>,
+  wanted: ReadonlyArray<{ clip: ReactionRender; atMs: number; gapMs: number }>,
   load: (id: string) => Promise<Uint8Array | null>,
 ): Promise<{
   spliced: Uint8Array;
-  placed: SplicedLaugh[];
+  placed: SplicedClip[];
   insertions: Array<{ atMs: number; durationMs: number }>;
   clips: AudioReport['clips'];
 }> {
-  const placed: SplicedLaugh[] = [];
+  const placed: SplicedClip[] = [];
   const insertions: Array<{ atMs: number; durationMs: number }> = [];
   // Every clip considered, used or not. A clip that was skipped is the single most useful
   // thing to know when a laugh does not appear, and it used to be the one thing nothing
@@ -179,12 +243,16 @@ async function spliceLaughs(
   // How much longer the buffer is than the timeline `wanted` was measured against.
   let grown = 0;
 
-  for (const { clip, atMs } of wanted) {
+  for (const { clip, atMs, gapMs } of wanted) {
     const scan = scanMp3(spliced);
     if (!scan) break;
 
+    // Decided before the clip is even loaded, because it is a fact about the sentence
+    // rather than about the recording: how much quiet the two words left between them.
+    const padFrames = gapMs < PAD_MIN_GAP_MS ? PAD_FRAMES : 0;
+
     const note = (used: boolean, skipped?: string, sc?: ReturnType<typeof scanMp3>,
-                  inserted = 0) =>
+                  inserted = 0, padMs = 0) =>
       clips.push({
         clipId: clip.id,
         label: clip.label,
@@ -194,6 +262,8 @@ async function spliceLaughs(
         format: sc ? describe(sc.format) : '—',
         used,
         skipped,
+        gapMs,
+        ...(padMs > 0 ? { padMs } : {}),
       });
 
     const bytes = await load(clip.id);
@@ -223,21 +293,32 @@ async function spliceLaughs(
     // shifted by are now the same thing, which they were not before either.
     const audioOnly = framesOf(bytes, clipScan, 0, clipScan.frames.length);
 
+    // Measured off the frames actually built rather than assumed from PAD_FRAMES, for the
+    // same reason the clip's own length is: what gets shifted has to be what went in.
+    const pad = padFrames > 0 ? silence(padFrames) : new Uint8Array(0);
+    const padScan = padFrames > 0 ? scanMp3(pad) : null;
+    const padMs = padScan?.durationMs ?? 0;
+
     const { head, tail, atMs: cutAt } = splitAt(spliced, scan, atMs + grown);
-    spliced = concat([head, audioOnly, tail]);
-    note(true, undefined, clipScan, audioOnly.length);
+    spliced = concat([head, pad, audioOnly, pad, tail]);
+    note(true, undefined, clipScan, audioOnly.length, padMs);
 
     placed.push({
       clipId: clip.id,
       kind: clip.kind,
       label: clip.label,
-      atMs: cutAt,
+      // Past the leading pad, because this is where the sound starts and the face's span
+      // is built from it. Pointing at the cut would open the mouth during the silence.
+      atMs: cutAt + padMs,
       durationMs: clipScan.durationMs,
+      ...(padMs > 0 ? { padMs } : {}),
       treatment: treatmentOf(clip),
     });
-    // Back onto the original timeline, which is where the marks still live.
-    insertions.push({ atMs: cutAt - grown, durationMs: clipScan.durationMs });
-    grown += clipScan.durationMs;
+    // Back onto the original timeline, which is where the marks still live — and by the
+    // WHOLE insertion, pad included, which is what the buffer actually grew by.
+    const insertedMs = clipScan.durationMs + padMs * 2;
+    insertions.push({ atMs: cutAt - grown, durationMs: insertedMs });
+    grown += insertedMs;
   }
 
   return { spliced, placed, insertions, clips };
@@ -315,22 +396,29 @@ export async function onRequestPost(
   const library = env.LIPSYNC
     ? await readClips(env.LIPSYNC)
     : { sources: [], renders: [] };
-  const covered: LaughKind[] = LAUGH_KINDS.filter(
+  const covered: ReactionClipKind[] = REACTION_CLIP_KINDS.filter(
     (kind) => eligible(library, kind, voiceId, voiceGender).length > 0,
   );
 
-  // WHAT AN UNCOVERED LAUGH DOES DEPENDS ON THE MODEL, and this is the one place the two
-  // models are told apart. On v3 a laugh tag is at least *attempted*, so a voice nobody has
-  // rendered a laugh into yet keeps whatever the model gives it — unreliable, but strictly
-  // better than nothing, and exactly what this route did before any of this existed.
+  // WHAT AN UNCOVERED REACTION DOES DEPENDS ON THE MODEL, and this is the one place the
+  // two models are told apart. On v3 the tag is at least *attempted*, so a voice nobody has
+  // recorded a sigh for keeps whatever the model gives it — unreliable, but strictly better
+  // than nothing, and exactly what this route did before any of this existed.
   //
-  // `eleven_multilingual_v2` ignores audio tags entirely. It cannot laugh, and the tag does
+  // `eleven_multilingual_v2` ignores audio tags entirely. It cannot sigh, and the tag does
   // not vanish politely: it is text, and text is liable to be read aloud, so the failure is
   // a voice saying the word "laughs" in the middle of a lesson. Silence is unambiguously
-  // better than that, so the tag is lifted whether or not there is a clip to put in its
-  // place — an uncovered laugh becomes nothing rather than an embarrassment.
-  const lift: LaughKind[] = model === 'eleven_multilingual_v2' ? LAUGH_KINDS : covered;
-  const { spoken, laughs: lifted } = splitLaughs(text, lift);
+  // better than that, so every clip-capable tag is lifted whether or not there is a clip to
+  // put in its place — an uncovered reaction becomes nothing rather than an embarrassment.
+  //
+  // On this model the lift is also the ONLY thing that puts a clip in: `sent` below is the
+  // fully stripped script, so a tag left out of `lift` here is a tag that makes no sound at
+  // all rather than one the model might attempt. That is why v2 lifts the whole set and not
+  // just `covered` — `pick` returns null for an uncovered kind further down and the
+  // reaction is dropped there, with the coverage panel in Compose having said so already.
+  const lift: ReactionClipKind[] =
+    model === 'eleven_multilingual_v2' ? REACTION_CLIP_KINDS : covered;
+  const { spoken, clips: lifted } = splitClips(text, lift);
 
   // Everything that was going to be said is now a laugh we removed. There is no audio to
   // align and nothing for a clip to be spliced into, so this is refused for the same
@@ -481,12 +569,20 @@ export async function onRequestPost(
 
   // --- 4. Splice our own laughs into the speech -------------------------------------
   const wanted = lifted
-    .map((laugh) => ({
-      clip: pick(library, laugh.kind, voiceId, voiceGender),
-      atMs: laughTimeMs(laugh, wordCount(script), result.words ?? [], result.durationMs),
+    .map((tag) => ({
+      clip: pick(library, tag.kind, voiceId, voiceGender),
+      index: tag.index,
+      ...clipTimeMs(tag, wordCount(script), result.words ?? [], result.durationMs),
     }))
-    .filter((w): w is { clip: LaughRender; atMs: number } => w.clip !== null)
-    .sort((a, b) => a.atMs - b.atMs);
+    .filter(
+      (w): w is { clip: ReactionRender; index: number; atMs: number; gapMs: number } =>
+        w.clip !== null,
+    )
+    // Source order breaks the tie, and the tie is real: two tags with nothing between them
+    // precede the same words and so resolve to the same millisecond. Sorting on atMs alone
+    // left their order resting on Array.prototype.sort being stable — true since ES2019,
+    // and an invariant nothing stated. See ClipTag.index.
+    .sort((a, b) => a.atMs - b.atMs || a.index - b.index);
 
   const speechScan = scanMp3(audio);
   const { spliced, placed, insertions, clips: clipReport } = await spliceLaughs(audio, wanted, async (id) => {
@@ -537,7 +633,7 @@ export async function onRequestPost(
   // of the one before it, and "the one before it" is an index, not a search.
   const all = [
     ...moved,
-    ...placed.flatMap((p) => laughSpan(p.kind, p.atMs, p.durationMs) ?? []),
+    ...placed.flatMap((p) => clipSpan(p.kind, p.atMs, p.durationMs) ?? []),
   ].sort((a, b) => a.startMs - b.startMs);
 
   const pkg: LipsyncPackage = {

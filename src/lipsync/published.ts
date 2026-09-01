@@ -17,7 +17,7 @@
  */
 
 import type { VisemeMark } from '../live/visemeTable';
-import type { SplicedLaugh, VoiceGender } from './laughs';
+import type { SplicedClip, VoiceGender } from './laughs';
 
 export const INDEX_KEY = 'index.json';
 
@@ -65,6 +65,21 @@ export interface AudioReport {
     format: string;
     used: boolean;
     skipped?: string;
+    /**
+     * The silence between the two words this clip was cut between, before padding.
+     *
+     * THE ONE NUMBER THAT EXPLAINS AN INTERRUPTION, and it cannot be recovered from
+     * anything else here. A clip goes at the midpoint of the gap, and a midpoint is the
+     * same number whether it splits 400ms of quiet or none at all — so a reaction that
+     * sounds like it cut the sentence in half and one that sounds placed are
+     * indistinguishable in every other field on this row.
+     *
+     * Zero at the very start or end of a take, where there is no gap between two words
+     * to measure rather than a gap of nothing.
+     */
+    gapMs?: number;
+    /** Silence added either side because the gap was too small. Absent when none was. */
+    padMs?: number;
   }>;
   /** The finished audio, rescanned rather than assumed. */
   final: { frames: number; durationMs: number; bytes: number };
@@ -370,13 +385,22 @@ export interface LipsyncPackage {
    * saved take reproducible — the clip was chosen at random, and without this record a
    * regenerate would silently be a different line. It lets Diagnostics say what the
    * audio actually contains rather than what was asked for. And it is the only thing
-   * that distinguishes a laugh we spliced from one ElevenLabs happened to render, which
-   * is the distinction this whole mechanism exists to make.
+   * that distinguishes a reaction we spliced from one ElevenLabs happened to render,
+   * which is the distinction this whole mechanism exists to make.
    *
-   * Empty or absent means every laugh in the line, if any, came from the model — either
-   * because the library had nothing for this voice or because the package predates it.
+   * Empty or absent means every reaction in the line, if any, came from the model —
+   * either because the library had nothing for this voice or because the package
+   * predates it.
+   *
+   * STILL CALLED `laughs` NOW THAT IT HOLDS EIGHT KINDS, and deliberately. This is a
+   * stored field: every take in the bucket carries it under this name, and LipSync reads
+   * it to count what was spliced. Renaming it would empty that count on every existing
+   * take to buy nothing — and the obvious new name is taken anyway, by `reactions`
+   * below, which is the options record rather than the clips. The element type says what
+   * these are; the field name says where they have always been. Same reasoning as
+   * `laughs/index.json` in laughs.ts.
    */
-  laughs?: SplicedLaugh[];
+  laughs?: SplicedClip[];
   /**
    * What the finished audio actually is. See AudioReport.
    *

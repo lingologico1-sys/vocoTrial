@@ -6,12 +6,13 @@ import {
   validateOriginalMp3,
   type ConvertFailure,
 } from './_convert';
+import { REACTION_CLIP_KINDS } from '../../../../src/lipsync/tags';
 import {
   laughRenderKey,
   laughSourceKey,
-  type LaughKind,
-  type LaughRender,
-  type LaughSource,
+  type ReactionClipKind,
+  type ReactionRender,
+  type ReactionSource,
   type VoiceGender,
 } from '../../../../src/lipsync/laughs';
 
@@ -19,7 +20,7 @@ import {
 interface ImportBody {
   audioBase64?: string;
   rawMp3Base64?: string;
-  kind?: LaughKind;
+  kind?: ReactionClipKind;
   gender?: VoiceGender;
   label?: string;
   voiceId?: string;
@@ -30,8 +31,30 @@ interface ImportBody {
   removeBackgroundNoise?: boolean;
 }
 
-const MIN_CLIP_MS = 150;
+/**
+ * The shortest clip worth keeping, lowered from 150ms when the six new kinds arrived.
+ *
+ * A laugh is never this short and a gulp routinely is: swallowing is a single throat
+ * click, and 150ms would have refused good ones. Below 100ms there is not enough for the
+ * frame quantisation in _mp3.ts to place meaningfully — a cut lands within ~13ms of where
+ * it was asked for, which at that length is most of the sound.
+ */
+const MIN_CLIP_MS = 100;
 const MAX_CLIP_MS = 8000;
+
+/**
+ * How far the LAME encode may differ from the selection before the two are not the same
+ * clip, as a fraction of the selection with an absolute floor.
+ *
+ * FLAT ±120ms WAS WRONG AT BOTH ENDS, and only the short end was ever exercised. LAME adds
+ * a fixed encoder delay and a padded final frame, so the overhead does not scale with the
+ * clip — which made 120ms a sane bound against a 1.5s laugh and a meaningless one against
+ * a 150ms gulp, where it is 80% of the whole recording and would wave through an encode of
+ * almost anything. The floor still covers the fixed overhead; the proportional term stops
+ * the check going slack on exactly the lengths these new kinds live at.
+ */
+const DURATION_FLOOR_MS = 60;
+const DURATION_TOLERANCE = 0.15;
 const decode = (base64: string) => Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
 
 function encode(bytes: Uint8Array): string {
@@ -67,8 +90,11 @@ export async function onRequestPost(
   if (!body.rawMp3Base64) {
     return json({ error: 'No original-performance MP3', code: 'no_original' }, 400);
   }
-  if (kind !== 'laughs' && kind !== 'giggles') {
-    return json({ error: 'kind must be laughs or giggles', code: 'bad_kind' }, 400);
+  if (!kind || !(REACTION_CLIP_KINDS as string[]).includes(kind)) {
+    return json(
+      { error: `kind must be one of ${REACTION_CLIP_KINDS.join(', ')}`, code: 'bad_kind' },
+      400,
+    );
   }
   if (gender !== 'male' && gender !== 'female') {
     return json({ error: 'gender must be male or female', code: 'bad_gender' }, 400);
@@ -79,18 +105,18 @@ export async function onRequestPost(
   if (wantsConversion && body.voiceGender !== gender) {
     return json(
       {
-        error: 'A laugh can only be converted into a voice from its own gender pool',
+        error: 'A clip can only be converted into a voice from its own gender pool',
         code: 'gender_mismatch',
       },
       400,
     );
   }
   if (durationMs < MIN_CLIP_MS) {
-    return json({ error: `A laugh has to be at least ${MIN_CLIP_MS}ms`, code: 'too_short' }, 400);
+    return json({ error: `A clip has to be at least ${MIN_CLIP_MS}ms`, code: 'too_short' }, 400);
   }
   if (durationMs > MAX_CLIP_MS) {
     return json(
-      { error: `A laugh cannot be longer than ${MAX_CLIP_MS / 1000}s`, code: 'too_long' },
+      { error: `A clip cannot be longer than ${MAX_CLIP_MS / 1000}s`, code: 'too_long' },
       400,
     );
   }
@@ -103,12 +129,19 @@ export async function onRequestPost(
   }
   // LAME adds a fixed encoder delay and a final padded frame. A small overrun is expected;
   // a large one means the WAV, MP3 and claimed selection do not describe the same clip.
-  if (Math.abs(originalResult.scan.durationMs - durationMs) > 120) {
+  // See DURATION_TOLERANCE for why this is not the flat bound it used to be.
+  const allowed = Math.max(DURATION_FLOOR_MS, Math.round(durationMs * DURATION_TOLERANCE));
+  const off = Math.abs(originalResult.scan.durationMs - durationMs);
+  if (off > allowed) {
     return json(
       {
         error: 'The original-performance MP3 does not match the selected duration',
         code: 'duration_mismatch',
-        detail: `selected ${durationMs}ms; encoded ${originalResult.scan.durationMs}ms`,
+        // Which bound applied, because "off by 90ms" reads very differently against a
+        // 3s yawn and a 200ms sniff, and the reader cannot tell which without it.
+        detail:
+          `selected ${durationMs}ms; encoded ${originalResult.scan.durationMs}ms; ` +
+          `off by ${off}ms, allowed ${allowed}ms`,
       },
       400,
     );
@@ -143,7 +176,7 @@ export async function onRequestPost(
   }
 
   const label = (body.label ?? '').trim() || `${kind} ${new Date().toLocaleDateString()}`;
-  const source: LaughSource = {
+  const source: ReactionSource = {
     id: crypto.randomUUID(),
     createdAt: Date.now(),
     kind,
@@ -152,7 +185,7 @@ export async function onRequestPost(
     durationMs,
     bytes: wav.length,
   };
-  const original: LaughRender = {
+  const original: ReactionRender = {
     id: crypto.randomUUID(),
     createdAt: Date.now(),
     sourceId: source.id,
@@ -163,7 +196,7 @@ export async function onRequestPost(
     durationMs: originalResult.scan.durationMs,
     bytes: originalResult.bytes.length,
   };
-  const converted: LaughRender | undefined = convertedResult && !isFailure(convertedResult)
+  const converted: ReactionRender | undefined = convertedResult && !isFailure(convertedResult)
     ? {
         id: crypto.randomUUID(),
         createdAt: Date.now(),

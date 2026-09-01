@@ -3,7 +3,7 @@ import { type LipsyncEnv, readClips, writeClips } from '../_library';
 import {
   originalFor,
   treatmentOf,
-  type LaughTreatment,
+  type ClipTreatment,
   type VoiceGender,
 } from '../../../../src/lipsync/laughs';
 
@@ -20,7 +20,7 @@ export async function onRequestPost(
     sourceId?: string;
     voiceId?: string;
     voiceGender?: VoiceGender;
-    treatment?: LaughTreatment;
+    treatment?: ClipTreatment;
   };
   try {
     body = (await request.json()) as typeof body;

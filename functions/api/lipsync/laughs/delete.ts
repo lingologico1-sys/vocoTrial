@@ -16,7 +16,7 @@ import { laughRenderKey, laughSourceKey } from '../../../../src/lipsync/laughs';
  *
  * Packages that already spliced a deleted clip are untouched and stay playable. Their audio
  * contains the laugh, not a reference to it; what they lose is only the ability to trace the
- * recorded `clipId` back to something that still exists, which is why `SplicedLaugh` carries
+ * recorded `clipId` back to something that still exists, which is why `SplicedClip` carries
  * the label as well as the id.
  */
 export async function onRequestPost(

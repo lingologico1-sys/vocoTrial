@@ -4,7 +4,7 @@ import { isFailure, validateOriginalMp3 } from './_convert';
 import {
   laughRenderKey,
   originalFor,
-  type LaughRender,
+  type ReactionRender,
   type VoiceGender,
 } from '../../../../src/lipsync/laughs';
 
@@ -46,7 +46,7 @@ export async function onRequestPost(
     const { status, ...rest } = checked;
     return json(rest, status);
   }
-  const render: LaughRender = {
+  const render: ReactionRender = {
     id: crypto.randomUUID(),
     createdAt: Date.now(),
     sourceId,
