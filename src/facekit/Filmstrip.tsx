@@ -92,10 +92,15 @@ export default function Filmstrip({ kit }: FilmstripProps) {
       ].filter((lid): lid is { patch: string; box: typeof lid.box } => Boolean(lid.patch));
 
       if (lids.length) {
+        // The lids go on last, over the glasses rather than under them, for the
+        // reason live/Face.tsx sets out at length: a tinted lens survives the
+        // matte with the open eye baked into it, and painted on top it buries
+        // the blink this frame exists to show. The lid art is cut from the
+        // glassed portrait to suit, so it carries the lens with it.
         const blinkFrame = await composite(kit.base, [
           ...(kit.patches.rest ? [{ patch: kit.patches.rest, box: kit.boxes.mouth }] : []),
-          ...lids,
           ...(kit.eyewear ? [{ patch: kit.eyewear.frame, box: kit.eyewear.box }] : []),
+          ...lids,
         ]);
         if (generation.current !== run) return;
         built.push({ id: BLINK, src: blinkFrame });

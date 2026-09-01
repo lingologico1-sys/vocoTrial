@@ -206,18 +206,32 @@ export default function BoxPicker({ base, boxes, active, locked, min = MIN_BOX, 
               }
             : null;
 
+        /*
+          Only one box is ever being placed, and the other four are there to be
+          checked against, not read. A brow sits directly on top of its eye and
+          the two eyes overlap in nothing but height, so five solid rings and
+          five captions bury the rectangle actually under the cursor.
+
+          So the inactive ones are dropped to a dotted hairline at a fifth
+          opacity and lose their labels entirely — still enough to see that the
+          right eye is placed and where it sits, which is the whole reason for
+          keeping them: an eye is judged against its partner's height and size,
+          and a brow against the eye below it. Removing them outright would
+          leave each box placed against the portrait alone, and a mismatch would
+          only surface after a generation had locked it.
+        */
         return (
           <div
             key={region}
             onPointerDown={draggable ? (event) => startDrag(event, region, null) : undefined}
             data-region={region}
             data-active={draggable || undefined}
-            className={`absolute border-2 ${style.ring} ${
+            className={`absolute ${style.ring} ${
               draggable
-                ? 'cursor-move opacity-100'
+                ? 'cursor-move border-2 opacity-100'
                 : isActive
-                  ? 'pointer-events-none border-dashed opacity-80'
-                  : 'pointer-events-none opacity-40'
+                  ? 'pointer-events-none border-2 border-dashed opacity-80'
+                  : 'pointer-events-none border border-dotted opacity-20'
             }`}
             style={{
               left: percent(box.x),
@@ -226,14 +240,16 @@ export default function BoxPicker({ base, boxes, active, locked, min = MIN_BOX, 
               height: percent(box.height),
             }}
           >
-            <span
-              className={`absolute left-0 text-xs font-medium ${style.label} ${
-                box.y / CANVAS_EDGE < LABEL_INSIDE_ABOVE ? 'top-0.5 px-1' : '-top-6'
-              }`}
-            >
-              {style.name}
-              {isActive && locked && <span className="text-slate-500"> · locked</span>}
-            </span>
+            {isActive && (
+              <span
+                className={`absolute left-0 text-xs font-medium ${style.label} ${
+                  box.y / CANVAS_EDGE < LABEL_INSIDE_ABOVE ? 'top-0.5 px-1' : '-top-6'
+                }`}
+              >
+                {style.name}
+                {locked && <span className="text-slate-500"> · locked</span>}
+              </span>
+            )}
 
             {/*
               The line inside a box, on the two kinds that have one.

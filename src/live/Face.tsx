@@ -1238,6 +1238,44 @@ export default function Face({
               );
             })}
     
+            {/*
+              Detached glasses stay registered to the head, and above every
+              expression but the blink.
+
+              The lids go over them, which is the wrong way round for a rim and
+              the only way round that works for a lens. This layer is a
+              difference matte of the glassed portrait against the de-glassed one
+              (facekit/canvas.ts), so it keeps whatever the glasses changed: a
+              clear lens changes nothing behind it and only the rim survives, but
+              a tinted or mirrored one changes every pixel it covers and the
+              matte keeps the whole lens — with the open eye baked into it.
+              Painted last, that frozen eye sits on top of the closed lid and the
+              face never blinks, however faithfully the lid was drawn. Observed
+              on a kit whose lenses read 85% opaque across the eye boxes.
+
+              Underneath the lids this costs nothing on a clear lens, where there
+              is nothing over the eye to cover them with, and nothing on a tinted
+              one either: a lid for a glassed kit is generated from the glassed
+              portrait rather than the bare working base (facekit/FaceKit.tsx),
+              so it arrives already tinted by the lens it is about to land on.
+              The rims are safe either way, because the lid boxes sit inside the
+              lenses — which is what slots.ts put them there for.
+
+              The one face this leaves short is a kit detached before that
+              changed, or one whose glassed original is missing: its lids are
+              bare-skin art, and over a tinted lens they will read a shade warm
+              for the length of a blink until the two eyes are generated again.
+            */}
+            {kit.eyewear && (
+              <image
+                href={kit.eyewear.frame}
+                x={toHead(kit.eyewear.box.x)}
+                y={toHead(kit.eyewear.box.y)}
+                width={toHead(kit.eyewear.box.width)}
+                height={toHead(kit.eyewear.box.height)}
+              />
+            )}
+
             {lids.map((lid) =>
               lid.patch ? (
                 <image
@@ -1250,17 +1288,6 @@ export default function Face({
                   opacity={shut ? 1 : 0}
                 />
               ) : null,
-            )}
-
-            {/* Detached glasses stay registered to the head but above every expression. */}
-            {kit.eyewear && (
-              <image
-                href={kit.eyewear.frame}
-                x={toHead(kit.eyewear.box.x)}
-                y={toHead(kit.eyewear.box.y)}
-                width={toHead(kit.eyewear.box.width)}
-                height={toHead(kit.eyewear.box.height)}
-              />
             )}
     
             <circle

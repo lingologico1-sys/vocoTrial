@@ -114,6 +114,23 @@ export function partnerBox(id: BoxId): BoxId | null {
   return null;
 }
 
+/**
+ * Which portrait a slot is being drawn on, as far as glasses are concerned.
+ *
+ * A boolean said this before and could not say the third case, which is the one
+ * a tinted lens needs. Detaching the glasses gives a kit two portraits that are
+ * pixel-for-pixel registered with each other — the bare working base, and the
+ * glassed original kept as `glassed` — and a pose is cut from whichever of them
+ * shows what that pose has to match.
+ *
+ * `asDrawn`     the portrait wears whatever it wears, baked in; keep it exactly.
+ * `detached`    the working base has had its glasses lifted onto a layer, and
+ *               must not grow a new pair.
+ * `throughLens` this pose is being cut from the glassed original on purpose,
+ *               because it will be painted on top of the glasses layer.
+ */
+export type EyewearContext = 'asDrawn' | 'detached' | 'throughLens';
+
 export interface Slot {
   id: SlotId;
   label: string;
@@ -132,7 +149,7 @@ export interface Slot {
    * argument and ignore it, which costs a pair of brackets and means every
    * call site has to have the setting in hand.
    */
-  prompt: (lashes: LashStyle, detachedEyewear?: boolean) => string;
+  prompt: (lashes: LashStyle, eyewear?: EyewearContext) => string;
 }
 
 /**
@@ -254,7 +271,7 @@ function lashClause(lashes: LashStyle): string {
  * correct under either regime beat two that each assumed one, and what is left
  * is the half that still applies.
  */
-const eyesClosedPrompt = (lashes: LashStyle, detachedEyewear = false): string =>
+const eyesClosedPrompt = (lashes: LashStyle, eyewear: EyewearContext = 'asDrawn'): string =>
   [
     'Close both eyes.',
     // Naming the mark to draw, rather than the state to depict. Asking for
@@ -268,9 +285,24 @@ const eyesClosedPrompt = (lashes: LashStyle, detachedEyewear = false): string =>
     'colour of the surrounding face — no eyelid crease, no fold, no wrinkle, no',
     'extra shading or texture of any kind.',
     'Keep the eyebrows unchanged.',
-    detachedEyewear
+    // The lens clause is the whole reason a closed eye is ever cut from the
+    // glassed portrait. A detached layer is a difference matte, so a lens that
+    // tints or reflects survives it whole — with the open eye baked in — and a
+    // lid drawn on the bare base sits under that and never shows. Drawn here,
+    // behind the same lens it will be seen through, the lid comes back already
+    // wearing the tint and can be painted over the layer instead.
+    eyewear === 'detached'
       ? 'This working portrait deliberately has no glasses. Do not add glasses or any eyewear.'
-      : 'Keep any glasses exactly as they are: the same frame colour, thickness and shape. Do not restyle the eyewear.',
+      : eyewear === 'throughLens'
+        ? [
+            'This portrait wears glasses and keeps them. Each eye closes behind its',
+            'lens: keep the frames, rims, bridge, lens tint and every reflection exactly',
+            'as they are, in the same colour, thickness, shape and position, and draw the',
+            'closed eye seen through the lens — tinted and shaded by it exactly as the',
+            'open eye was. Do not restyle, recolour, thin, thicken or move the eyewear,',
+            'and do not clear, brighten or remove the lens in front of the closed eye.',
+          ].join(' ')
+        : 'Keep any glasses exactly as they are: the same frame colour, thickness and shape. Do not restyle the eyewear.',
   ].join(' ');
 
 /*

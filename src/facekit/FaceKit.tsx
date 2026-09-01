@@ -877,18 +877,47 @@ export default function FaceKit({ situation = false }: { situation?: boolean } =
     setError(null);
 
     try {
-      // Always generated from the neutral base, even while the page is showing
-      // the smile one. The mouth and eye poses are written against a closed,
-      // relaxed rest pose, and a smile is a rest pose the face can wear — not
-      // one the poses are measured from. A kit with no neutral base yet falls
-      // back to the active base, which is the behaviour every kit had before
-      // either pose could be chosen.
+      // A closed eye is cut from the glassed portrait, and only a closed eye is.
+      //
+      // The lids are the one pose that ends up painted *over* the glasses layer
+      // rather than under it, because a lens that tints or reflects comes
+      // through the difference matte opaque, with the open eye inside it — so a
+      // lid underneath is drawn and then buried. Painted on top it has to match
+      // the lens it lands on, which means being drawn behind that lens in the
+      // first place: hence the glassed original as the base, and the ordinary
+      // glasses-preserving preamble in place of the glasses-free one.
+      //
+      // Safe because `glassed` is the very image the glasses were lifted off
+      // (see acceptEyewear), so it is registered with the neutral base pixel for
+      // pixel and a box means the same rectangle on both. Safe for the frames
+      // too, for the reason slots.ts gives the two eye boxes at all: the crop
+      // sits inside the lens, so a rim the model restyles is thrown away with
+      // everything else outside it.
+      //
+      // A glassed kit whose source did not come back falls through to the bare
+      // base, which is what it did before any of this. The lid is then a shade
+      // out against a tinted lens — visible, and better than a blink nobody
+      // sees.
+      const throughLens =
+        (id === 'eyeLeftClosed' || id === 'eyeRightClosed') &&
+        Boolean(kit.eyewear) &&
+        Boolean(kit.glassed);
+
+      // Otherwise always generated from the neutral base, even while the page is
+      // showing the smile one. The mouth and eye poses are written against a
+      // closed, relaxed rest pose, and a smile is a rest pose the face can wear
+      // — not one the poses are measured from. A kit with no neutral base yet
+      // falls back to the active base, which is the behaviour every kit had
+      // before either pose could be chosen.
       const result = await generatePatch({
         modelKey,
-        base: kit.bases?.neutral ?? kit.base,
+        base: throughLens ? (kit.glassed as string) : kit.bases?.neutral ?? kit.base,
         box: kit.boxes[definition.region],
-        instruction: definition.prompt(kit.lashes ?? DEFAULT_LASH_STYLE, Boolean(kit.eyewear)),
-        preamble: kit.eyewear ? GLASSES_FREE_PREAMBLE : undefined,
+        instruction: definition.prompt(
+          kit.lashes ?? DEFAULT_LASH_STYLE,
+          throughLens ? 'throughLens' : kit.eyewear ? 'detached' : 'asDrawn',
+        ),
+        preamble: kit.eyewear && !throughLens ? GLASSES_FREE_PREAMBLE : undefined,
         label: definition.label,
         imageFirst,
         temperature: variation?.temperature,
@@ -1737,13 +1766,23 @@ export default function FaceKit({ situation = false }: { situation?: boolean } =
               </div>
 
               <div className={`space-y-3 ${kit.situation ? '' : 'md:col-start-1 md:row-start-2'}`}>
+                {/*
+                  Each box is dragged over the picture it is cut from, which on a
+                  glassed kit is two different pictures. An eye box is cut from
+                  the glassed original now, so it is judged against the lens it
+                  has to stay inside; a brow box is sampled from the bare base
+                  the lift slides around; a mouth box gets the assembled rest
+                  pose, glasses layer and all.
+                */}
                 <BoxPicker
                   base={
                     shownBase
                       ? kit.bases?.[shownBase] ?? assembled ?? kit.base
-                      : kit.eyewear && region !== 'mouth'
-                        ? kit.bases?.neutral ?? kit.base
-                      : assembled ?? kit.base
+                      : kit.eyewear && (region === 'eyeLeft' || region === 'eyeRight')
+                        ? kit.glassed ?? kit.bases?.neutral ?? kit.base
+                        : kit.eyewear && region !== 'mouth'
+                          ? kit.bases?.neutral ?? kit.base
+                          : assembled ?? kit.base
                   }
                   boxes={kit.boxes}
                   active={region}
@@ -1891,19 +1930,20 @@ export default function FaceKit({ situation = false }: { situation?: boolean } =
                       ) : (
                         <>
                           {' '}
-                          {kit.eyewear ? (
-                            <>
-                              The working base has no glasses, so cover the whole eye and the skin
-                              a closed lid needs. The detached frames are painted back over this
-                              patch after it is composited.
-                            </>
-                          ) : (
-                            <>
-                              Keep it <em>inside</em> the lens. A box that catches a spectacle rim
-                              invites the model to redesign the glasses; one that stops short of the
-                              frame throws any such damage away with the rest of the crop.
-                            </>
-                          )}{' '}
+                          <>
+                            Keep it <em>inside</em> the lens. A box that catches a spectacle rim
+                            invites the model to redesign the glasses; one that stops short of the
+                            frame throws any such damage away with the rest of the crop.
+                            {kit.eyewear ? (
+                              <>
+                                {' '}
+                                That still holds with the frames detached, because a closed eye is
+                                cut from the glassed portrait — the one shown here — so that it
+                                comes back wearing the lens and can be painted over the frames
+                                rather than buried under them.
+                              </>
+                            ) : null}
+                          </>{' '}
                           Resizing
                           one eye resizes the other to match, about its own centre and without
                           moving it — until you size that one yourself, after which it keeps
