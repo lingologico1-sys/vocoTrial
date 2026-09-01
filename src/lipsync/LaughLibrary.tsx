@@ -17,6 +17,7 @@ import {
   MIN_GAIN_DB,
   decodeFile,
   gainFromDb,
+  headroomDb,
   levelOf,
   peakOf,
   proposeBounds,
@@ -413,6 +414,7 @@ export default function LaughLibrary({
    */
   async function nudgeLevel(render: ReactionRender, byDb: number) {
     setProblem(null);
+    setNote(null);
     setWorking(`level:${render.id}`);
     setBusy(true);
     try {
@@ -421,16 +423,41 @@ export default function LaughLibrary({
       const buffer = await decodeFile(
         new File([bytes], 'clip.mp3', { type: contentType || 'audio/mpeg' }),
       );
-      const encoded = await toMp3(buffer, 0, buffer.duration * 1000, gainFromDb(byDb));
+
+      // MEASURED BEFORE ANYTHING IS ENCODED, because a lift past full scale is clamped
+      // rather than refused, and a clamped lift is silent in both senses: nothing sounds
+      // louder and nothing says why. See headroomDb.
+      const span = buffer.duration * 1000;
+      const room = headroomDb(buffer, 0, span);
+      let applied = byDb;
+      if (byDb > 0) {
+        if (room < 0.5) {
+          setProblem(
+            `"${render.label}" is already at full scale, so it cannot be made louder — ` +
+              'a lift would only flatten its peaks. Cut the others instead, or re-import ' +
+              'the recording at a lower level.',
+          );
+          return;
+        }
+        applied = Math.min(byDb, room);
+      }
+
+      const encoded = await toMp3(buffer, 0, span, gainFromDb(applied));
       const { render: updated } = await relevelClip({
         renderId: render.id,
         rawMp3Base64: toBase64(encoded),
-        gainDb: (render.gainDb ?? 0) + byDb,
+        gainDb: (render.gainDb ?? 0) + applied,
       });
       setLibrary(await listClips());
+
+      const at = updated.gainDb ?? 0;
       setNote(
-        `${updated.label} is now ${(updated.gainDb ?? 0) > 0 ? '+' : ''}` +
-          `${(updated.gainDb ?? 0).toFixed(1)} dB from as recorded.`,
+        `"${updated.label}" ${applied > 0 ? 'up' : 'down'} ${Math.abs(applied).toFixed(1)} dB` +
+          ` — now ${at > 0 ? '+' : ''}${at.toFixed(1)} dB from as recorded.` +
+          (applied < byDb
+            ? ` Only ${applied.toFixed(1)} of the ${byDb} fitted before clipping.`
+            : '') +
+          ' Press play to hear it.',
       );
     } catch (error) {
       setProblem(
@@ -472,7 +499,21 @@ export default function LaughLibrary({
   );
   /** Where this kind belongs, and the lift that would put this clip there. */
   const target = tagForKind(kind)?.levelDb;
-  const suggested = useMemo(() => suggestedGainDb(level, target), [level, target]);
+  /**
+   * How much lift this selection has room for before it clips.
+   *
+   * The suggestion is capped by it, because a slider that opens above the ceiling is
+   * showing a level the encode cannot produce — toMp3 clamps, and the readout would then
+   * be a promise about loudness that the bytes do not keep.
+   */
+  const room = useMemo(
+    () => (picked && span > 0 ? headroomDb(picked.buffer, fromMs, toMs) : MAX_GAIN_DB),
+    [picked, fromMs, toMs, span],
+  );
+  const suggested = useMemo(
+    () => Math.min(suggestedGainDb(level, target), room),
+    [level, target, room],
+  );
 
   // The suggestion follows the kind and the trim until somebody overrules it, and then
   // stops. Re-deriving after that would take the slider back off them mid-adjustment.
@@ -656,9 +697,9 @@ export default function LaughLibrary({
                     <span className="inline-flex items-center overflow-hidden rounded-md border border-slate-800">
                       <button
                         type="button"
-                        onClick={() => void nudgeLevel(activeRender, -1.5)}
+                        onClick={() => void nudgeLevel(activeRender, -3)}
                         disabled={busy}
-                        title="Re-encode 1.5 dB quieter"
+                        title="Re-encode 3 dB quieter"
                         className="px-1.5 py-1 text-[10px] text-slate-500 transition-colors hover:text-slate-200 disabled:text-slate-700"
                       >
                         −
@@ -681,9 +722,9 @@ export default function LaughLibrary({
                       </span>
                       <button
                         type="button"
-                        onClick={() => void nudgeLevel(activeRender, 1.5)}
+                        onClick={() => void nudgeLevel(activeRender, 3)}
                         disabled={busy}
-                        title="Re-encode 1.5 dB louder"
+                        title="Re-encode 3 dB louder. A clip already at full scale cannot go up at all."
                         className="px-1.5 py-1 text-[10px] text-slate-500 transition-colors hover:text-slate-200 disabled:text-slate-700"
                       >
                         +
@@ -926,13 +967,17 @@ export default function LaughLibrary({
                   {/* Peak after the lift, since that is the one that can wrap. toMp3
                       clamps, so this is a warning about audible flattening rather than
                       about a click. */}
-                  {peak * gainFromDb(gainDb) > 0.99 && (
+                  {gainDb > room + 0.25 ? (
                     <span className="text-[11px] leading-snug text-amber-500">
-                      {gainDb > 0
-                        ? 'This lift pushes the clip to full scale — it will be clamped, which flattens the peaks.'
-                        : 'Peaks at full scale — this may already be clipped in the source.'}
+                      Only +{room.toFixed(1)} dB of this fits before the peaks clip. Past
+                      that the lift is flattened rather than heard, so the clip stops
+                      getting louder and starts getting harder.
                     </span>
-                  )}
+                  ) : peak > 0.99 && gainDb >= 0 ? (
+                    <span className="text-[11px] leading-snug text-amber-500">
+                      Already at full scale, so it cannot go up — only down.
+                    </span>
+                  ) : null}
                 </div>
               )}
 

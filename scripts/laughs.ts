@@ -7,6 +7,7 @@ import {
   MAX_GAIN_DB,
   MIN_GAIN_DB,
   gainFromDb,
+  headroomDb,
   suggestedGainDb,
 } from '../src/lipsync/audioTrim.ts';
 import {
@@ -336,6 +337,28 @@ assert.equal(
   // Clamped, so a recording made across a room cannot open the slider at its own end.
   assert.equal(suggestedGainDb(-60, 0), MAX_GAIN_DB, 'a distant recording is clamped');
   assert.equal(suggestedGainDb(40, 0), MIN_GAIN_DB, 'a hot recording is clamped');
+
+  // HEADROOM, which is what made the row's + button look broken: a lift past full scale
+  // is clamped flat, so on an ElevenLabs conversion — mastered near 0 dBFS — every press
+  // was silently doing nothing.
+  const flat = (peak: number) => ({
+    getChannelData: () => Float32Array.from([peak, -peak, 0]),
+    numberOfChannels: 1,
+    length: 3,
+    sampleRate: 44_100,
+    duration: 3 / 44_100,
+  }) as unknown as AudioBuffer;
+
+  assert.equal(headroomDb(flat(1), 0, 1), 0, 'a clip at full scale cannot go up at all');
+  assert.ok(
+    Math.abs(headroomDb(flat(0.5), 0, 1) - 6.02) < 0.05,
+    'a clip peaking at half scale has 6 dB of room',
+  );
+  assert.equal(headroomDb(flat(0), 0, 1), MAX_GAIN_DB, 'silence is unconstrained');
+  assert.ok(
+    headroomDb(flat(0.95), 0, 1) < 0.5,
+    'an ElevenLabs-style hot clip has essentially no room, which is the reported case',
+  );
 
   // dB to multiplier, in the direction that makes +6 louder rather than quieter.
   assert.ok(Math.abs(gainFromDb(6) - 1.995) < 0.01, '+6 dB roughly doubles amplitude');

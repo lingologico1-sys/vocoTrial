@@ -199,6 +199,28 @@ export function suggestedGainDb(measuredDb: number | null, targetDb: number | un
 }
 
 export const gainFromDb = (db: number) => 10 ** (db / 20);
+export const dbFromGain = (gain: number) => 20 * Math.log10(gain);
+
+/**
+ * How much louder this clip can be made before it starts clipping.
+ *
+ * THE THING THAT MADE THE LEVEL CONTROL LOOK BROKEN. A lift is applied by multiplying the
+ * samples, and anything past full scale is clamped flat to avoid a wrap — which is right,
+ * and silently means a lift on a clip that is already loud does nothing but square off its
+ * peaks. ElevenLabs conversions arrive mastered near full scale, so on exactly the clips
+ * somebody is most likely to reach for the button, every press was inaudible.
+ *
+ * So the ceiling is measured first and the caller is told. Zero is a real answer: a clip
+ * with no headroom cannot be made louder at all, and the honest response is to say so
+ * rather than to re-encode it into a slightly more distorted version of itself.
+ *
+ * Cutting is never limited. You can always go quieter.
+ */
+export function headroomDb(buffer: AudioBuffer, fromMs: number, toMs: number): number {
+  const peak = peakOf(buffer, fromMs, toMs);
+  if (peak <= 0) return MAX_GAIN_DB;
+  return Math.max(0, Math.min(MAX_GAIN_DB, -dbFromGain(peak)));
+}
 
 /** The loudest single sample in the selection, for the clipping warning. */
 export function peakOf(buffer: AudioBuffer, fromMs: number, toMs: number): number {
