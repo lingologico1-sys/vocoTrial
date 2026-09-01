@@ -141,6 +141,18 @@ export default function Diagnostics({ pkg }: { pkg: LipsyncPackage }) {
                 {clip.used ? 'used' : 'SKIPPED'} · {secs(clip.durationMs)} · {clip.frames}{' '}
                 frames · {clip.format} · &ldquo;{clip.label}&rdquo;
                 {clip.skipped ? ` — ${clip.skipped}` : ''}
+                {/* The room the clip was cut into, which is the answer to "why does this
+                    one sound like it interrupted the sentence". A zero gap is not an
+                    error — it is two words the model ran together, and the fix is a comma
+                    in the script rather than anything here. Amber rather than red for
+                    exactly that reason. */}
+                {clip.used && clip.gapMs !== undefined && (
+                  <span className={clip.gapMs === 0 ? 'text-amber-400/80' : undefined}>
+                    {' '}
+                    · cut into a {clip.gapMs}ms gap
+                    {clip.padMs ? `, padded ${clip.padMs}ms either side` : ''}
+                  </span>
+                )}
               </div>
             ))}
           </div>

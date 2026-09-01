@@ -41,7 +41,7 @@ import {
   stripTags,
   type Tag,
 } from './tags';
-import { scriptWarnings } from './warnings';
+import { addRoom, roomWarnings, scriptWarnings } from './warnings';
 import { loadPrefs, loadVoiceGender, savePrefs, saveVoiceGender } from './prefs';
 
 /**
@@ -317,14 +317,35 @@ export default function Compose({ onGenerated, onVoiceChange, busy, setBusy }: C
     return () => window.removeEventListener(LAUGH_LIBRARY_CHANGED, refresh);
   }, []);
 
-  const { fromLibrary, fromTimings, dropped, byTag } = useMemo(() => {
-    const covered = new Set(
+  /**
+   * The kinds this voice has a clip for, which is what generate.ts will decide too.
+   *
+   * Lifted out of the coverage memo below because the punctuation warning needs the same
+   * answer, and two places deriving it independently is how they drift. Both ask
+   * `eligible` from laughs.ts rather than each deciding what "covered" means.
+   */
+  const covered = useMemo(
+    () =>
       voiceId.trim()
         ? REACTION_CLIP_KINDS.filter(
             (k) => eligible(library, k, voiceId.trim(), voiceGender).length > 0,
           )
         : [],
-    );
+    [library, voiceId, voiceGender],
+  );
+
+  /**
+   * Reactions with a word butted against them, which will splice as an interruption.
+   *
+   * Only the ones actually being spliced, which is why this reads `covered` rather than
+   * warning about every reaction in the line: a tag the model performs itself phrases its
+   * own room, and telling somebody to punctuate around it would be advice about a problem
+   * they do not have.
+   */
+  const crowded = useMemo(() => roomWarnings(text, covered), [text, covered]);
+
+  const { fromLibrary, fromTimings, dropped, byTag } = useMemo(() => {
+    const coveredSet = new Set(covered);
     // Read off the raw text rather than off `reactions`, so that a tag the current model
     // ignores is still classified rather than quietly missing from the panel.
     const clips = reactionsIn(text).filter((t) => clipKindOf(t.tag));
@@ -335,7 +356,7 @@ export default function Compose({ onGenerated, onVoiceChange, busy, setBusy }: C
 
     for (const tag of clips) {
       const kind = clipKindOf(tag.tag);
-      if (kind && covered.has(kind)) {
+      if (kind && coveredSet.has(kind)) {
         spliced.push(tag.tag);
         byTag.set(tag.tag, 'spliced');
       } else if (tagsAllowed) {
@@ -358,7 +379,7 @@ export default function Compose({ onGenerated, onVoiceChange, busy, setBusy }: C
       }
     }
     return { fromLibrary: spliced, fromTimings: timed, dropped: gone, byTag };
-  }, [reactions, library, voiceId, voiceGender, text, tagsAllowed]);
+  }, [reactions, covered, text, tagsAllowed]);
 
   /** Inserts at the cursor rather than appending — a tag placed mid-line is the point. */
   function insert(tag: string) {
@@ -878,6 +899,34 @@ export default function Compose({ onGenerated, onVoiceChange, busy, setBusy }: C
           {w.message}
         </p>
       ))}
+
+      {crowded.length > 0 && (
+        <div className="flex items-start gap-2 rounded-lg border border-amber-900/60 bg-amber-950/30 px-3 py-2 text-xs text-amber-300">
+          <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+          <div className="flex flex-col items-start gap-1.5">
+            <span>
+              {crowded.map((w) => w.tag).join(' ')} —{' '}
+              {crowded.length === 1 ? 'this one has' : 'these have'} a word hard against{' '}
+              {crowded.length === 1 ? 'it' : 'them'}. The tag is removed before synthesis,
+              so the voice has no reason to leave a pause there and the clip will be cut
+              into continuous speech. Punctuation gives it somewhere to sit.
+            </span>
+            <button
+              type="button"
+              onClick={() => setText(addRoom(text, crowded))}
+              className="rounded-md border border-amber-800/70 px-2 py-0.5 text-[11px] text-amber-200 transition-colors hover:border-amber-600 hover:text-amber-100"
+            >
+              Add {crowded.length === 1 ? 'a pause' : `${crowded.length} pauses`}
+            </button>
+            <span className="text-[11px] text-amber-300/60">
+              Adds a comma, or a dash for a yawn or a sigh — never a full stop, so nothing
+              needs recapitalising. Undo puts it back. A clip is padded with a little
+              silence either way, so this changes how the line reads rather than whether
+              it works.
+            </span>
+          </div>
+        </div>
+      )}
 
       {cost.unknownTags.length > 0 && (
         <p className="flex items-start gap-2 rounded-lg border border-amber-900/60 bg-amber-950/30 px-3 py-2 text-xs text-amber-300">

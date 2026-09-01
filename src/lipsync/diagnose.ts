@@ -205,7 +205,7 @@ export function report(pkg: LipsyncPackage): string {
   L.push(`  oov        ${pkg.oovCount}`);
   const spliced = pkg.laughs ?? [];
   L.push(
-    `  reactions  ${pkg.reactionCount} span(s), ${spliced.length} of them spliced laughs`,
+    `  reactions  ${pkg.reactionCount} span(s), ${spliced.length} of them spliced clips`,
   );
   L.push('');
 
@@ -247,9 +247,15 @@ export function report(pkg: LipsyncPackage): string {
         (Math.abs(audio.driftMs) > 250 ? '   <-- SOMETHING LOST AUDIO' : ''),
     );
     for (const clip of audio.clips) {
+      const room =
+        clip.used && clip.gapMs !== undefined
+          ? `  gap ${String(clip.gapMs).padStart(4)}ms` +
+            (clip.padMs ? `  +${clip.padMs}ms pad either side` : '')
+          : '';
       L.push(
         `  clip       ${clip.used ? 'used   ' : 'SKIPPED'} ${secs(clip.durationMs).padStart(7)}  ` +
           `${String(clip.frames).padStart(4)} frames  ${clip.format}  "${clip.label}"` +
+          room +
           (clip.skipped ? `  — ${clip.skipped}` : ''),
       );
     }
@@ -257,12 +263,13 @@ export function report(pkg: LipsyncPackage): string {
   }
 
   if (spliced.length > 0) {
-    L.push(`LAUGHS SPLICED FROM THE LIBRARY (${spliced.length})`);
-    for (const laugh of spliced) {
+    L.push(`REACTIONS SPLICED FROM THE LIBRARY (${spliced.length})`);
+    for (const clip of spliced) {
       L.push(
-        `  ${secs(laugh.atMs)}  ${laugh.kind.padEnd(8)} ${secs(laugh.durationMs).padStart(7)}  ` +
-          `${(laugh.treatment ?? 'legacy').padEnd(15)} "${laugh.label}"  ` +
-          `[${laugh.clipId.slice(0, 8)}]`,
+        `  ${secs(clip.atMs)}  ${clip.kind.padEnd(14)} ${secs(clip.durationMs).padStart(7)}  ` +
+          `${(clip.treatment ?? 'legacy').padEnd(15)} "${clip.label}"  ` +
+          `[${clip.clipId.slice(0, 8)}]` +
+          (clip.padMs ? `  +${clip.padMs}ms pad` : ''),
       );
     }
     // Worth stating, because it is the one span length on the page that is not a
@@ -270,6 +277,13 @@ export function report(pkg: LipsyncPackage): string {
     L.push("  These lengths are the clips' own, known before synthesis rather than");
     L.push('  measured after it. The audio was cut open and everything after each');
     L.push('  insertion moved along by exactly this much.');
+    // The pad is deliberately not in the lengths above: it is silence either side, so
+    // counting it would make the face hold a pose through the quiet. It IS in what the
+    // timeline moved by, which is why the two can differ by a few tens of ms.
+    if (spliced.some((clip) => clip.padMs)) {
+      L.push('  A pad is silence added either side where the words left no room. It is');
+      L.push('  part of what the timeline moved by and not part of the clip.');
+    }
     L.push('');
   }
 

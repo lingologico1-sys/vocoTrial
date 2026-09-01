@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { Mp3Encoder } from '@breezystack/lamejs';
 import { scanMp3 } from '../functions/api/lipsync/_mp3.ts';
 import { silence } from '../functions/api/lipsync/generate.ts';
+import { addRoom, roomWarnings } from '../src/lipsync/warnings.ts';
 import {
   eligible,
   pick,
@@ -179,6 +180,60 @@ assert.equal(
   0,
   'the start of a take reports no gap rather than a measured one',
 );
+
+// --- room, and the punctuation offered to buy it -----------------------------------------
+{
+  const noRoom = 'Bonjour [gulps] excusez-moi';
+  const warned = roomWarnings(noRoom);
+  assert.equal(warned.length, 1, 'a tag between two bare words has no room');
+  assert.equal(warned[0].kind, 'gulps');
+
+  // Punctuation on EITHER side is enough, because the tag is removed and what is left is
+  // the mark standing between the two words.
+  assert.deepEqual(roomWarnings('Bonjour, [gulps] excusez-moi'), [], 'a comma before is room');
+  assert.deepEqual(roomWarnings('Bonjour [gulps], excusez-moi'), [], 'a comma after is room');
+  assert.deepEqual(roomWarnings('Bonjour. [gulps] Excusez-moi'), [], 'a sentence boundary is room');
+  assert.deepEqual(roomWarnings('[gulps] Excusez-moi'), [], 'the start of a line is room');
+  assert.deepEqual(roomWarnings('Excusez-moi [gulps]'), [], 'the end of a line is room');
+  assert.deepEqual(roomWarnings('Bonjour\n[gulps]\nExcusez-moi'), [], 'a line break is room');
+  assert.deepEqual(roomWarnings('a [whispering] b'), [], 'a directive is not spliced, so it needs none');
+  assert.deepEqual(
+    roomWarnings('a [gulps] b', ['sniffs']),
+    [],
+    'a kind this voice cannot cover is the model\'s problem, not the author\'s',
+  );
+
+  // THE FIX MUST SURVIVE THE LIFT. This is the assertion that matters: what the model is
+  // asked to say is the text with the tag gone, and a mark on both sides would double up.
+  const fixed = addRoom(noRoom, warned);
+  assert.equal(fixed, 'Bonjour, [gulps] excusez-moi', 'a brief reaction gets a comma');
+  assert.equal(
+    splitClips(fixed, REACTION_CLIP_KINDS).spoken,
+    'Bonjour, excusez-moi',
+    'the lifted text carries exactly one comma, which is the pause the clip sits in',
+  );
+  assert.deepEqual(roomWarnings(fixed), [], 'the fix satisfies the warning it came from');
+
+  // An arc wants more than a comma, and a dash is spaced on both sides.
+  const long = addRoom('Bonjour [yawn] excusez-moi', roomWarnings('Bonjour [yawn] excusez-moi'));
+  assert.equal(long, 'Bonjour — [yawn] excusez-moi', 'a yawn gets a dash');
+  assert.equal(splitClips(long, REACTION_CLIP_KINDS).spoken, 'Bonjour — excusez-moi');
+
+  // Several in one line, applied right to left so earlier offsets stay valid.
+  const many = 'un [gulps] deux [sniffs] trois';
+  assert.equal(
+    addRoom(many, roomWarnings(many)),
+    'un, [gulps] deux, [sniffs] trois',
+    'every reaction in the line is fixed and none of the offsets drift',
+  );
+
+  // No period is ever inserted, in any kind, because that would mean recapitalising.
+  for (const kind of REACTION_CLIP_KINDS) {
+    const line = `aa [${kind}] bb`;
+    const out = addRoom(line, roomWarnings(line));
+    assert.ok(!/\./.test(out), `[${kind}] is not given a full stop`);
+  }
+}
 
 // --- the pad is real MP3 ----------------------------------------------------------------
 //

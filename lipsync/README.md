@@ -126,7 +126,7 @@ v3 only, and sorted by what they do to an aligner rather than by how they read:
 |---|---|---|
 | directive | `[happy]` `[whispering]` `[slowly]` | none — no audio of their own. Free. |
 | pause | `[pause]` `[long pause]` | silence, which MFA leaves as a gap and `to_marks` turns into `sil`. Helps. |
-| reaction | `[laughs]` `[sighs]` `[gasps]` | **audio with no words.** The hazard. |
+| reaction | `[laughs]` `[sighs]` `[gasps]` | **audio with no words.** The hazard — and the eight with a `clip` flag are ours to supply. |
 
 A reaction makes sound the transcript cannot account for, so MFA stretches the
 surrounding words across it and the mouth is wrong on both sides as well as during. The
@@ -137,18 +137,56 @@ either side are left alone. See `src/lipsync/tags.ts`.
 It is a heuristic — a laugh is not one pose held — but the span is measured rather than
 guessed, and the alternative is words smeared across a laugh.
 
-#### Laugh library
+#### Reaction clip library
 
-`[laughs]` and `[giggles]` can be lifted out and replaced with an authored clip. Importing
-always keeps the trimmed PCM WAV and makes a mono `mp3_44100_128` original-performance
-derivative in the browser. That original is shared by every voice in its male or female
-pool. The author may additionally ask ElevenLabs speech-to-speech to re-perform it for one
-exact, matching-gender voice; cross-gender conversion is refused.
+Eight reactions can be lifted out of the prompt and replaced with an authored clip:
+`[laughs]` `[giggles]` `[yawn]` `[sighs]` `[gasps]` `[clears throat]` `[gulps]` `[sniffs]`.
+The set is not a list in code — it is the `clip` flag on the tag row, and
+`REACTION_CLIP_KINDS` is derived from it, so adding a kind is one field. `[panting]`,
+`[hesitates]` and `[stammers]` are deliberately out: the first is rhythmic and pulses
+rather than holding, and the other two are wordlike and language-specific.
 
-When both versions exist, the converted version is the default for that voice and the row
-can switch back to the original after auditioning both. Old exact-voice renders continue to
-work. Old retained sources remain unclassified until the author assigns a gender and makes
-their original derivative.
+**On multilingual v2 this is the whole feature.** That model reads no tags and
+`generate.ts` strips every one of them out of what it is asked to say, so an unrecorded
+reaction there makes no sound at all. The library is not an improvement on the model's
+attempt; it is the only reason these exist on the model that holds an accent.
+
+Importing always keeps the trimmed PCM WAV and makes a mono `mp3_44100_128`
+original-performance derivative in the browser. That original is shared by every voice in
+its male or female pool. The author may additionally ask ElevenLabs speech-to-speech to
+re-perform it for one exact, matching-gender voice; cross-gender conversion is refused.
+
+When both versions exist the kind decides which is offered, unless the author has chosen
+for that voice. `[laughs]`, `[giggles]` and `[yawn]` prefer the conversion — they are
+voiced, so there is something in them for a speech model to carry. The throat and breath
+sounds prefer the recording: `eleven_multilingual_sts_v2` is a *speech* model, and a 200ms
+gulp gives it nothing to work with. Noise removal follows the same split, and matters more
+here than it did for laughs — an isolation model is trained to remove everything that is
+not speech, and a sniff *is* not speech.
+
+Old exact-voice renders continue to work. Old retained sources remain unclassified until
+the author assigns a gender and makes their original derivative.
+
+#### Room for a reaction
+
+A lifted tag is one the model never saw, so it had no reason to leave a pause where the
+clip goes. A laugh survived that by usually standing at a sentence boundary; `[gulps]`,
+`[sniffs]` and `[clears throat]` are most natural mid-clause, where there is none.
+
+Three things address it, and they are deliberately different in kind:
+
+- **Measured.** `clipTimeMs` returns the word gap it cut into alongside the position,
+  because the midpoint is the same number whether it splits 400ms of quiet or none. It is
+  printed on every clip row in the audio report.
+- **Padded.** Below ~160ms of gap, three hand-built silent frames go either side of the
+  clip. This needs nothing from the model. The pad counts toward what the timeline shifted
+  by and *not* toward the clip's own span — a duration carrying the silence would hold the
+  mouth in a gulp through the quiet.
+- **Punctuated.** `warnings.ts` spots a reaction with a word hard against it and offers to
+  add one mark — a comma, or a dash for an arc. One and not two: the tag is removed before
+  synthesis, so a mark either side would send the model a doubled one. Never a full stop,
+  so nothing needs recapitalising. Offered rather than applied, because punctuation changes
+  how a line reads.
 
 ### What it needs configured
 
