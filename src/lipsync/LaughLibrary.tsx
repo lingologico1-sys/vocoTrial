@@ -466,6 +466,10 @@ export default function LaughLibrary({
             const active: ClipTreatment = activeRender
               ? treatmentOf(activeRender)
               : 'original';
+            // The treatment that will NOT be spliced, when there is one. This is what the
+            // compare button plays, and its absence is why a row with a single treatment
+            // shows no compare button rather than one that duplicates ▶.
+            const other = active === 'original' ? here : original;
             return (
               <div
                 key={source.id}
@@ -490,30 +494,48 @@ export default function LaughLibrary({
                 <span className="shrink-0 font-mono text-[11px] text-slate-600">
                   {secs(activeRender?.durationMs ?? source.durationMs)}
                 </span>
-                {/* The recording, for comparing against the conversion — the only way to
-                    judge whether the voice changer treated the laugh well. */}
-                <button
-                  type="button"
-                  onClick={() => void audition(source.id, 'source')}
-                  title="Play the recording you provided"
-                  className="shrink-0 rounded-md border border-slate-800 px-1.5 py-1 text-[10px] text-slate-500 transition-colors hover:border-slate-600 hover:text-slate-300"
-                >
-                  raw
-                </button>
-                {original ? (
+                {/* THE OTHER ONE, whichever that is — never a second way to play what ▶
+                    already plays.
+
+                    `raw` and `original` used to sit here together, and they are the same
+                    performance: the WAV you trimmed, and that same selection LAME-encoded
+                    to splice format. Nobody can hear the difference at 128kbps mono, and
+                    ▶ played the identical bytes again whenever the recording was active —
+                    which the six new kinds made the common case rather than a rare one.
+                    Three buttons for one sound.
+
+                    So this is the A/B instead: ▶ is what will be spliced, and this is the
+                    treatment that will not be. On a row with only one treatment there is
+                    nothing to compare against and it does not appear at all. */}
+                {other && (
                   <button
                     type="button"
-                    onClick={() => void audition(original.id, 'render')}
-                    title="Play the splice-ready original performance"
-                    className={`shrink-0 rounded-md border px-1.5 py-1 text-[10px] transition-colors ${
+                    onClick={() => void audition(other.id, 'render')}
+                    title={
                       active === 'original'
-                        ? 'border-sky-800 text-sky-300'
-                        : 'border-slate-800 text-slate-500 hover:text-slate-300'
-                    }`}
+                        ? `Play the conversion for ${voiceName ?? 'this voice'}, which is NOT what will be spliced. Use it to judge whether the voice changer did better than the recording.`
+                        : 'Play the recording as provided, which is NOT what will be spliced. Use it to judge whether the conversion kept what made the sound work.'
+                    }
+                    className="shrink-0 rounded-md border border-slate-800 px-1.5 py-1 text-[10px] text-slate-500 transition-colors hover:border-slate-600 hover:text-slate-300"
                   >
-                    original
+                    hear {active === 'original' ? 'conversion' : 'recording'}
                   </button>
-                ) : voiceGender ? (
+                )}
+                {/* Only where there is no encoded original to play yet: a legacy source
+                    kept before original-performance clips existed. Then the WAV really is
+                    the only way to hear what was uploaded, and it is not duplicating
+                    anything. */}
+                {!original && (
+                  <button
+                    type="button"
+                    onClick={() => void audition(source.id, 'source')}
+                    title="Play the recording you provided. This source has no splice-ready encode yet."
+                    className="shrink-0 rounded-md border border-slate-800 px-1.5 py-1 text-[10px] text-slate-500 transition-colors hover:border-slate-600 hover:text-slate-300"
+                  >
+                    raw
+                  </button>
+                )}
+                {!original && voiceGender ? (
                   <button
                     type="button"
                     onClick={() => void makeOriginal(source.id, source.gender ?? voiceGender)}
