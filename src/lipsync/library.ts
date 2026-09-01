@@ -14,6 +14,7 @@ import type {
   LipsyncPackage,
   PublishedLine,
   VoiceParams,
+  VoiceProfile,
 } from './published';
 
 /**
@@ -254,6 +255,8 @@ export function fetchVoiceInfo(voiceId: string): Promise<{
   voiceId: string;
   name?: string;
   gender?: VoiceGender;
+  /** What ElevenLabs says the voice is, as opposed to how it will be driven. */
+  profile?: VoiceProfile;
 }> {
   return post('voice', { voiceId });
 }

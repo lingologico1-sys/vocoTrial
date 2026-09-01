@@ -214,6 +214,40 @@ export const DEFAULT_REACTIONS: ReactionOptions = {
 
 export type LipsyncModel = 'eleven_v3' | 'eleven_multilingual_v2';
 
+/**
+ * What ElevenLabs says the voice *is*, as opposed to how it was driven.
+ *
+ * Recorded on the package because the report in diagnose.ts exists to be pasted into a
+ * message by somebody asking why a take came out wrong, and "which voice, and what was
+ * it built to sound like" is exactly the class of fact that cannot be recovered later —
+ * a voice can be renamed, re-labelled, or deleted, and a saved take would then be
+ * unexplainable. It is also the answer to the one question the settings cannot settle:
+ * a voice labelled `american` and categorised `premade` is not going to speak with a
+ * French-African accent no matter what tag it is handed, and knowing that before
+ * spending a dozen takes on the sliders is the whole point of writing it down.
+ *
+ * Every field optional and nothing inferred from an absence. Labels are free-form on
+ * ElevenLabs' side, so a voice with no accent label is a voice nobody labelled, not a
+ * voice with no accent.
+ */
+export interface VoiceProfile {
+  /** `labels.accent` — what accent the voice is advertised as having. */
+  accent?: string;
+  age?: string;
+  useCase?: string;
+  /**
+   * `premade`, `cloned`, `professional`, `generated`, `famous`, `high_quality`.
+   *
+   * The field that decides what can be done about a weak accent. A `cloned` voice can be
+   * re-cut from better source audio; a `premade` or `generated` one has no source audio
+   * to re-cut, so the only move left is a different voice.
+   */
+  category?: string;
+  description?: string;
+  /** Verified languages, each as "language / accent / locale" where those are given. */
+  languages?: string[];
+}
+
 /** Straight through to ElevenLabs; none of these affect alignment. */
 export interface VoiceParams {
   stability: number;
@@ -301,6 +335,13 @@ export interface LipsyncPackage {
    * was asked for — or that the take predates the field.
    */
   accent?: string;
+  /**
+   * What ElevenLabs said the voice was, looked up when this take was made.
+   *
+   * Absent on takes made before the lookup existed, and on any take where the metadata
+   * call failed — which is deliberately not an error. See lookupVoice.
+   */
+  voice?: VoiceProfile;
   /** Tags stripped. What the aligner was given, and the only text MFA ever saw. */
   script: string;
   language: 'en' | 'fr' | 'es';

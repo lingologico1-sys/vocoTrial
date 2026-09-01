@@ -177,6 +177,24 @@ export function report(pkg: LipsyncPackage): string {
   L.push(`  model      ${pkg.model}`);
   L.push(`  language   ${pkg.language}`);
   L.push(`  voice      ${pkg.voiceName ?? '?'} (${pkg.voiceId})`);
+  // What the voice IS, under how it was driven, because the two get confused and the
+  // confusion is expensive. An accent that will not come through is read as a settings
+  // problem and answered with a dozen takes on the sliders, when the voice is labelled
+  // `american` and was never going to do it. Printed only when ElevenLabs had something
+  // to say — a voice nobody labelled is not a voice with no accent, and inventing a
+  // "none" here would be the report asserting something it does not know.
+  const voice = pkg.voice;
+  if (voice) {
+    const said = [
+      voice.accent && `accent ${voice.accent}`,
+      voice.category && `category ${voice.category}`,
+      voice.age && `age ${voice.age}`,
+    ].filter(Boolean);
+    if (said.length > 0) L.push(`  labelled   ${said.join(', ')}`);
+    if (voice.languages?.length) L.push(`  verified   ${voice.languages.join('; ')}`);
+    if (voice.description) L.push(`  described  ${voice.description}`);
+  }
+  if (pkg.accent) L.push(`  accent ask ${pkg.accent}`);
   L.push(
     `  params     stability ${pkg.params.stability}, similarity ${pkg.params.similarityBoost}, ` +
       `style ${pkg.params.style}, speakerBoost ${pkg.params.speakerBoost}`,

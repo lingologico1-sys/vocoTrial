@@ -27,6 +27,7 @@ import {
 } from './cost';
 import {
   ACCENT_PARAMS,
+  type VoiceProfile,
   type ReactionOptions,
   type LipsyncModel,
   type LipsyncPackage,
@@ -122,6 +123,15 @@ export default function Compose({ onGenerated, onVoiceChange, busy, setBusy }: C
   const [lookingUpVoice, setLookingUpVoice] = useState(false);
   const [model, setModel] = useState<LipsyncModel>(remembered.model);
   const [accent, setAccent] = useState(remembered.accent);
+  /**
+   * What ElevenLabs says the voice is, filled by the lookup that already runs for gender.
+   *
+   * The one fact the sliders cannot supply, and the reason it is beside the accent field
+   * rather than in the report only: a voice labelled `american` and categorised `premade`
+   * will not speak French-African however it is driven, and the cheapest moment to learn
+   * that is before the first take rather than after twelve.
+   */
+  const [profile, setProfile] = useState<VoiceProfile | undefined>();
   const [params, setParams] = useState<VoiceParams>(remembered.params);
   const [reactions_, setReactions] = useState<ReactionOptions>(remembered.reactions);
   const [problem, setProblem] = useState<string | null>(null);
@@ -164,11 +174,16 @@ export default function Compose({ onGenerated, onVoiceChange, busy, setBusy }: C
       return;
     }
     let current = true;
+    // Cleared as the ID changes rather than left standing, so a stale label never sits
+    // under a voice it does not describe — which on this panel would be the one kind of
+    // wrong worth avoiding, since the whole point of the line is to be believed.
+    setProfile(undefined);
     const timer = window.setTimeout(() => {
       setLookingUpVoice(true);
       void fetchVoiceInfo(id)
         .then((voice) => {
           if (!current) return;
+          setProfile(voice.profile);
           if (voice.name) setVoiceName(voice.name);
           if (voice.gender) {
             setVoiceGender(voice.gender);
@@ -564,6 +579,33 @@ export default function Compose({ onGenerated, onVoiceChange, busy, setBusy }: C
               className="rounded border border-slate-800 bg-slate-950 px-2 py-1 text-sm text-slate-200 placeholder:text-slate-700"
             />
           </label>
+          {/*
+            * What the voice is, above what we are asking it to be. Only rendered when
+            * ElevenLabs actually said something: labels are free-form there, so a voice
+            * with no accent label is one nobody labelled, and printing "accent: none"
+            * would be this panel asserting a thing it does not know.
+            */}
+          {(profile?.accent || profile?.category) && (
+            <p className="text-[11px] leading-snug text-slate-500">
+              This voice is labelled{' '}
+              {profile.accent ? (
+                <span className="text-slate-300">{profile.accent}</span>
+              ) : (
+                'with no accent'
+              )}
+              {profile.category && (
+                <>
+                  , category <span className="text-slate-300">{profile.category}</span>
+                </>
+              )}
+              .{' '}
+              {profile.category === 'premade' || profile.category === 'generated'
+                ? 'It has no source audio behind it, so a weak accent cannot be re-cut — only a different voice fixes that.'
+                : profile.category === 'cloned' || profile.category === 'professional'
+                  ? 'It was cloned, so if the accent is weak the source audio is the place to fix it.'
+                  : null}
+            </p>
+          )}
           <p className="text-[11px] leading-snug text-slate-600">
             {accentUsed ? (
               <>

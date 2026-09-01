@@ -34,6 +34,7 @@ import {
   type SplicedLaugh,
   type VoiceGender,
 } from '../../../src/lipsync/laughs';
+import { lookupVoice } from './_voice';
 import { concat, framesOf, sameFormat, scanMp3, splitAt, type Mp3Format } from './_mp3';
 import { SPLICE_FORMAT } from './laughs/_convert';
 import {
@@ -362,6 +363,18 @@ export async function onRequestPost(
   // worth having on this model, that the words v2 is given are the words MFA is given.
   const sent = model === 'eleven_v3' ? applyAccent(spoken, accent) : script;
 
+  // What ElevenLabs says this voice IS, asked for alongside the synthesis rather than
+  // before it. Started here and awaited much later, so the round trip overlaps the one
+  // that does the work and costs nothing on the clock — it is a metadata read, and making
+  // a generation wait in series for a note on the package would be paying for it twice.
+  //
+  // Deliberately unguarded by any check. Nothing downstream reads it, a failure leaves
+  // the field absent, and `catch` swallowing the reason is the correct amount of care for
+  // something whose entire job is to be a footnote in a report.
+  const profile = lookupVoice(voiceId, env.ELEVENLABS_API_KEY)
+    .then((found) => (found.ok ? found.voice.profile : undefined))
+    .catch(() => undefined);
+
   // --- 1. Synthesise, keeping the timings the synthesiser stamped -------------------
   const speech = await fetch(
     `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}` +
@@ -541,6 +554,7 @@ export async function onRequestPost(
     voiceId,
     voiceName: body.voiceName,
     voiceGender,
+    voice: await profile,
     model,
     params,
     durationMs: result.durationMs + addedMs,

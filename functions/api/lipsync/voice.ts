@@ -1,8 +1,8 @@
 import { json } from '../_middleware';
 import type { LipsyncEnv } from './_library';
-import type { VoiceGender } from '../../../src/lipsync/laughs';
+import { lookupVoice } from './_voice';
 
-/** Resolve the optional gender label without exposing the ElevenLabs key to the browser. */
+/** Resolve a voice's labels without exposing the ElevenLabs key to the browser. */
 export async function onRequestPost(
   context: EventContext<LipsyncEnv, string, Record<string, unknown>>,
 ): Promise<Response> {
@@ -22,24 +22,18 @@ export async function onRequestPost(
   voiceId = voiceId.trim();
   if (!voiceId) return json({ error: 'No voice chosen', code: 'no_voice' }, 400);
 
-  const response = await fetch(
-    `https://api.elevenlabs.io/v1/voices/${encodeURIComponent(voiceId)}`,
-    { headers: { 'xi-api-key': env.ELEVENLABS_API_KEY } },
-  );
-  if (!response.ok) {
-    const detail = await response.text();
+  const found = await lookupVoice(voiceId, env.ELEVENLABS_API_KEY);
+  if (!found.ok) {
     return json(
-      { error: 'ElevenLabs could not find that voice', code: 'voice_lookup', detail: detail.slice(0, 400) },
-      response.status === 401 ? 500 : response.status,
+      {
+        error: 'ElevenLabs could not find that voice',
+        code: 'voice_lookup',
+        detail: found.detail,
+      },
+      // A 401 is this deployment's key, not the ID that was pasted. Reported as ours so
+      // nobody goes looking for a typo in a voice ID that was correct all along.
+      found.status === 401 ? 500 : found.status,
     );
   }
-  const voice = (await response.json()) as {
-    voice_id?: string;
-    name?: string;
-    labels?: Record<string, string> | null;
-  };
-  const labelled = voice.labels?.gender?.trim().toLowerCase();
-  const gender: VoiceGender | undefined =
-    labelled === 'male' || labelled === 'female' ? labelled : undefined;
-  return json({ voiceId: voice.voice_id ?? voiceId, name: voice.name, gender });
+  return json(found.voice);
 }
