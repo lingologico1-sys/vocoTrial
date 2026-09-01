@@ -26,6 +26,7 @@ import {
   clipKindOf,
   clipSpan,
   clipTimeMs,
+  wordBoundaries,
   tagForKind,
   splitClips,
   type ReactionClipKind,
@@ -191,23 +192,78 @@ assert.deepEqual(
 assert.equal(split.spoken, 'one two', 'the lifted tags leave the words behind');
 
 const words = [
-  { startMs: 0, endMs: 300 },
-  { startMs: 800, endMs: 1100 },
+  { word: 'one', startMs: 0, endMs: 300 },
+  { word: 'two', startMs: 800, endMs: 1100 },
 ];
-const mid = clipTimeMs(split.clips[0], 2, words, 1100);
+const mid = clipTimeMs(split.clips[0], 'one two', words, 1100);
 assert.deepEqual(mid, { atMs: 550, gapMs: 500 }, 'the midpoint of the gap, and the gap');
 
-const runOn = clipTimeMs(split.clips[0], 2, [
-  { startMs: 0, endMs: 300 },
-  { startMs: 300, endMs: 600 },
+const runOn = clipTimeMs(split.clips[0], 'one two', [
+  { word: 'one', startMs: 0, endMs: 300 },
+  { word: 'two', startMs: 300, endMs: 600 },
 ], 600);
 assert.deepEqual(runOn, { atMs: 300, gapMs: 0 }, 'two words run together leave no room');
 
 assert.equal(
-  clipTimeMs({ kind: 'sighs', tag: '[sighs]', wordsBefore: 0, index: 0 }, 2, words, 1100).gapMs,
+  clipTimeMs({ kind: 'sighs', tag: '[sighs]', wordsBefore: 0, index: 0 }, 'one two', words, 1100).gapMs,
   0,
   'the start of a take reports no gap rather than a measured one',
 );
+
+// --- a merge late in the line does not move the anchors before it ------------------------
+//
+// The bug this pins, from a real take: MFA returned "Mais j'en" as the single token
+// "maisj'en", so 74 script words came back as 73. The old proportional rescale multiplied
+// every anchor by 73/74, which is a rounding no-op at the top of the line and an
+// off-by-one from word 37 on — a [sighs] written after "identité" was spliced before it.
+// Every anchor here is checked against the boundary the author actually wrote, including
+// the one after the merge, which the merge genuinely does shift by one.
+{
+  const tokens = ['a', 'b', 'c', 'd', 'e', 'f', 'mais', "j'en", 'ai', 'peur'];
+  const script = tokens.join(' ');
+  const tier = ['a', 'b', 'c', 'd', 'e', 'f', "maisj'en", 'ai', 'peur'].map((word, i) => ({
+    word,
+    startMs: i * 1000,
+    endMs: i * 1000 + 500,
+  }));
+
+  for (const [wordsBefore, expected] of [[1, 750], [6, 5750], [8, 6750], [9, 7750]] as const) {
+    assert.equal(
+      clipTimeMs({ kind: 'sighs', tag: '[sighs]', wordsBefore, index: 0 }, script, tier, 9500).atMs,
+      expected,
+      `an anchor ${wordsBefore} words in survives a merge later in the line`,
+    );
+  }
+
+  assert.equal(
+    clipTimeMs({ kind: 'sighs', tag: '[sighs]', wordsBefore: 7, index: 0 }, script, tier, 9500).atMs,
+    5750,
+    'an anchor inside a merged word falls at an edge of it, the near one on a tie',
+  );
+
+  assert.deepEqual(
+    wordBoundaries("l'école est fermée", ['l', 'école', 'est', 'fermée']),
+    [0, 2, 3, 4],
+    'a token the aligner split counts as the words it was split into',
+  );
+
+  assert.deepEqual(
+    wordBoundaries('one two three', ['one', 'zwei', 'three']),
+    [0, 1, 2, 3],
+    'a word the aligner heard differently resyncs instead of dragging the rest along',
+  );
+
+  assert.equal(
+    clipTimeMs(
+      { kind: 'sighs', tag: '[sighs]', wordsBefore: 1, index: 0 },
+      'one two',
+      [{ startMs: 0, endMs: 300 }, { startMs: 800, endMs: 1100 }],
+      1100,
+    ).atMs,
+    550,
+    'an aligner tier with no text still anchors, by count',
+  );
+}
 
 // --- the panel and the generator resolve through one function ----------------------------
 //

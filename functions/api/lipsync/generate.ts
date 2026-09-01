@@ -20,7 +20,6 @@ import {
   reactionSpans,
   splitClips,
   stripTags,
-  wordCount,
   type ReactionClipKind,
   type Span,
 } from '../../../src/lipsync/tags';
@@ -572,7 +571,7 @@ export async function onRequestPost(
     .map((tag) => ({
       clip: pick(library, tag.kind, voiceId, voiceGender),
       index: tag.index,
-      ...clipTimeMs(tag, wordCount(script), result.words ?? [], result.durationMs),
+      ...clipTimeMs(tag, script, result.words ?? [], result.durationMs),
     }))
     .filter(
       (w): w is { clip: ReactionRender; index: number; atMs: number; gapMs: number } =>

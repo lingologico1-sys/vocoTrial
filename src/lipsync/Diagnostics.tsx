@@ -240,15 +240,17 @@ export default function Diagnostics({ pkg }: { pkg: LipsyncPackage }) {
         <div className="flex flex-wrap gap-x-5 gap-y-1 border-t border-slate-900 pt-3 font-mono text-[11px] text-slate-600">
           <span>{pkg.marks.length} marks</span>
           {/* BOTH COUNTS, because the disagreement is the interesting number and neither
-              one alone shows it. clipTimeMs rescales every reaction anchor by the ratio
-              between them, so when they part company a spliced clip does not land where
-              the tag stood. MFA merges tokens across some punctuation — see isMergedWord
-              in warnings.ts — which makes this the thing to look at after adding one. */}
+              one alone shows it. MFA merges tokens across some punctuation — see
+              isMergedWord in warnings.ts — and splits clitics, so the two lists can part
+              company. clipTimeMs matches them by text rather than scaling one to the
+              other, so anchors either side of a merge still land where the tag stood;
+              only one written *inside* a merged word has to round. Worth a look after a
+              reaction lands oddly, which is why it is still on the panel. */}
           <span className={scriptWords === pkg.words.length ? undefined : 'text-amber-400/80'}>
             {pkg.words.length} words
             {scriptWords === pkg.words.length
               ? ''
-              : ` — but ${scriptWords} in the script, so reaction anchors were rescaled by ${(pkg.words.length / scriptWords).toFixed(2)}×`}
+              : ` — but ${scriptWords} in the script, so reaction anchors were matched word by word`}
           </span>
           <span>{secs(pkg.durationMs)} aligned</span>
           <span>{pkg.model}</span>

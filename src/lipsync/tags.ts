@@ -504,33 +504,54 @@ export function splitClips(
  * measurement — at the very start or the very end of a take there is no gap between two
  * words to divide, so there is nothing the pad should be reasoning about.
  *
- * INDICES ARE RESCALED WHEN THE COUNTS DISAGREE, which is a real case and not a
- * defensive flourish. `wordsBefore` counts whitespace-separated tokens; MFA counts what
- * its dictionary considers words, and in French a clitic like "l'école" can come back as
- * two. Taking the index literally would then put every clip after that point one word
- * early, and the error accumulates down the line. Scaling proportionally spreads the
- * disagreement instead of concentrating it at the end, and the exact case — the counts
- * agreeing, which is nearly every English line — is unaffected because the ratio is 1.
+ * THE INDEX IS MATCHED THROUGH THE WORDS THEMSELVES when the counts disagree, which is
+ * a real case and not a defensive flourish. `wordsBefore` counts whitespace-separated
+ * tokens; MFA counts what its dictionary considers words, and the two part company in
+ * both directions — it merges "Mais j'en" into one `maisj'en` across the apostrophe, and
+ * splits a clitic like "l'école" into two.
  *
- * That rescale is also why warnings.ts is careful about inserting punctuation: MFA merges
- * tokens across some of it (see isMergedWord), so a comma added between two words can
- * lower `words.length` and move every anchor in the line.
+ * THIS USED TO BE A PROPORTIONAL RESCALE AND THAT WAS WRONG, in the specific way worth
+ * recording. Scaling `wordsBefore` by `words.length / scriptWordCount` spread a
+ * one-token disagreement across the whole line, so anchors nowhere near the merge moved:
+ * a 73-against-74 line scaled every index by 0.99, and any anchor past word 37 rounded
+ * down one. A `[sighs]` written after "identité" was spliced before it; a
+ * `[clears throat]` after "regardent" landed before it. The single merge was late in the
+ * line and every reaction ahead of it was displaced anyway.
+ *
+ * `wordBoundaries` instead walks the two token lists together and matches them by text,
+ * so a disagreement stays where it happened: tokens before it map exactly, tokens after
+ * it map exactly, and only an anchor standing *inside* a merged word has to round — to
+ * the nearer edge of the word that swallowed it, because there is no boundary in the
+ * audio to put it at. The exact case — the counts agreeing, which is nearly every English
+ * line — walks one-to-one and is unaffected.
+ *
+ * ALIGNER WORDS WITHOUT TEXT fall back to the old rescale, because with no words to match
+ * against, the ratio is the only thing left. Nothing in this app writes such a package;
+ * it is the `scripts/laughs.ts` shape and the floor for an older one read back from R2.
+ *
+ * The matching is also why warnings.ts can be less nervous about inserting punctuation
+ * than it was: MFA merges tokens across some of it (see isMergedWord), and a comma added
+ * between two words now moves the anchors at that comma rather than every anchor in the
+ * line.
  */
 export function clipTimeMs(
   clip: ClipTag,
-  scriptWordCount: number,
-  words: ReadonlyArray<{ startMs: number; endMs: number }>,
+  /**
+   * The script the aligner was given — the words themselves, not a count of them.
+   *
+   * It was a count until the anchors started sliding. A count can only ever be divided
+   * into; the text can be matched against what came back, which is what puts a merge
+   * back where it happened instead of smearing it over the line.
+   */
+  script: string,
+  words: ReadonlyArray<{ word?: string; startMs: number; endMs: number }>,
   durationMs: number,
 ): { atMs: number; gapMs: number } {
   if (words.length === 0) {
     return { atMs: Math.max(0, Math.round(durationMs / 2)), gapMs: 0 };
   }
 
-  const scaled =
-    scriptWordCount > 0 && scriptWordCount !== words.length
-      ? Math.round((clip.wordsBefore * words.length) / scriptWordCount)
-      : clip.wordsBefore;
-  const index = Math.max(0, Math.min(words.length, scaled));
+  const index = Math.max(0, Math.min(words.length, anchorIndex(clip.wordsBefore, script, words)));
 
   // Before the first word: at the very top of the clip. Whatever silence ElevenLabs put
   // in front of the speech stays in front of the reaction, which is where it belongs.
@@ -549,6 +570,94 @@ export function clipTimeMs(
     atMs: Math.round((words[index - 1].endMs + words[index].startMs) / 2),
     gapMs,
   };
+}
+
+/**
+ * Which aligner word a script-token boundary falls at.
+ *
+ * Falls back to the proportional rescale only when the aligner reported no text to match
+ * against — see the note on clipTimeMs. With text, the counts agreeing is not a special
+ * case: the walk is one-to-one and lands on the same number.
+ */
+function anchorIndex(
+  wordsBefore: number,
+  script: string,
+  words: ReadonlyArray<{ word?: string }>,
+): number {
+  const spoken = words.map((w) => w.word ?? '');
+  if (spoken.every((w) => w === '')) {
+    const scriptWordCount = wordCount(script);
+    return scriptWordCount > 0 && scriptWordCount !== words.length
+      ? Math.round((wordsBefore * words.length) / scriptWordCount)
+      : wordsBefore;
+  }
+
+  const boundaries = wordBoundaries(script, spoken);
+  return boundaries[Math.max(0, Math.min(boundaries.length - 1, wordsBefore))];
+}
+
+/**
+ * For every gap between script tokens, the aligner word index that gap sits at.
+ *
+ * `boundaries[n]` answers "n script words have gone by — how many aligner words is that",
+ * so it is one longer than the token list: `boundaries[0]` is 0 and the last entry is the
+ * end of the tier.
+ *
+ * THE WALK GROWS WHICHEVER SIDE IS SHORT. Two tokens the aligner merged — "mais" and
+ * "j'en" against its one `maisj'en` — match once the script side has grown to cover the
+ * aligner's word; one token it split — "l'école" against its `l` and `école` — matches
+ * once the aligner side has grown to cover the script's. Comparison is on letters and
+ * digits alone, because the merge is usually the punctuation between them going missing.
+ *
+ * A BOUNDARY INSIDE A MERGED WORD ROUNDS TO THE NEARER EDGE, and there is no better
+ * answer available: the aligner measured one word where the script has two, so the
+ * instant between them was never timed. Rounding keeps the reaction on the side of the
+ * merge its author wrote it on.
+ *
+ * WHERE THE TWO SIDES SIMPLY DISAGREE — the aligner heard something else, an OOV came
+ * back as a different string — neither side is a prefix of the other and there is nothing
+ * to grow towards. The walk resyncs one-to-one and carries on, which keeps a single bad
+ * word local instead of throwing the rest of the line out of step.
+ */
+export function wordBoundaries(script: string, spoken: readonly string[]): number[] {
+  const tokens = script.split(/\s+/).filter(isWord).map(bareLetters);
+  const aligned = spoken.map(bareLetters);
+  const boundaries = new Array<number>(tokens.length + 1).fill(0);
+
+  let t = 0;
+  let i = 0;
+  while (t < tokens.length && i < aligned.length) {
+    let tEnd = t + 1;
+    let iEnd = i + 1;
+    let left = tokens[t];
+    let right = aligned[i];
+
+    while (left !== right) {
+      if (right.startsWith(left) && tEnd < tokens.length) left += tokens[tEnd++];
+      else if (left.startsWith(right) && iEnd < aligned.length) right += aligned[iEnd++];
+      else break;
+    }
+    if (left !== right) {
+      // Nothing matched: take one of each rather than consuming the run that failed.
+      tEnd = t + 1;
+      iEnd = i + 1;
+    }
+
+    const span = tEnd - t;
+    for (let m = 1; m < span; m++) boundaries[t + m] = m * 2 <= span ? i : iEnd;
+    boundaries[tEnd] = iEnd;
+    t = tEnd;
+    i = iEnd;
+  }
+
+  // Tokens past the end of the tier — a truncated alignment — all sit at the end of it.
+  for (let rest = t; rest < tokens.length; rest++) boundaries[rest + 1] = aligned.length;
+  return boundaries;
+}
+
+/** A word reduced to what two spellings of it have in common: its letters and digits. */
+function bareLetters(token: string): string {
+  return token.toLowerCase().normalize('NFC').replace(/[^\p{L}\p{N}]+/gu, '');
 }
 
 /**

@@ -202,10 +202,17 @@ export function report(pkg: LipsyncPackage): string {
   );
   L.push(`  duration   ${secs(pkg.durationMs)}`);
   L.push(`  marks      ${pkg.marks.length}`);
-  L.push(`  words      ${pkg.words.length} from the aligner, ${wordCount(pkg.script)} in the script` +
-    (pkg.words.length === wordCount(pkg.script)
+  // BOTH COUNTS AND, WHEN THEY DIFFER, THE WORDS RESPONSIBLE. The disagreement no longer
+  // moves anchors that are nowhere near it — clipTimeMs matches the two lists by text —
+  // but it is still the first thing to look at when a reaction lands oddly, and naming
+  // the merged token is what turns "73 against 74" into something actionable.
+  const scriptWords = wordCount(pkg.script);
+  const merged = pkg.words.map((w) => w.word).filter((w) => isMergedWord(pkg, w));
+  L.push(`  words      ${pkg.words.length} from the aligner, ${scriptWords} in the script` +
+    (pkg.words.length === scriptWords
       ? ''
-      : `   <-- REACTION ANCHORS RESCALED BY ${(pkg.words.length / wordCount(pkg.script)).toFixed(2)}x`));
+      : `   <-- ANCHORS MATCHED WORD BY WORD` +
+        (merged.length > 0 ? `, on ${merged.map((w) => `"${w}"`).join(' ')}` : '')));
   L.push(`  oov        ${pkg.oovCount}`);
   const spliced = pkg.laughs ?? [];
   L.push(
