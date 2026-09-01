@@ -8,14 +8,19 @@ import {
   importClip,
   listClips,
   preferClip,
+  relevelClip,
   renderClip,
   LipsyncError,
 } from './library';
 import {
+  MAX_GAIN_DB,
+  MIN_GAIN_DB,
   decodeFile,
+  gainFromDb,
   levelOf,
   peakOf,
   proposeBounds,
+  suggestedGainDb,
   toBase64,
   toMp3,
   toWav,
@@ -28,6 +33,7 @@ import {
   renderedVoices,
   treatmentOf,
   type ReactionLibraryIndex,
+  type ReactionRender,
   type ReactionClipKind,
   type ClipTreatment,
   type VoiceGender,
@@ -155,6 +161,16 @@ export default function LaughLibrary({
   const [denoise, setDenoise] = useState(tagForKind('laughs')?.denoise ?? true);
   const [gender, setGender] = useState<VoiceGender | undefined>(voiceGender);
   const [alsoConvert, setAlsoConvert] = useState(false);
+  /**
+   * How much the clip is lifted or cut before encoding, in dB.
+   *
+   * Held as an author's choice rather than derived on the fly, because the moment they
+   * touch the slider it stops being a suggestion — and a value that silently re-derived
+   * itself when the trim moved would drag their setting back under them.
+   */
+  const [gainDb, setGainDb] = useState(0);
+  /** True until the slider is touched, so the suggestion may keep following the clip. */
+  const [gainAuto, setGainAuto] = useState(true);
 
   useEffect(() => {
     if (voiceGender) setGender(voiceGender);
@@ -235,7 +251,7 @@ export default function LaughLibrary({
     setWorking('import');
     try {
       const wav = toWav(picked.buffer, fromMs, toMs);
-      const mp3 = await toMp3(picked.buffer, fromMs, toMs);
+      const mp3 = await toMp3(picked.buffer, fromMs, toMs, gainFromDb(gainDb));
       const { source, original, converted, render, conversionError, audioBase64 } =
         await importClip({
           audioBase64: toBase64(wav),
@@ -382,6 +398,50 @@ export default function LaughLibrary({
     }
   }
 
+  /**
+   * Nudge one stored clip's level, by re-encoding it.
+   *
+   * DECODES WHAT IS STORED RATHER THAN THE SOURCE WAV, and does so for both treatments,
+   * because only one of them has a WAV behind it: a conversion is bytes ElevenLabs
+   * returned and nothing else. Re-encoding an MP3 is lossy a second time, which is worth
+   * knowing and is still cheaper than paying for the same performance twice.
+   *
+   * A step rather than a slider on the row. Judging loudness here means playing the clip,
+   * hearing the line in your head and adjusting — which is a nudge-and-listen loop, not a
+   * drag. The import panel is where a continuous control makes sense, because the waveform
+   * is in front of you.
+   */
+  async function nudgeLevel(render: ReactionRender, byDb: number) {
+    setProblem(null);
+    setWorking(`level:${render.id}`);
+    setBusy(true);
+    try {
+      const { audioBase64, contentType } = await fetchClip(render.id, 'render');
+      const bytes = Uint8Array.from(atob(audioBase64), (c) => c.charCodeAt(0));
+      const buffer = await decodeFile(
+        new File([bytes], 'clip.mp3', { type: contentType || 'audio/mpeg' }),
+      );
+      const encoded = await toMp3(buffer, 0, buffer.duration * 1000, gainFromDb(byDb));
+      const { render: updated } = await relevelClip({
+        renderId: render.id,
+        rawMp3Base64: toBase64(encoded),
+        gainDb: (render.gainDb ?? 0) + byDb,
+      });
+      setLibrary(await listClips());
+      setNote(
+        `${updated.label} is now ${(updated.gainDb ?? 0) > 0 ? '+' : ''}` +
+          `${(updated.gainDb ?? 0).toFixed(1)} dB from as recorded.`,
+      );
+    } catch (error) {
+      setProblem(
+        error instanceof LipsyncError ? error.message : 'Could not re-encode that clip.',
+      );
+    } finally {
+      setWorking(null);
+      setBusy(false);
+    }
+  }
+
   /** Which tags this voice can actually cover, which is what generate.ts will decide too. */
   const covered = useMemo(
     () =>
@@ -410,6 +470,20 @@ export default function LaughLibrary({
     () => (picked && span > 0 ? levelOf(picked.buffer, fromMs, toMs) : null),
     [picked, fromMs, toMs, span],
   );
+  /** Where this kind belongs, and the lift that would put this clip there. */
+  const target = tagForKind(kind)?.levelDb;
+  const suggested = useMemo(() => suggestedGainDb(level, target), [level, target]);
+
+  // The suggestion follows the kind and the trim until somebody overrules it, and then
+  // stops. Re-deriving after that would take the slider back off them mid-adjustment.
+  useEffect(() => {
+    if (gainAuto) setGainDb(suggested);
+  }, [suggested, gainAuto]);
+
+  // A new file is a new decision, so the suggestion is back in charge.
+  useEffect(() => {
+    setGainAuto(true);
+  }, [picked]);
   const peak = useMemo(
     () => (picked && span > 0 ? peakOf(picked.buffer, fromMs, toMs) : 0),
     [picked, fromMs, toMs, span],
@@ -574,6 +648,47 @@ export default function LaughLibrary({
                     >
                       <Play size={12} />
                     </button>
+                  )}
+                  {/* Acts on the ACTIVE render, so the thing being made louder is the
+                      thing that will be heard. Pointing it at the original would have let
+                      somebody spend three clicks levelling a clip this voice never uses. */}
+                  {activeRender && (
+                    <span className="inline-flex items-center overflow-hidden rounded-md border border-slate-800">
+                      <button
+                        type="button"
+                        onClick={() => void nudgeLevel(activeRender, -1.5)}
+                        disabled={busy}
+                        title="Re-encode 1.5 dB quieter"
+                        className="px-1.5 py-1 text-[10px] text-slate-500 transition-colors hover:text-slate-200 disabled:text-slate-700"
+                      >
+                        −
+                      </button>
+                      <span
+                        className="border-x border-slate-800 px-1 py-1 font-mono text-[10px] text-slate-600"
+                        title={
+                          activeRender.gainDb === undefined
+                            ? 'Encoded before the level control existed, so at whatever level it was recorded'
+                            : 'How far this clip has been moved from the recording as provided'
+                        }
+                      >
+                        {working === `level:${activeRender.id}` ? (
+                          <Loader2 size={10} className="animate-spin" />
+                        ) : activeRender.gainDb === undefined ? (
+                          '—'
+                        ) : (
+                          `${activeRender.gainDb > 0 ? '+' : ''}${activeRender.gainDb.toFixed(1)}`
+                        )}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => void nudgeLevel(activeRender, 1.5)}
+                        disabled={busy}
+                        title="Re-encode 1.5 dB louder"
+                        className="px-1.5 py-1 text-[10px] text-slate-500 transition-colors hover:text-slate-200 disabled:text-slate-700"
+                      >
+                        +
+                      </button>
+                    </span>
                   )}
                   {here && original && voiceGender && (
                     <button
@@ -751,30 +866,71 @@ export default function LaughLibrary({
                 hear selection
               </button>
 
-              {/* Against generated speech, because that is what it will be spliced into.
-                  A number rather than a correction: see levelOf. */}
+              {/* WHERE THE CLIP WILL SIT, AND THE ONE CHANCE TO CHANGE IT. The slider opens
+                  at whatever puts this clip where its kind belongs — not at unity, and not
+                  at the speech's own level, which would be plain normalisation and is what
+                  turns a sniff into a loud wet noise. See levelDb in tags.ts.
+
+                  Baked into the encode, because it has to be: the Worker joins MP3 frames
+                  without decoding, so a level chosen anywhere else could never reach the
+                  bytes. That is also why the readout says what it will be rather than what
+                  it is. */}
               {level !== null && (
-                <div className="flex flex-col gap-0.5">
-                  <span className="text-[11px] uppercase tracking-wide text-slate-600">
-                    Level
-                  </span>
+                <div className="flex min-w-[13rem] flex-col gap-1">
+                  <div className="flex items-baseline justify-between gap-2">
+                    <span className="text-[11px] uppercase tracking-wide text-slate-600">
+                      Level
+                    </span>
+                    {!gainAuto && (
+                      <button
+                        type="button"
+                        onClick={() => setGainAuto(true)}
+                        className="text-[10px] text-slate-500 underline decoration-dotted hover:text-slate-300"
+                      >
+                        reset
+                      </button>
+                    )}
+                  </div>
+                  <input
+                    type="range"
+                    min={MIN_GAIN_DB}
+                    max={MAX_GAIN_DB}
+                    step={0.5}
+                    value={gainDb}
+                    onChange={(event) => {
+                      setGainAuto(false);
+                      setGainDb(Number(event.target.value));
+                    }}
+                    className="w-full accent-slate-400"
+                  />
                   <span className="font-mono text-xs text-slate-300">
-                    {level >= 0 ? '+' : ''}
-                    {level.toFixed(1)} dB
+                    {level + gainDb >= 0 ? '+' : ''}
+                    {(level + gainDb).toFixed(1)} dB
                     <span className="ml-1 font-sans text-[11px] text-slate-600">
                       vs speech
                     </span>
+                    {Math.abs(gainDb) >= 0.5 && (
+                      <span className="ml-1.5 font-sans text-[11px] text-slate-600">
+                        ({gainDb > 0 ? '+' : ''}{gainDb.toFixed(1)} applied
+                        {gainAuto ? ', suggested' : ''})
+                      </span>
+                    )}
                   </span>
                   <span className="text-[11px] leading-snug text-slate-600">
-                    {Math.abs(level) < 4
-                      ? 'About the level of the line it will sit in.'
-                      : level < 0
-                        ? 'Quieter than the line. Right for a sniff or a gulp; check it is not simply a distant recording.'
-                        : 'Louder than the line. Right for a gasp; worth a listen for anything else.'}
+                    {target === undefined
+                      ? 'No target for this kind, so nothing is suggested.'
+                      : gainAuto
+                        ? `Opened at where a ${kind} usually sits (${target > 0 ? '+' : ''}${target} dB). Move it by ear.`
+                        : `A ${kind} usually sits at ${target > 0 ? '+' : ''}${target} dB.`}
                   </span>
-                  {peak > 0.99 && (
+                  {/* Peak after the lift, since that is the one that can wrap. toMp3
+                      clamps, so this is a warning about audible flattening rather than
+                      about a click. */}
+                  {peak * gainFromDb(gainDb) > 0.99 && (
                     <span className="text-[11px] leading-snug text-amber-500">
-                      Peaks at full scale — this may already be clipped in the source.
+                      {gainDb > 0
+                        ? 'This lift pushes the clip to full scale — it will be clamped, which flattens the peaks.'
+                        : 'Peaks at full scale — this may already be clipped in the source.'}
                     </span>
                   )}
                 </div>

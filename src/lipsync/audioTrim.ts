@@ -136,18 +136,18 @@ const SPEECH_RMS = 0.13;
 /**
  * How loud the selection is, in dB relative to generated speech.
  *
- * WHY THIS ONLY MEASURES. The obvious feature here is normalisation: match the clip to the
- * speech and a phone recording stops sounding pasted in. It is the wrong default, and
- * wrong in a way that gets worse the better it works. A breathy sound's character *is* its
- * quietness — a sniff pulled up to speech level is not integrated, it is a loud wet noise
- * where a sniff used to be, and the same is true of a sigh. A gasp is *supposed* to sit
- * above the line. Across the six new kinds, the sounds a normaliser would move furthest
- * are precisely the ones it would ruin.
+ * WHAT THIS IS MEASURED AGAINST, AND WHY IT IS NOT A TARGET. Matching every clip to the
+ * level of the speech — plain normalisation — is wrong in a way that gets worse the better
+ * it works. A breathy sound's character *is* its quietness: a sniff pulled up to speech
+ * level is not integrated, it is a loud wet noise where a sniff used to be. A gasp is
+ * *supposed* to sit above the line. The sounds a normaliser moves furthest are precisely
+ * the ones it ruins.
  *
- * So the panel shows the number and the author decides. That is not a smaller version of
- * normalising; it is the useful half of it. "Your sniff is 14dB under the line" is a fact
- * somebody can act on in either direction, and acting on it in the wrong direction is
- * exactly what the automatic version would have done for them.
+ * The answer is not to give up on a default, though, which was this file's first position
+ * and was too cautious. It is that the right level is a fact about the KIND rather than
+ * about the speech — see `levelDb` in tags.ts, where each of the eight says where it
+ * belongs. `suggestedGain` below turns this measurement plus that target into an opening
+ * position for the slider, and the author moves it by ear from there.
  *
  * Null when the selection is silent, which is a real answer: there is no level, rather
  * than a level of zero to be reported as minus infinity.
@@ -180,6 +180,25 @@ export function levelOf(buffer: AudioBuffer, fromMs: number, toMs: number): numb
   const rms = Math.sqrt(loud.reduce((sum, l) => sum + l * l, 0) / loud.length);
   return 20 * Math.log10(rms / SPEECH_RMS);
 }
+
+/**
+ * The gain that would put this clip where its kind belongs.
+ *
+ * Returns a plain multiplier, and `1` whenever there is nothing to go on — a silent
+ * selection, or a kind with no stated target. Clamped, because the arithmetic is happy to
+ * suggest 40dB of lift on a recording made across a room, and a slider that opens at the
+ * far end of its own range is worse than one that opens at unity: it presents a number
+ * nobody chose as though it were considered.
+ */
+export const MAX_GAIN_DB = 12;
+export const MIN_GAIN_DB = -24;
+
+export function suggestedGainDb(measuredDb: number | null, targetDb: number | undefined): number {
+  if (measuredDb === null || targetDb === undefined) return 0;
+  return Math.max(MIN_GAIN_DB, Math.min(MAX_GAIN_DB, targetDb - measuredDb));
+}
+
+export const gainFromDb = (db: number) => 10 ** (db / 20);
 
 /** The loudest single sample in the selection, for the clipping warning. */
 export function peakOf(buffer: AudioBuffer, fromMs: number, toMs: number): number {
@@ -255,6 +274,16 @@ export async function toMp3(
   buffer: AudioBuffer,
   startMs: number,
   endMs: number,
+  /**
+   * A multiplier applied before encoding, and the only moment it can be applied at all.
+   *
+   * Baked into the bytes rather than stored as a number for the splice to honour, because
+   * the splice cannot honour it: generate.ts joins MP3 frames without decoding, which is
+   * what makes it possible in a Worker at all, and a decoder is exactly what changing a
+   * level requires. The browser is holding the samples already, so it is the one place in
+   * the app where this costs nothing.
+   */
+  gain = 1,
 ): Promise<Uint8Array> {
   const from = Math.max(0, Math.floor((startMs / 1000) * buffer.sampleRate));
   const to = Math.min(buffer.length, Math.ceil((endMs / 1000) * buffer.sampleRate));
@@ -262,14 +291,25 @@ export async function toMp3(
   if (selected.length === 0) return new Uint8Array();
 
   let samples = selected;
+  if (gain !== 1) {
+    // Clamped here as well as at the encoder, because a lift applied to a clip already
+    // near full scale wraps rather than distorting, and a wrap is a click.
+    samples = new Float32Array(selected.length);
+    for (let i = 0; i < selected.length; i++) {
+      samples[i] = Math.max(-1, Math.min(1, selected[i] * gain));
+    }
+  }
   if (buffer.sampleRate !== SPLICE_SAMPLE_RATE) {
+    // `samples`, not `selected`: the gain above has already been applied to it, and
+    // resampling from the untouched selection would silently throw the level away on
+    // every file that is not already at 44.1kHz.
     const outputLength = Math.max(
       1,
-      Math.ceil((selected.length * SPLICE_SAMPLE_RATE) / buffer.sampleRate),
+      Math.ceil((samples.length * SPLICE_SAMPLE_RATE) / buffer.sampleRate),
     );
     const context = new OfflineAudioContext(1, outputLength, SPLICE_SAMPLE_RATE);
-    const input = context.createBuffer(1, selected.length, buffer.sampleRate);
-    input.copyToChannel(selected, 0);
+    const input = context.createBuffer(1, samples.length, buffer.sampleRate);
+    input.copyToChannel(samples, 0);
     const source = context.createBufferSource();
     source.buffer = input;
     source.connect(context.destination);

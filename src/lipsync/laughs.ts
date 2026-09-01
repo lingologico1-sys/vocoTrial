@@ -134,6 +134,15 @@ export interface ReactionRender {
   voiceName?: string;
   durationMs: number;
   bytes: number;
+  /**
+   * The gain baked into these bytes, in dB, relative to the recording as provided.
+   *
+   * Recorded rather than derived, because it cannot be derived: once the samples are
+   * scaled and encoded there is nothing left that says what they were scaled by. Absent on
+   * anything imported before the slider existed, which reads as "unknown" rather than as
+   * zero — those clips were encoded at whatever level they were recorded at.
+   */
+  gainDb?: number;
 }
 
 export const LAUGHS_INDEX_KEY = 'laughs/index.json';

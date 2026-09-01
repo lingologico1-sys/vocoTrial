@@ -4,6 +4,12 @@ import { scanMp3 } from '../functions/api/lipsync/_mp3.ts';
 import { silence } from '../functions/api/lipsync/generate.ts';
 import { addRoom, roomWarnings } from '../src/lipsync/warnings.ts';
 import {
+  MAX_GAIN_DB,
+  MIN_GAIN_DB,
+  gainFromDb,
+  suggestedGainDb,
+} from '../src/lipsync/audioTrim.ts';
+import {
   chosenFor,
   eligible,
   pick,
@@ -19,6 +25,7 @@ import {
   clipKindOf,
   clipSpan,
   clipTimeMs,
+  tagForKind,
   splitClips,
   type ReactionClipKind,
 } from '../src/lipsync/tags.ts';
@@ -293,6 +300,47 @@ assert.equal(
     const out = addRoom(line, roomWarnings(line));
     assert.ok(!/\./.test(out), `[${kind}] is not given a full stop`);
   }
+}
+
+// --- the level suggestion ----------------------------------------------------------------
+{
+  // Every clip kind states where it belongs, since the slider opening at unity was the
+  // thing the per-kind target replaced.
+  for (const kind of REACTION_CLIP_KINDS) {
+    assert.equal(
+      typeof tagForKind(kind)?.levelDb,
+      'number',
+      `[${kind}] says where it sits against speech`,
+    );
+  }
+
+  // A gasp belongs above the line and a gulp well below it. If these ever collapse toward
+  // each other the feature has quietly become normalisation, which is what it exists not
+  // to be.
+  assert.ok(
+    tagForKind('gasps')!.levelDb! > tagForKind('laughs')!.levelDb!,
+    'a gasp cuts through more than a laugh',
+  );
+  assert.ok(
+    tagForKind('gulps')!.levelDb! < tagForKind('sighs')!.levelDb!,
+    'a gulp is quieter than a sigh',
+  );
+
+  // The suggestion is the distance from measured to target, in that direction.
+  assert.equal(suggestedGainDb(-14, -8), 6, 'a clip under its target is lifted');
+  assert.equal(suggestedGainDb(-2, -8), -6, 'a clip over its target is cut');
+  assert.equal(suggestedGainDb(-8, -8), 0, 'a clip already there is left alone');
+  assert.equal(suggestedGainDb(null, -8), 0, 'silence suggests nothing');
+  assert.equal(suggestedGainDb(-14, undefined), 0, 'a kind with no target suggests nothing');
+
+  // Clamped, so a recording made across a room cannot open the slider at its own end.
+  assert.equal(suggestedGainDb(-60, 0), MAX_GAIN_DB, 'a distant recording is clamped');
+  assert.equal(suggestedGainDb(40, 0), MIN_GAIN_DB, 'a hot recording is clamped');
+
+  // dB to multiplier, in the direction that makes +6 louder rather than quieter.
+  assert.ok(Math.abs(gainFromDb(6) - 1.995) < 0.01, '+6 dB roughly doubles amplitude');
+  assert.ok(Math.abs(gainFromDb(-6) - 0.501) < 0.01, '-6 dB roughly halves it');
+  assert.equal(gainFromDb(0), 1, 'unity is unity');
 }
 
 // --- the pad is real MP3 ----------------------------------------------------------------

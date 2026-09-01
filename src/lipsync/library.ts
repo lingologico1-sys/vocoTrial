@@ -250,6 +250,20 @@ export function preferClip(request: {
   return changed(post('laughs/prefer', request));
 }
 
+/**
+ * Re-encode one stored clip at a different level.
+ *
+ * The page sends the bytes rather than the number, because the Worker has no codec — see
+ * the note on relevel.ts. Everything else about the clip stays as it was.
+ */
+export function relevelClip(request: {
+  renderId: string;
+  rawMp3Base64: string;
+  gainDb: number;
+}): Promise<{ render: ReactionRender }> {
+  return changed(post('laughs/relevel', request));
+}
+
 /** Voice metadata used to choose the gender-scoped original-performance pool. */
 export function fetchVoiceInfo(voiceId: string): Promise<{
   voiceId: string;
