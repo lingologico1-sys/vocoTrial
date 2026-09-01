@@ -593,8 +593,14 @@ const PULSE_MS = 110;
  * gives the easing something to work with, so the shape moves rather than snapping.
  */
 const ARC_EDGE_MS = 160;
-/** Below this an arc has no room for edges and is simply held. */
-const ARC_MIN_MS = 2 * ARC_EDGE_MS + 120;
+/**
+ * Below this an arc has no room for edges and is simply held.
+ *
+ * Exported because the import panel shows it: a yawn or a sigh trimmed shorter than this
+ * silently loses the shape that makes it recognisable, and that is worth knowing while
+ * the trim handles are still on screen rather than after a take.
+ */
+export const ARC_MIN_MS = 2 * ARC_EDGE_MS + 120;
 /** How long a blink lasts. Matches what a real one takes, and Face's own BLINK_MS. */
 const BLINK_MS = 160;
 /**

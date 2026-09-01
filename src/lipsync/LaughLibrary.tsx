@@ -13,16 +13,17 @@ import {
 } from './library';
 import { decodeFile, proposeBounds, toBase64, toMp3, toWav } from './audioTrim';
 import {
-  LAUGH_KINDS,
   eligible,
   originalFor,
+  preferredFor,
   renderedVoices,
   treatmentOf,
-  type LaughLibraryIndex,
-  type LaughKind,
-  type LaughTreatment,
+  type ReactionLibraryIndex,
+  type ReactionClipKind,
+  type ClipTreatment,
   type VoiceGender,
 } from './laughs';
+import { ARC_MIN_MS, REACTION_CLIP_KINDS, tagForKind } from './tags';
 
 /**
  * The laugh library: laughs you provide, and which voices have them.
@@ -53,9 +54,65 @@ interface LaughLibraryProps {
   setBusy: (busy: boolean) => void;
 }
 
-const KIND_LABEL: Record<LaughKind, string> = {
+/**
+ * What the face will actually do with a clip filed under each kind.
+ *
+ * Written from the poses in tags.ts rather than from what the word means, because the
+ * import form is the one moment somebody chooses a kind and the cost of choosing wrong is
+ * paid silently afterwards — a yawn filed under `gasps` snaps open and stays open, and
+ * nothing later says so. Naming the pose here is what makes that visible while it is still
+ * a dropdown rather than a take.
+ */
+const KIND_LABEL: Record<ReactionClipKind, string> = {
   laughs: 'laugh — open mouth, eyes shut, head bobs',
   giggles: 'giggle — mouth shut, eyes open, small bob',
+  yawn: 'yawn — opens and closes slowly, eyes shut',
+  sighs: 'sigh — lips part and trail shut, blink',
+  gasps: 'gasp — snaps open and stays open',
+  'clears throat': 'clears throat — lips parted, over quickly',
+  gulps: 'gulp — lips stay shut throughout',
+  sniffs: 'sniff — lips compressed, blink',
+};
+
+/** The two families the picker groups by, so eight options read as a choice not a list. */
+const KIND_GROUPS: Array<{ label: string; kinds: ReactionClipKind[] }> = [
+  { label: 'Laughter', kinds: ['laughs', 'giggles'] },
+  { label: 'Breath and throat', kinds: ['yawn', 'sighs', 'gasps', 'clears throat', 'gulps', 'sniffs'] },
+];
+
+/**
+ * A colour per kind, so a row is identifiable before its label is read.
+ *
+ * Laughter keeps the amber it had. The breath and throat sounds share a cooler range,
+ * which carries the same split the picker groups by without needing a second badge.
+ */
+const KIND_STYLE: Record<ReactionClipKind, string> = {
+  laughs: 'bg-amber-950/50 text-amber-400',
+  giggles: 'bg-orange-950/50 text-orange-400',
+  yawn: 'bg-violet-950/50 text-violet-400',
+  sighs: 'bg-sky-950/50 text-sky-400',
+  gasps: 'bg-rose-950/50 text-rose-400',
+  'clears throat': 'bg-teal-950/50 text-teal-400',
+  gulps: 'bg-slate-800 text-slate-400',
+  sniffs: 'bg-emerald-950/50 text-emerald-400',
+};
+
+/**
+ * How long a clip of this kind usually wants to be, as guidance in the trim panel.
+ *
+ * Targets to aim at, not bounds — MIN_CLIP_MS and MAX_CLIP_MS server-side are the only
+ * things that refuse anything. Worth showing because the useful range differs by an order
+ * of magnitude across these eight, and a 3s gulp is a mistake nothing else would catch.
+ */
+const KIND_TARGET_MS: Record<ReactionClipKind, [number, number]> = {
+  laughs: [600, 3000],
+  giggles: [400, 2000],
+  yawn: [1200, 3500],
+  sighs: [600, 1800],
+  gasps: [250, 800],
+  'clears throat': [400, 1200],
+  gulps: [150, 500],
+  sniffs: [150, 650],
 };
 
 const secs = (ms: number) => `${(ms / 1000).toFixed(2)}s`;
@@ -67,7 +124,7 @@ export default function LaughLibrary({
   busy,
   setBusy,
 }: LaughLibraryProps) {
-  const [library, setLibrary] = useState<LaughLibraryIndex>({ sources: [], renders: [] });
+  const [library, setLibrary] = useState<ReactionLibraryIndex>({ sources: [], renders: [] });
   const [problem, setProblem] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [working, setWorking] = useState<string | null>(null);
@@ -76,15 +133,30 @@ export default function LaughLibrary({
   const [picked, setPicked] = useState<{ name: string; buffer: AudioBuffer } | null>(null);
   const [fromMs, setFromMs] = useState(0);
   const [toMs, setToMs] = useState(0);
-  const [kind, setKind] = useState<LaughKind>('laughs');
+  const [kind, setKind] = useState<ReactionClipKind>('laughs');
   const [label, setLabel] = useState('');
-  const [denoise, setDenoise] = useState(true);
+  /**
+   * Noise removal, defaulted from the kind rather than always on.
+   *
+   * On a laugh it takes the room off a phone recording and is close to essential. On a
+   * breath sound the isolation model is being asked to strip everything that is not
+   * speech, and a sniff *is* not speech — it can remove the clip rather than clean it.
+   * See `denoise` in the tag table, which is where the per-kind answer lives.
+   */
+  const [denoise, setDenoise] = useState(tagForKind('laughs')?.denoise ?? true);
   const [gender, setGender] = useState<VoiceGender | undefined>(voiceGender);
   const [alsoConvert, setAlsoConvert] = useState(false);
 
   useEffect(() => {
     if (voiceGender) setGender(voiceGender);
   }, [voiceGender]);
+
+  // Follows the kind, and is still a checkbox: the default is what this sound usually
+  // wants, not a rule about it. Somebody importing a sniff recorded in a noisy room
+  // should be able to turn it on, having heard the room.
+  useEffect(() => {
+    setDenoise(tagForKind(kind)?.denoise ?? true);
+  }, [kind]);
 
   /**
    * One <audio> for auditioning, made once and re-pointed.
@@ -237,7 +309,7 @@ export default function LaughLibrary({
     }
   }
 
-  async function choose(sourceId: string, treatment: LaughTreatment) {
+  async function choose(sourceId: string, treatment: ClipTreatment) {
     if (!voiceId || !voiceGender) return;
     setBusy(true);
     setProblem(null);
@@ -306,14 +378,17 @@ export default function LaughLibrary({
     () =>
       new Set(
         voiceId
-          ? LAUGH_KINDS.filter((k) => eligible(library, k, voiceId, voiceGender).length > 0)
+          ? REACTION_CLIP_KINDS.filter((k) => eligible(library, k, voiceId, voiceGender).length > 0)
           : [],
       ),
     [library, voiceId, voiceGender],
   );
 
   const span = toMs - fromMs;
-  const missing = LAUGH_KINDS.filter((k) => !covered.has(k));
+  const missing = REACTION_CLIP_KINDS.filter((k) => !covered.has(k));
+  // What a conversion would be doing for this kind, shown next to the option so that
+  // "why is the original selected" has an answer where the choice is made.
+  const prefers = preferredFor(kind);
   // Opposite-gender sources have no useful action for this voice: they cannot be used raw
   // and the server will not convert them across pools. Unknown legacy sources remain so
   // they can be classified and given an original derivative.
@@ -324,19 +399,23 @@ export default function LaughLibrary({
   return (
     <section className="flex flex-col gap-3 rounded-xl border border-slate-800 p-4">
       <div className="flex items-baseline justify-between gap-4">
-        <h2 className="text-sm font-semibold text-slate-200">Laughs</h2>
+        <h2 className="text-sm font-semibold text-slate-200">Reaction clips</h2>
         <span className="text-xs text-slate-600">
           {voiceGender ? `${voiceGender} pool` : 'male and female pools'}
         </span>
       </div>
 
       <p className="text-[11px] leading-snug text-slate-600">
-        ElevenLabs treats <span className="font-mono text-slate-500">[laughs]</span> and{' '}
-        <span className="font-mono text-slate-500">[giggles]</span> as suggestions on v3 and
-        ignores them entirely on multilingual v2. Bring your own performance and keep it as
-        recorded, or optionally convert it into a matching-gender voice. Original clips are
-        shared with every voice in their male or female pool; conversions belong to one
-        exact voice.
+        ElevenLabs treats reaction tags as suggestions on v3 and ignores them entirely on
+        multilingual v2 — where every tag is stripped before synthesis, so an unrecorded
+        one makes no sound at all. On that model a clip is not an improvement on the
+        model&rsquo;s attempt; it is the only way these exist, which is why it is worth
+        recording all {REACTION_CLIP_KINDS.length}.
+      </p>
+      <p className="text-[11px] leading-snug text-slate-600">
+        Bring your own performance and keep it as recorded, or optionally convert it into a
+        matching-gender voice. Original clips are shared with every voice in their male or
+        female pool; conversions belong to one exact voice.
       </p>
 
       {/* ---- the library ---- */}
@@ -354,7 +433,7 @@ export default function LaughLibrary({
                 render.voiceId === voiceId,
             );
             const preferred = source.preferredTreatmentByVoice?.[voiceId];
-            const active: LaughTreatment = preferred === 'original' && original
+            const active: ClipTreatment = preferred === 'original' && original
               ? 'original'
               : here
                 ? 'voice-converted'
@@ -370,9 +449,7 @@ export default function LaughLibrary({
               >
                 <span
                   className={`shrink-0 rounded px-1.5 py-0.5 font-mono text-[10px] ${
-                    source.kind === 'laughs'
-                      ? 'bg-amber-950/50 text-amber-400'
-                      : 'bg-sky-950/50 text-sky-400'
+                    KIND_STYLE[source.kind] ?? 'bg-slate-800 text-slate-400'
                   }`}
                 >
                   {source.kind}
@@ -613,13 +690,38 @@ export default function LaughLibrary({
                 <span className="text-[11px] uppercase tracking-wide text-slate-600">Kind</span>
                 <select
                   value={kind}
-                  onChange={(event) => setKind(event.target.value as LaughKind)}
+                  onChange={(event) => setKind(event.target.value as ReactionClipKind)}
                   className="rounded-lg border border-slate-800 bg-slate-900 px-2 py-1.5 text-xs text-slate-200"
                 >
-                  {LAUGH_KINDS.map((k) => (
-                    <option key={k} value={k}>{k}</option>
+                  {KIND_GROUPS.map((group) => (
+                    <optgroup key={group.label} label={group.label}>
+                      {group.kinds.map((k) => (
+                        <option key={k} value={k}>{k}</option>
+                      ))}
+                    </optgroup>
                   ))}
                 </select>
+                <span className="text-[11px] leading-snug text-slate-600">
+                  {KIND_LABEL[kind]}
+                </span>
+                <span className="text-[11px] leading-snug text-slate-600">
+                  Usually {(KIND_TARGET_MS[kind][0] / 1000).toFixed(2)}–
+                  {(KIND_TARGET_MS[kind][1] / 1000).toFixed(2)}s. A target, not a limit.
+                </span>
+                {/* Both of these are properties of the format rather than mistakes, so
+                    they are said here and not enforced anywhere. */}
+                {tagForKind(kind)?.perform === 'arc' && span > 0 && span < ARC_MIN_MS && (
+                  <span className="text-[11px] leading-snug text-amber-500">
+                    Under {ARC_MIN_MS}ms this holds one shape instead of opening and
+                    closing, which is most of what makes a {kind} recognisable.
+                  </span>
+                )}
+                {span > 0 && span < 250 && (
+                  <span className="text-[11px] leading-snug text-slate-600">
+                    Short clips are placed less precisely: a cut lands on a 26ms frame
+                    boundary, so this one can sit up to 13ms either way.
+                  </span>
+                )}
               </label>
 
               <fieldset className="flex flex-col gap-1">
@@ -691,6 +793,15 @@ export default function LaughLibrary({
               <span className="text-[11px] leading-snug text-slate-600">
                 Also convert into {voiceName || 'the current voice'}. This spends credits
                 and is available only when the recording and voice use the same gender pool.
+                {prefers === 'original' && (
+                  <>
+                    {' '}
+                    A <span className="font-mono text-slate-500">{kind}</span> plays the
+                    recording by default even once converted — speech-to-speech has little
+                    to work with in an unvoiced sound. Convert to audition it; the choice is
+                    per voice and reversible.
+                  </>
+                )}
               </span>
             </label>
 
@@ -708,8 +819,9 @@ export default function LaughLibrary({
                 }`}
               >
                 Strip background noise before voice conversion. Near-essential on a phone
-                recording, since the room otherwise gets rendered as breath — but it can
-                soften the edges of a clean studio clip, which is the part carrying the laugh.
+                recording of a laugh, since the room otherwise gets rendered as breath — but
+                it softens edges, and on a sigh, a gasp or a sniff those edges are the whole
+                sound. Defaulted per kind for that reason; off does not mean wrong.
               </span>
             </label>
 

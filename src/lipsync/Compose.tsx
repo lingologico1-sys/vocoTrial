@@ -10,10 +10,8 @@ import {
   type Generated,
 } from './library';
 import {
-  LAUGH_KINDS,
   eligible,
-  laughKindOf,
-  type LaughLibraryIndex,
+  type ReactionLibraryIndex,
   type VoiceGender,
 } from './laughs';
 import {
@@ -34,9 +32,11 @@ import {
   type VoiceParams,
 } from './published';
 import {
+  REACTION_CLIP_KINDS,
   SMILE_LEAD_MIN_MS,
   TAGS,
   applyAccent,
+  clipKindOf,
   reactionsIn,
   stripTags,
   type Tag,
@@ -52,10 +52,55 @@ import { loadPrefs, loadVoiceGender, savePrefs, saveVoiceGender } from './prefs'
  * audio, the timings, the transcript and the marks are made by one request from one
  * piece of text, so they cannot describe different utterances. See generate.ts.
  *
- * Tags are offered only on v3, because only v3 has them; on the other model the palette
- * is disabled rather than absent, so it is clear the feature exists and which model it
- * belongs to rather than looking like it was never built.
+ * WHICH TAGS ARE OFFERED DEPENDS ON THE MODEL, in two tiers rather than one. Directives
+ * and pauses are v3's to perform, so on v2 they are disabled rather than absent — it is
+ * clearer that the feature exists and which model it belongs to than that it was never
+ * built. The eight clip-capable reactions are enabled on both, and that is not an
+ * exception so much as the point of the library: generate.ts lifts the tag out and splices
+ * a recording afterwards, so those work on v2 *because* the model never sees them.
+ *
+ * Each of those eight also says on the button what it will actually do here — spliced from
+ * the library, performed by the model, or dropped for want of a clip. The answer depends
+ * on the voice and on what has been recorded for it, so it is not something an author can
+ * work out from the tag.
  */
+
+/**
+ * What will become of a reaction tag in this line, as a mark on its button.
+ *
+ * A glyph rather than a word because it sits inside a monospace tag button next to seven
+ * others, and "Spliced from library" on each would be a paragraph pretending to be a
+ * palette. The legend under the palette spells all three out, and the title attribute says
+ * it in full on the one being pointed at.
+ */
+/**
+ * Whether a tag does anything on the chosen model.
+ *
+ * At module scope rather than inside the component because a closure redefined every
+ * render cannot go in a dependency array honestly: it changes identity constantly while
+ * meaning the same thing, so listing it re-runs the memo on every keystroke and omitting
+ * it is a lie about what the memo reads. A plain function of its two inputs has neither
+ * problem.
+ */
+const worksOn = (tag: Tag, tagsAllowed: boolean) =>
+  tagsAllowed || clipKindOf(tag.tag) !== null;
+
+type Fate = 'spliced' | 'timed' | 'gone';
+
+const FATE_MARK: Record<Fate, string> = { spliced: '●', timed: '○', gone: '×' };
+
+const FATE_STYLE: Record<Fate, string> = {
+  spliced: 'text-emerald-400',
+  timed: 'text-amber-400',
+  gone: 'text-rose-400',
+};
+
+const FATE_HINT: Record<Fate | 'unused', string> = {
+  spliced: 'Spliced from your library.',
+  timed: 'No recording for this voice, so the model is asked to perform it.',
+  gone: 'No recording for this voice and v2 cannot perform it, so it will be dropped.',
+  unused: 'Can be spliced from a recording you provide.',
+};
 
 interface ComposeProps {
   onGenerated: (result: Generated) => void;
@@ -207,7 +252,19 @@ export default function Compose({ onGenerated, onVoiceChange, busy, setBusy }: C
     void fetchQuota().then(setQuota);
   }, []);
 
+  /**
+   * Whether the model reads tags at all, which is not the same as whether a tag works.
+   *
+   * v2 ignores audio tags, and generate.ts strips every one of them out of what it sends,
+   * so a directive there is inert. A clip-capable reaction is the exception and the whole
+   * point of the library: the tag is lifted and a recording is spliced in afterwards, so
+   * it works on v2 precisely because the model never sees it. Hence two gates below rather
+   * than this one doing double duty — it used to disable the entire palette on v2, which
+   * left the eight kinds that do work with no way to insert them.
+   */
   const tagsAllowed = model === 'eleven_v3';
+  /** Whether this particular tag does something on the model currently chosen. */
+  const worksHere = (tag: Tag) => worksOn(tag, tagsAllowed);
   /**
    * The accent actually in force, which on v2 is none whatever the field says.
    *
@@ -231,7 +288,18 @@ export default function Compose({ onGenerated, onVoiceChange, busy, setBusy }: C
   const billed = useMemo(() => applyAccent(text, accentUsed), [text, accentUsed]);
   const cost = useMemo(() => costOf(billed), [billed]);
   const script = useMemo(() => stripTags(text), [text]);
-  const reactions = useMemo(() => (tagsAllowed ? reactionsIn(text) : []), [text, tagsAllowed]);
+  /**
+   * The reactions in this line that the chosen model will do something about.
+   *
+   * On v3 that is all of them. On v2 it is the clip-capable ones only — this used to be
+   * flatly empty there, which was right when no tag did anything on that model and became
+   * a silent hole the moment eight of them did: the coverage panel had nothing to report
+   * about a v2 take even though it was about to splice four clips into one.
+   */
+  const reactions = useMemo(
+    () => reactionsIn(text).filter((t) => worksOn(t, tagsAllowed)),
+    [text, tagsAllowed],
+  );
   const warnings = useMemo(() => scriptWarnings(script), [script]);
   /**
    * Which of this line's tags the library will take over, and which the model still gets.
@@ -241,7 +309,7 @@ export default function Compose({ onGenerated, onVoiceChange, busy, setBusy }: C
    * keeps the two in step is that both ask `eligible` from laughs.ts rather than each
    * deciding for itself what "covered" means.
    */
-  const [library, setLibrary] = useState<LaughLibraryIndex>({ sources: [], renders: [] });
+  const [library, setLibrary] = useState<ReactionLibraryIndex>({ sources: [], renders: [] });
   useEffect(() => {
     const refresh = () => void listClips().then(setLibrary).catch(() => undefined);
     refresh();
@@ -249,36 +317,47 @@ export default function Compose({ onGenerated, onVoiceChange, busy, setBusy }: C
     return () => window.removeEventListener(LAUGH_LIBRARY_CHANGED, refresh);
   }, []);
 
-  const { fromLibrary, fromTimings, dropped } = useMemo(() => {
+  const { fromLibrary, fromTimings, dropped, byTag } = useMemo(() => {
     const covered = new Set(
       voiceId.trim()
-        ? LAUGH_KINDS.filter(
+        ? REACTION_CLIP_KINDS.filter(
             (k) => eligible(library, k, voiceId.trim(), voiceGender).length > 0,
           )
         : [],
     );
-    // Read off the raw text rather than off `reactions`, which is empty on v2 because
-    // that model ignores audio tags. Laugh tags are the exception to that rule now: v2
-    // still cannot perform one, but generate.ts lifts them out either way, so on v2 a
-    // laugh tag genuinely does something and the panel has to be able to say what.
-    const laughs = reactionsIn(text).filter((t) => laughKindOf(t.tag));
+    // Read off the raw text rather than off `reactions`, so that a tag the current model
+    // ignores is still classified rather than quietly missing from the panel.
+    const clips = reactionsIn(text).filter((t) => clipKindOf(t.tag));
     const spliced: string[] = [];
     const timed: string[] = [];
     const gone: string[] = [];
+    const byTag = new Map<string, Fate>();
 
-    for (const tag of laughs) {
-      const kind = laughKindOf(tag.tag);
-      if (kind && covered.has(kind)) spliced.push(tag.tag);
-      else if (tagsAllowed) timed.push(tag.tag);
-      // v2, no clip: lifted out and nothing put back. Silence, which is the point —
-      // left in, the model is liable to read the tag aloud as a word.
-      else gone.push(tag.tag);
+    for (const tag of clips) {
+      const kind = clipKindOf(tag.tag);
+      if (kind && covered.has(kind)) {
+        spliced.push(tag.tag);
+        byTag.set(tag.tag, 'spliced');
+      } else if (tagsAllowed) {
+        // v3 with no clip: the model is asked for it and may oblige. Unreliable, and
+        // strictly better than nothing, which is what this did before the library.
+        timed.push(tag.tag);
+        byTag.set(tag.tag, 'timed');
+      } else {
+        // v2, no clip: lifted out and nothing put back. Silence, which is the point —
+        // left in, the model is liable to read the tag aloud as a word.
+        gone.push(tag.tag);
+        byTag.set(tag.tag, 'gone');
+      }
     }
     // Everything else keeps the old rule, and on v2 there is nothing else to report.
     for (const tag of reactions) {
-      if (!laughKindOf(tag.tag)) timed.push(tag.tag);
+      if (!clipKindOf(tag.tag)) {
+        timed.push(tag.tag);
+        byTag.set(tag.tag, 'timed');
+      }
     }
-    return { fromLibrary: spliced, fromTimings: timed, dropped: gone };
+    return { fromLibrary: spliced, fromTimings: timed, dropped: gone, byTag };
   }, [reactions, library, voiceId, voiceGender, text, tagsAllowed]);
 
   /** Inserts at the cursor rather than appending — a tag placed mid-line is the point. */
@@ -521,7 +600,10 @@ export default function Compose({ onGenerated, onVoiceChange, busy, setBusy }: C
         <div className="flex items-baseline gap-3">
           <span className="text-xs font-medium text-slate-400">Audio tags</span>
           {!tagsAllowed && (
-            <span className="text-[11px] text-slate-600">v3 only</span>
+            <span className="text-[11px] text-slate-600">
+              v2 reads no tags — the {REACTION_CLIP_KINDS.length} with recordings still work,
+              because they are spliced in rather than performed
+            </span>
           )}
         </div>
         {GROUPS.map((group) => (
@@ -533,18 +615,27 @@ export default function Compose({ onGenerated, onVoiceChange, busy, setBusy }: C
               <button
                 key={t.tag}
                 type="button"
-                disabled={!tagsAllowed}
+                disabled={!worksHere(t)}
                 onClick={() => insert(t.tag)}
                 title={
-                  t.kind === 'reaction'
-                    ? 'Makes sound the transcript has no words for. Its span is marked from the timings rather than aligned.'
-                    : t.kind === 'pause'
-                      ? 'Inserts silence, which the aligner reads correctly on its own.'
-                      : 'Changes how the words are said. No effect on alignment.'
+                  t.clip
+                    ? `${FATE_HINT[byTag.get(t.tag) ?? 'unused']} Recorded clips are spliced into the finished audio, so this works on either model.`
+                    : t.kind === 'reaction'
+                      ? 'Makes sound the transcript has no words for. Its span is marked from the timings rather than aligned.'
+                      : t.kind === 'pause'
+                        ? 'Inserts silence, which the aligner reads correctly on its own.'
+                        : 'Changes how the words are said. No effect on alignment.'
                 }
                 className={`rounded-md border px-2 py-0.5 font-mono text-[11px] transition-colors disabled:cursor-not-allowed disabled:border-slate-900 disabled:text-slate-700 ${KIND_STYLE[t.kind]}`}
               >
                 {t.tag}
+                {/* Only once the tag is in the line, because before that its fate is a
+                    hypothetical and eight permanent badges would be noise. */}
+                {byTag.get(t.tag) && (
+                  <span className={`ml-1 ${FATE_STYLE[byTag.get(t.tag)!]}`}>
+                    {FATE_MARK[byTag.get(t.tag)!]}
+                  </span>
+                )}
               </button>
             ))}
           </div>
@@ -554,6 +645,13 @@ export default function Compose({ onGenerated, onVoiceChange, busy, setBusy }: C
           would smear the surrounding words across them, so their span is taken from
           ElevenLabs&rsquo; own timings instead. Blue tags are silence, which the aligner
           already handles. Grey tags cost nothing.
+        </p>
+        <p className="text-[11px] leading-snug text-slate-600">
+          Once a reaction is in the line it is marked with what will happen to it:{' '}
+          <span className={FATE_STYLE.spliced}>{FATE_MARK.spliced}</span> spliced from your
+          library, <span className={FATE_STYLE.timed}>{FATE_MARK.timed}</span> left for the
+          model to perform, <span className={FATE_STYLE.gone}>{FATE_MARK.gone}</span> no
+          recording for this voice, so it will be dropped.
         </p>
       </div>
 
