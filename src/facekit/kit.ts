@@ -453,14 +453,21 @@ export function defaultBoxSize(id: BoxId): { width: number; height: number } {
  * a box from its top-left corner slides it off the eye it was placed on and
  * makes the owner re-place a box they never asked to have resized.
  */
-export function resizeAbout<T extends Box>(box: T, size: { width: number; height: number }): T {
-  return clampBox({
+export function resizeAbout<T extends Box>(
+  box: T,
+  size: { width: number; height: number },
+  min = MIN_BOX,
+): T {
+  return clampBox(
+    {
     ...box,
-    x: box.x + (box.width - size.width) / 2,
-    y: box.y + (box.height - size.height) / 2,
-    width: size.width,
-    height: size.height,
-  });
+      x: box.x + (box.width - size.width) / 2,
+      y: box.y + (box.height - size.height) / 2,
+      width: size.width,
+      height: size.height,
+    },
+    min,
+  );
 }
 
 /**
@@ -526,8 +533,49 @@ export function newKit(name: string, base: string, situation = false): FaceKit {
  * mouth it means nothing has been measured and nothing should be inferred
  * (`chinClearance`).
  */
-export function clampBox<T extends Box>(box: T): T {
-  const min = 48;
+/**
+ * The smallest a box may be dragged, in base pixels.
+ *
+ * A drag-handle floor rather than an artistic one: nothing downstream cares how
+ * small a rectangle is, but a box smaller than its own grips cannot be resized
+ * back out of. That makes it a fact about screen space wearing base-pixel
+ * clothing, and the conversion between the two is the picker's width — which is
+ * why there are two of these rather than one.
+ *
+ * 48 is the long-standing figure and it was chosen against a picker sharing its
+ * row with the motion strip, about 490px wide for a 1024 base. That is a scale
+ * near a half, so the floor anybody actually felt was some 23 screen pixels.
+ */
+export const MIN_BOX = 48;
+
+/**
+ * The same floor, for a kit whose picker draws the base at full width.
+ *
+ * Not a loosening of the rule above so much as the same rule restated at the
+ * scale a situational kit is now placed at: stacked, the picker is up to 1024px
+ * for a 1024 base, so 16 base pixels is 16 screen pixels against corner grips
+ * that are 12px and sit *outside* the rectangle rather than inside it. There is
+ * still something to grab at the floor, which is all this has ever promised.
+ *
+ * It has to come down for these kits, because 48 is not a floor there — it is a
+ * ceiling on how well the boxes can fit. A head that is a third of the frame has
+ * an eye about 46 by 21 base pixels, so the old minimum is twice the height of
+ * the thing being boxed, and the eye cannot be fitted at all.
+ *
+ * What it is not is permission to box anything. An eye this small makes a
+ * blink patch too coarse to be worth generating, and the honest fix for that is
+ * upstream — frame the shot closer. See FramingNote: this stops the picker from
+ * refusing what the framing already allows, and settles nothing about whether
+ * the framing was wise.
+ */
+export const MIN_BOX_FINE = 16;
+
+/** Which floor a kit's boxes are dragged against. */
+export function minBoxFor(kit: { situation?: boolean } | null | undefined): number {
+  return kit?.situation ? MIN_BOX_FINE : MIN_BOX;
+}
+
+export function clampBox<T extends Box>(box: T, min = MIN_BOX): T {
   const width = Math.min(CANVAS_EDGE, Math.max(min, Math.round(box.width)));
   const height = Math.min(CANVAS_EDGE, Math.max(min, Math.round(box.height)));
   const { headroom, chin } = box as MeasuredBox;

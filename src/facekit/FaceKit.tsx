@@ -30,6 +30,7 @@ import {
   chinClearance,
   defaultBoxSize,
   defaultBrowBox,
+  minBoxFor,
   newKit,
   patchFilename,
   resizeAbout,
@@ -1187,7 +1188,7 @@ export default function FaceKit({ situation = false }: { situation?: boolean } =
     const other = partner ? kit?.boxes[partner] : undefined;
     const box = defaultBrowBox(id);
     if (!other) return box;
-    return { ...resizeAbout(box, other), headroom: browHeadroom(other) };
+    return { ...resizeAbout(box, other, minBoxFor(kit)), headroom: browHeadroom(other) };
   };
 
   /**
@@ -1230,7 +1231,7 @@ export default function FaceKit({ situation = false }: { situation?: boolean } =
     const carry = resized && partner && other && boxFollows(partner) ? partner : null;
 
     const carried: Partial<Record<BoxId, Box>> = {};
-    if (carry && other) carried[carry] = resizeAbout(other, box);
+    if (carry && other) carried[carry] = resizeAbout(other, box, minBoxFor(kit));
 
     edit((current) => ({ ...current, boxes: { ...current.boxes, [which]: box, ...carried } }));
 
@@ -1747,6 +1748,7 @@ export default function FaceKit({ situation = false }: { situation?: boolean } =
                   boxes={kit.boxes}
                   active={region}
                   locked={committed[region] > 0}
+                  min={minBoxFor(kit)}
                   onChange={moveBox}
                 />
 

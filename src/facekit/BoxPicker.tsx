@@ -1,6 +1,6 @@
 import { useRef } from 'react';
 import { CANVAS_EDGE } from './imageModels';
-import { browHeadroom, chinLine, clampBox, type Boxes, type MeasuredBox } from './kit';
+import { MIN_BOX, browHeadroom, chinLine, clampBox, type Boxes, type MeasuredBox } from './kit';
 import { isBrow, type BoxId } from './slots';
 
 /**
@@ -54,6 +54,15 @@ interface BoxPickerProps {
    */
   locked?: boolean;
   /**
+   * The smallest a box may be dragged, in base pixels.
+   *
+   * A prop rather than a constant because the floor is really a screen-space
+   * one — it keeps the corner grips reachable — and this component is drawn at
+   * two very different scales. The caller knows which, so the caller decides.
+   * See MIN_BOX and MIN_BOX_FINE in kit.ts.
+   */
+  min?: number;
+  /**
    * Takes a `MeasuredBox` rather than a `Box`, which every `Box` already is.
    *
    * The widest of the types, because two of the drags here report a measurement
@@ -65,7 +74,7 @@ interface BoxPickerProps {
   onChange: (region: BoxId, box: MeasuredBox) => void;
 }
 
-export default function BoxPicker({ base, boxes, active, locked, onChange }: BoxPickerProps) {
+export default function BoxPicker({ base, boxes, active, locked, min = MIN_BOX, onChange }: BoxPickerProps) {
   const frame = useRef<HTMLDivElement>(null);
 
   /**
@@ -105,7 +114,7 @@ export default function BoxPicker({ base, boxes, active, locked, onChange }: Box
       const dy = (moveEvent.clientY - startY) * scale;
 
       if (!handle) {
-        onChange(region, clampBox({ ...box, x: box.x + dx, y: box.y + dy }));
+        onChange(region, clampBox({ ...box, x: box.x + dx, y: box.y + dy }, min));
         return;
       }
 
@@ -135,12 +144,15 @@ export default function BoxPicker({ base, boxes, active, locked, onChange }: Box
       const north = handle === 'nw' || handle === 'ne';
       onChange(
         region,
-        clampBox({
-          x: west ? box.x + dx : box.x,
-          y: north ? box.y + dy : box.y,
-          width: west ? box.width - dx : box.width + dx,
-          height: north ? box.height - dy : box.height + dy,
-        }),
+        clampBox(
+          {
+            x: west ? box.x + dx : box.x,
+            y: north ? box.y + dy : box.y,
+            width: west ? box.width - dx : box.width + dx,
+            height: north ? box.height - dy : box.height + dy,
+          },
+          min,
+        ),
       );
     };
 
