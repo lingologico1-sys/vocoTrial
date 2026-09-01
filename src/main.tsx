@@ -4,6 +4,7 @@ import Start from './start/Start';
 import TutorBench from './tutor/TutorBench';
 import Studio from './live/Studio';
 import FaceKit from './facekit/FaceKit';
+import SituationMaker from './facekit/SituationMaker';
 import Teach from './teach/Teach';
 import LipSync from './lipsync/LipSync';
 import Takes from './lipsync/Takes';
@@ -40,6 +41,12 @@ const PAGES: Record<string, () => JSX.Element> = {
   // Models and prompts. Off the path to a published session — see Start.tsx.
   '/tutorbench': TutorBench,
   '/facekit': FaceKit,
+  // The same authoring flow as /facekit, for a speaker shown in a setting
+  // rather than a head on its own — a gentleman at a desk, for a listening
+  // exercise where where he is doing it is part of what is being understood.
+  // One component under both; see SituationMaker.tsx for why it is still a
+  // separate page.
+  '/situationmaker': SituationMaker,
   // The teacher's page. One Voco Session — questions, consigne, and the
   // tutor that asks them — written here and handed out from here under a
   // code. It is not a workshop page and does not look like one; see Teach.tsx.

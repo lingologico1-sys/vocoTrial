@@ -6,6 +6,7 @@ import {
   Library,
   Smile,
   SlidersHorizontal,
+  UserSquare,
 } from 'lucide-react';
 import BuildBadge from '../BuildBadge';
 
@@ -53,6 +54,13 @@ const WORKSHOP: Place[] = [
     blurb:
       'A portrait in, a mouth and a pair of eyelids out. Draws the face the tutor wears and saves it to the shared library.',
     Icon: Smile,
+  },
+  {
+    href: '/situationmaker',
+    name: 'situationMaker',
+    blurb:
+      'The same flow as faceKit, for a speaker shown somewhere — a gentleman at his desk — rather than a head on a plain ground. Frame him chest-up: the mouth still has to be big enough to draw. The picture it makes holds still while it talks.',
+    Icon: UserSquare,
   },
   {
     href: '/studio',

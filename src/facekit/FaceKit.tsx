@@ -18,6 +18,7 @@ import {
 } from './canvas';
 import { generateBase, generatePatch } from './generate';
 import {
+  CANVAS_EDGE,
   IMAGE_MODELS,
   IMAGE_RATES_READ_ON,
   BASE_MODEL_KEY,
@@ -372,7 +373,77 @@ function money(usd: number): string {
   return usd < 0.01 ? `$${usd.toFixed(4)}` : `$${usd.toFixed(2)}`;
 }
 
-export default function FaceKit() {
+/**
+ * How wide a mouth box has to be before the poses cut to it read as speech.
+ *
+ * A generated pose is not drawn at the size of its box. The whole 1024 frame
+ * goes to the model and the result is cropped back, so the mouth's share of
+ * that frame is the detail the model had to spend on it — which is why this is
+ * the one number a situational portrait has to watch and a headshot never did.
+ * The shipped portrait's mouth is 331px because the head fills the frame.
+ *
+ * 120 is a floor rather than a target, and it is a judgement rather than a
+ * measurement: it is roughly where the narrow shapes stop being separable. The
+ * open vowels survive much further down — `aa` and `oh` are big holes and read
+ * at almost any size — but `ee`, `st` and `fv` are all the same small gap with
+ * different lips around it, and once that gap is a few dozen pixels the model
+ * returns three pictures of the same mouth. The face goes on moving, so nothing
+ * looks broken; it just stops carrying the consonants, which on a listening
+ * exercise is the entire point of it being there.
+ */
+const MIN_SITUATION_MOUTH = 120;
+
+/**
+ * What the framing is costing the mouth, said in the only unit that decides it.
+ *
+ * Shown for a situational kit and not for a portrait, because a portrait cannot
+ * fail this: its head fills the frame by construction. Here the author chose how
+ * much room to give the person, and that choice is spent before a single pose is
+ * generated — which is the reason this is a note beside the picker rather than a
+ * warning on the generate button. By the time a pose comes back soft, the
+ * framing is three steps upstream and has been paid for.
+ */
+function FramingNote({ box }: { box: MouthBox }) {
+  const frame = 'rounded-lg border px-3 py-2 text-xs';
+  const share = Math.round((box.width / CANVAS_EDGE) * 100);
+
+  if (box.width < MIN_SITUATION_MOUTH) {
+    return (
+      <p className={`${frame} border-amber-700/70 bg-amber-950/20 text-amber-300`}>
+        This mouth box is {box.width}px wide, {share}% of the frame, and under the{' '}
+        {MIN_SITUATION_MOUTH}px the narrow shapes need. The open vowels will still read; ee, st
+        and fv will come back as the same small gap three times, and the face will go on moving
+        while it stops carrying the consonants. The fix is upstream of this box — re-frame the
+        picture closer, chest-up rather than full-length, and upload it again. Widening the
+        rectangle over the same face only crops in more cheek.
+      </p>
+    );
+  }
+
+  return (
+    <p className={`${frame} border-slate-800 bg-slate-900/40 text-slate-400`}>
+      {box.width}px of mouth, {share}% of the frame, against 331px on the shipped headshot. Above
+      the floor, so the poses have detail to spend — though closer is still better, and the
+      narrow shapes are the ones to check first on the finished kit.
+    </p>
+  );
+}
+
+/**
+ * The authoring page, in either of the two things it authors.
+ *
+ * One component rather than two pages, because the flow is genuinely identical:
+ * a picture arrives, five rectangles go onto a face, and eight patches come
+ * back cut to them. Nothing in that sequence changes when the face happens to
+ * be sitting at a desk. What changes is the guidance around it — the framing
+ * rule, which a headshot cannot break and a scene can — and the one flag the
+ * kit carries out.
+ *
+ * Forking the page would have meant two copies of a 2000-line flow kept in step
+ * by hand, and every future change to a box, a slot or the publish path landing
+ * in one of them. See /situationmaker, which is this with the prop set.
+ */
+export default function FaceKit({ situation = false }: { situation?: boolean } = {}) {
   const [kit, setKit] = useState<Kit | null>(null);
   const [inUse, setInUse] = useState<string | null>(selectedFace());
   /**
@@ -770,7 +841,7 @@ export default function FaceKit() {
     setError(null);
     try {
       const normalised = await normalise(await fileToDataUrl(file));
-      setKit(newKit(file.name.replace(/\.[^.]+$/, '') || 'face', normalised));
+      setKit(newKit(file.name.replace(/\.[^.]+$/, '') || 'face', normalised, situation));
       setEyewearCandidate(null);
       setEyewearSourceChanged(false);
       setCandidates({});
@@ -1393,9 +1464,13 @@ export default function FaceKit() {
       <div className="mx-auto flex min-h-screen max-w-5xl flex-col gap-5 px-5 pb-8 pt-12">
         <header className="flex items-baseline justify-between gap-3">
           <div>
-            <h1 className="text-xl font-semibold tracking-tight">faceKit</h1>
+            <h1 className="text-xl font-semibold tracking-tight">
+              {situation ? 'situationMaker' : 'faceKit'}
+            </h1>
             <p className="text-xs text-slate-500">
-              One portrait in, a mouth and a pair of eyelids out.
+              {situation
+                ? 'One person at a desk in, the same mouth and eyelids out — on a picture that holds still.'
+                : 'One portrait in, a mouth and a pair of eyelids out.'}
             </p>
           </div>
           <nav className="flex items-center gap-4 text-xs text-slate-500">
@@ -1527,6 +1602,34 @@ export default function FaceKit() {
                   </button>
                 </div>
               </div>
+
+              {situation && (
+                <Guidance label="How to frame a situation">
+                  Chest-up, not full-length. The person can be at a desk with the room behind
+                  them and the props that say who they are — that is the whole point of this
+                  page — but the head still has to be a large part of the picture, because
+                  every mouth pose is drawn by sending this entire frame to the model and
+                  cropping the result back. A face that is a tenth of the picture gets a tenth
+                  of the drawing, and the narrow shapes go first.
+                  <br />
+                  <br />
+                  Square, and it will be made square whether or not it arrives that way: an
+                  upload is fitted inside a 1024 square and centred, so a wide photograph comes
+                  in letterboxed with empty bands above and below, and the head inside it ends
+                  up smaller than the crop it deserved. Crop to a square before uploading.
+                  <br />
+                  <br />
+                  Face forward, eyes open, mouth closed and neutral. Same rules as a portrait,
+                  for the same reasons — every pose is drawn over the resting mouth, and a
+                  three-quarter head makes a mouth box that is a rectangle over a curve.
+                  <br />
+                  <br />
+                  The mouth box will tell you whether the framing worked, in pixels, under the
+                  Regions picker below. Read it before generating anything: it is the one
+                  number that cannot be fixed after the fact, because the only fix is a
+                  different picture.
+                </Guidance>
+              )}
 
               <Guidance label="What the two buttons do">
                 Neutralise sets the resting mouth every later pose is drawn over, and clears any
@@ -1727,7 +1830,16 @@ export default function FaceKit() {
                     )}
 
                     {region === 'mouth' && (
-                      <ChinNote box={kit.boxes.mouth} locked={committed[region] > 0} />
+                      <>
+                        {/*
+                          Framing first, because it is the earlier question and
+                          the one with no way back: whether this picture gives
+                          the mouth enough pixels at all, before where inside it
+                          the chin sits.
+                        */}
+                        {situation && <FramingNote box={kit.boxes.mouth} />}
+                        <ChinNote box={kit.boxes.mouth} locked={committed[region] > 0} />
+                      </>
                     )}
 
                     <Guidance
