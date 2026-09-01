@@ -4,6 +4,8 @@ import {
   AudioLines,
   Download,
   Loader2,
+  Maximize2,
+  Minimize2,
   Play,
   RefreshCw,
   Trash2,
@@ -66,6 +68,8 @@ export default function Takes() {
   const [faces, setFaces] = useState<PublishedFace[]>([]);
   const [faceId, setFaceId] = useState(remembered.faceId);
   const [started, setStarted] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const stage = useRef<HTMLDivElement | null>(null);
   const audioElement = useRef<HTMLAudioElement | null>(null);
   const audioObjectUrl = useRef<string | null>(null);
   const requestNumber = useRef(0);
@@ -77,6 +81,42 @@ export default function Takes() {
   }
 
   useEffect(() => releaseAudio, []);
+
+  /**
+   * Fullscreen is the overlay; the browser's own fullscreen is a bonus on top of it.
+   *
+   * The stage keeps its place in the element tree and only changes class, so the
+   * <audio> node is never remounted: expanding mid-sentence keeps the sound and the
+   * mouth exactly where they were. If requestFullscreen is refused — an iframe without
+   * the permission, a browser that says no — the overlay alone still fills the window.
+   */
+  function expand() {
+    setExpanded(true);
+    void stage.current?.requestFullscreen?.().catch(() => undefined);
+  }
+
+  function collapse() {
+    setExpanded(false);
+    if (document.fullscreenElement) void document.exitFullscreen().catch(() => undefined);
+  }
+
+  useEffect(() => {
+    if (!expanded) return;
+    function onKey(event: KeyboardEvent) {
+      if (event.key === 'Escape') collapse();
+    }
+    // Leaving the browser's fullscreen (Escape, F11, the tab switching away) has to
+    // take the overlay with it, or the page is left covered with no way out.
+    function onFullscreenChange() {
+      if (!document.fullscreenElement) setExpanded(false);
+    }
+    window.addEventListener('keydown', onKey);
+    document.addEventListener('fullscreenchange', onFullscreenChange);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      document.removeEventListener('fullscreenchange', onFullscreenChange);
+    };
+  }, [expanded]);
 
   useEffect(() => {
     loadBundledKit()
@@ -162,6 +202,7 @@ export default function Takes() {
       if (openTake?.pkg.id === line.id) {
         ++requestNumber.current;
         releaseAudio();
+        collapse();
         setOpenTake(null);
         setStarted(false);
         setOpeningId(null);
@@ -318,20 +359,59 @@ export default function Takes() {
                     </h2>
                     <p className="mt-1 text-xs text-slate-600">{when(openTake.pkg.createdAt)}</p>
                   </div>
-                  {openTake.audio && (
-                    <a
-                      href={openTake.audio}
-                      download={`${openTake.pkg.name}.mp3`}
+                  <div className="flex shrink-0 items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={expand}
+                      title="Play this take fullscreen"
                       className="inline-flex items-center gap-1.5 rounded-lg border border-slate-800 px-3 py-1.5 text-xs text-slate-400 transition-colors hover:border-slate-600 hover:text-slate-200"
                     >
-                      <Download size={13} />
-                      MP3
-                    </a>
-                  )}
+                      <Maximize2 size={13} />
+                      Fullscreen
+                    </button>
+                    {openTake.audio && (
+                      <a
+                        href={openTake.audio}
+                        download={`${openTake.pkg.name}.mp3`}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-slate-800 px-3 py-1.5 text-xs text-slate-400 transition-colors hover:border-slate-600 hover:text-slate-200"
+                      >
+                        <Download size={13} />
+                        MP3
+                      </a>
+                    )}
+                  </div>
                 </div>
 
-                <div className="flex flex-col items-center gap-4 rounded-xl border border-slate-800 bg-slate-950/40 px-4 py-5">
-                  <div className="w-full max-w-[300px]">
+                <div
+                  ref={stage}
+                  className={
+                    expanded
+                      ? 'fixed inset-0 z-50 flex flex-col items-center justify-center gap-5 bg-slate-950 px-6 py-6'
+                      : 'flex flex-col items-center gap-4 rounded-xl border border-slate-800 bg-slate-950/40 px-4 py-5'
+                  }
+                >
+                  {expanded && (
+                    <div className="absolute inset-x-0 top-0 flex items-start justify-between gap-4 px-5 py-4">
+                      <div className="min-w-0">
+                        <h2 className="truncate text-sm font-medium text-slate-300">
+                          {openTake.pkg.name}
+                        </h2>
+                        <p className="mt-0.5 font-mono text-[10px] text-slate-600">
+                          {languageName[openTake.pkg.language]} · {duration(openTake.pkg.durationMs)}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={collapse}
+                        title="Leave fullscreen (Esc)"
+                        className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-slate-800 px-3 py-1.5 text-xs text-slate-400 transition-colors hover:border-slate-600 hover:text-slate-200"
+                      >
+                        <Minimize2 size={13} />
+                        Exit
+                      </button>
+                    </div>
+                  )}
+                  <div className={expanded ? 'w-full max-w-[min(60vh,34rem)]' : 'w-full max-w-[300px]'}>
                     <SpeakingFace
                       tap={null}
                       marks={started ? openTake.pkg.marks : null}
