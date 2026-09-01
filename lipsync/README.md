@@ -156,13 +156,18 @@ original-performance derivative in the browser. That original is shared by every
 its male or female pool. The author may additionally ask ElevenLabs speech-to-speech to
 re-perform it for one exact, matching-gender voice; cross-gender conversion is refused.
 
-When both versions exist the kind decides which is offered, unless the author has chosen
-for that voice. `[laughs]`, `[giggles]` and `[yawn]` prefer the conversion — they are
-voiced, so there is something in them for a speech model to carry. The throat and breath
-sounds prefer the recording: `eleven_multilingual_sts_v2` is a *speech* model, and a 200ms
-gulp gives it nothing to work with. Noise removal follows the same split, and matters more
-here than it did for laughs — an isolation model is trained to remove everything that is
-not speech, and a sniff *is* not speech.
+Conversion is on by default and every kind uses it once it exists. That varied briefly —
+the throat and breath sounds preferred the recording, on the argument that
+`eleven_multilingual_sts_v2` is a *speech* model with nothing to work with in a 200ms
+gulp. The argument is sound and was outweighed by a measurement: a conversion of a clip
+this short costs single-digit credits, so hearing whether it mangles a gulp beats guessing.
+Both versions are kept, the row plays one against the other, and `use original` switches
+back in a click.
+
+Noise removal is off by default for all eight. The isolation model removes what is not
+speech, and none of these are speech — it softens edges, and on a gasp or a sigh the edges
+are the sound. Turn it on when you can hear the room in the recording, which is the case it
+is genuinely good at.
 
 Old exact-voice renders continue to work. Old retained sources remain unclassified until
 the author assigns a gender and makes their original derivative.

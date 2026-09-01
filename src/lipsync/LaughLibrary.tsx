@@ -30,7 +30,6 @@ import {
   chosenFor,
   eligible,
   originalFor,
-  preferredFor,
   renderedVoices,
   treatmentOf,
   type ReactionLibraryIndex,
@@ -161,7 +160,16 @@ export default function LaughLibrary({
    */
   const [denoise, setDenoise] = useState(tagForKind('laughs')?.denoise ?? true);
   const [gender, setGender] = useState<VoiceGender | undefined>(voiceGender);
-  const [alsoConvert, setAlsoConvert] = useState(false);
+  /**
+   * Whether to re-perform the clip in the current voice on the way in.
+   *
+   * ON BY DEFAULT, which it was not. Converting costs single-digit credits for a clip this
+   * short, and matching the tutor is worth more than that — so the default is now the thing
+   * you almost always want, and the checkbox is for the case where you deliberately want
+   * the recording kept as made. It also puts both treatments in the library at once, which
+   * is what makes the row's A/B worth having.
+   */
+  const [alsoConvert, setAlsoConvert] = useState(true);
   /**
    * How much the clip is lifted or cut before encoding, in dB.
    *
@@ -172,6 +180,18 @@ export default function LaughLibrary({
   const [gainDb, setGainDb] = useState(0);
   /** True until the slider is touched, so the suggestion may keep following the clip. */
   const [gainAuto, setGainAuto] = useState(true);
+
+  /**
+   * Whether a conversion is possible at all right now.
+   *
+   * SEPARATE FROM WANTING ONE, and keeping them apart is what lets the checkbox default to
+   * on. A wish that cannot be granted must not block the import: with one flag doing both
+   * jobs, defaulting it to true would have disabled the Keep button for anybody who had not
+   * chosen a voice yet, which is a worse first run than the one this replaced.
+   */
+  const canConvert = Boolean(voiceId && voiceGender && gender && voiceGender === gender);
+  /** What will actually happen, which is the wish and the possibility together. */
+  const willConvert = alsoConvert && canConvert;
 
   useEffect(() => {
     if (voiceGender) setGender(voiceGender);
@@ -263,7 +283,7 @@ export default function LaughLibrary({
           voiceId,
           voiceName,
           voiceGender,
-          convert: alsoConvert,
+          convert: willConvert,
           durationMs: toMs - fromMs,
           removeBackgroundNoise: denoise,
         });
@@ -482,9 +502,6 @@ export default function LaughLibrary({
 
   const span = toMs - fromMs;
   const missing = REACTION_CLIP_KINDS.filter((k) => !covered.has(k));
-  // What a conversion would be doing for this kind, shown next to the option so that
-  // "why is the original selected" has an answer where the choice is made.
-  const prefers = preferredFor(kind);
 
   /**
    * How this selection sits against generated speech, and whether it is near clipping.
@@ -760,11 +777,7 @@ export default function LaughLibrary({
                         !source.gender ||
                         source.gender !== voiceGender
                       }
-                      title={
-                        preferredFor(source.kind) === 'original'
-                          ? `Convert into this voice. Costs credits — and a ${source.kind} keeps using the recording unless you then pick the conversion, because speech-to-speech has little to work with in one.`
-                          : 'Convert into the voice this page is using. Costs credits.'
-                      }
+                      title="Re-perform this in the voice this page is using, and use it. A few credits for a clip this short. The recording is kept, so you can play one against the other and switch back."
                       className="inline-flex shrink-0 items-center gap-1 rounded-md border border-slate-700 px-2 py-1 text-[10px] text-slate-300 transition-colors hover:border-slate-500 disabled:cursor-not-allowed disabled:border-slate-900 disabled:text-slate-700"
                     >
                       {working === source.id ? (
@@ -1061,10 +1074,9 @@ export default function LaughLibrary({
                 type="button"
                 onClick={() => void keep()}
                 disabled={
-                  busy ||
-                  span <= 0 ||
-                  !gender ||
-                  (alsoConvert && (!voiceId || !voiceGender || gender !== voiceGender))
+                  // `willConvert`, so an impossible conversion is simply not attempted
+                  // rather than making the whole import unavailable.
+                  busy || span <= 0 || !gender
                 }
                 className="inline-flex items-center gap-2 rounded-lg border border-slate-700 px-3 py-1.5 text-xs font-medium text-slate-200 transition-colors hover:border-slate-500 disabled:cursor-not-allowed disabled:border-slate-900 disabled:text-slate-700"
               >
@@ -1073,7 +1085,7 @@ export default function LaughLibrary({
                 ) : (
                   <Wand2 size={13} />
                 )}
-                Keep {alsoConvert ? 'both' : 'as recorded'}
+                Keep {willConvert ? 'both' : 'as recorded'}
               </button>
             </div>
 
@@ -1081,20 +1093,23 @@ export default function LaughLibrary({
               <input
                 type="checkbox"
                 className="mt-0.5"
-                checked={alsoConvert}
-                disabled={!voiceId || !voiceGender || !gender || voiceGender !== gender}
+                checked={willConvert}
+                disabled={!canConvert}
                 onChange={(event) => setAlsoConvert(event.target.checked)}
               />
               <span className="text-[11px] leading-snug text-slate-600">
-                Also convert into {voiceName || 'the current voice'}. This spends credits
-                and is available only when the recording and voice use the same gender pool.
-                {prefers === 'original' && (
+                Also convert into {voiceName || 'the current voice'}, and use it. Costs a
+                few credits for a clip this short, and is available only when the recording
+                and the voice share a gender pool.
+                {!canConvert && (
+                  <> Pick a voice and set its gender to enable it.</>
+                )}
+                {canConvert && (
                   <>
                     {' '}
-                    A <span className="font-mono text-slate-500">{kind}</span> plays the
-                    recording by default even once converted — speech-to-speech has little
-                    to work with in an unvoiced sound. Convert to audition it; the choice is
-                    per voice and reversible.
+                    Both versions are kept either way, so the row can play one against the
+                    other and switch back with a click if the voice changer handles this
+                    sound badly — likeliest on the short unvoiced ones.
                   </>
                 )}
               </span>
@@ -1113,10 +1128,11 @@ export default function LaughLibrary({
                   alsoConvert ? 'text-slate-600' : 'text-slate-700'
                 }`}
               >
-                Strip background noise before voice conversion. Near-essential on a phone
-                recording of a laugh, since the room otherwise gets rendered as breath — but
-                it softens edges, and on a sigh, a gasp or a sniff those edges are the whole
-                sound. Defaulted per kind for that reason; off does not mean wrong.
+                Strip background noise before voice conversion. Off by default now, for all
+                eight: the isolation model removes what is not speech, and none of these are
+                speech. It softens edges, and on a gasp or a sigh the edges are the sound.
+                Turn it on if you can hear the room in your recording — that is the case it
+                is genuinely good at.
               </span>
             </label>
 

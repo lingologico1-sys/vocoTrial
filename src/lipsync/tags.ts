@@ -73,20 +73,31 @@ export interface Tag {
   /**
    * Which treatment this sound defaults to when nobody has chosen one for the voice.
    *
-   * Per kind rather than per category, because "unvoiced" is not the cut that matters.
-   * Speech-to-speech is a *speech* model: it has plenty to work with in a yawn, which is
-   * voiced and sustained, and nothing at all in a 200ms throat click. So a yawn defaults
-   * to a conversion and a gulp to the recording as made. An author's explicit per-voice
-   * choice still wins over this — see preferredTreatmentByVoice in laughs.ts.
+   * ALL EIGHT SAY `voice-converted`, AND THE FIELD IS KEPT ANYWAY. It briefly varied: the
+   * throat and breath sounds defaulted to the recording on the argument that
+   * speech-to-speech is a *speech* model with nothing to work with in a 200ms click. That
+   * argument is still true and it was outweighed by a measurement — a conversion costs
+   * single-digit credits, so the way to settle whether it mangles a gulp is to hear one,
+   * not to guess. Matching the tutor's voice is worth more than a theory about the model.
+   *
+   * The field stays because it is the mechanism, and because "all eight agree" is a fact
+   * about today rather than a law: the first kind that reliably converts badly gets flipped
+   * here, in one place, instead of needing the concept reintroduced. An author's explicit
+   * per-voice choice still wins over it — see preferredTreatmentByVoice in laughs.ts.
    */
   prefer?: ClipTreatment;
   /**
    * Whether background-noise removal is on by default when converting this kind.
    *
-   * ElevenLabs' isolation model is trained to remove everything that is not speech, and a
-   * sniff *is* not speech. On a laugh it takes a room off and occasionally softens the
-   * edges; on a breath sound it can remove the clip. Off by default for anything breathy,
-   * and still available for a recording with an audible room behind it.
+   * OFF EVERYWHERE NOW, including on a laugh. The isolation model is trained to remove
+   * everything that is not speech, and none of these are speech — a sniff least of all. It
+   * softens edges, and on a gasp or a sigh the edges are the sound. It used to default on
+   * for the laughs on the grounds that it takes a room off a phone recording, which is
+   * true and is the narrower case: somebody who can hear their own room can turn it on,
+   * whereas somebody whose gasp came back blunted has no way to know why.
+   *
+   * Kept per kind for the same reason `prefer` is: it is the switch, and today's uniform
+   * answer is not a permanent one.
    */
   denoise?: boolean;
   /**
@@ -187,7 +198,7 @@ export const TAGS: Tag[] = [
   // headMotion.ts, and `nod` below, which is what turns it on.
   { tag: '[laughs]', kind: 'reaction', group: 'Reactions', viseme: 'laugh',
     perform: 'hold', eyes: 'closed', laughing: true,
-    clip: true, prefer: 'voice-converted', denoise: true, levelDb: 1 },
+    clip: true, prefer: 'voice-converted', denoise: false, levelDb: 1 },
   // A giggle: the same gesture as a laugh, one size down and with the mouth shut. It
   // was a literal alias of [laughs] until now — same open pose, same closed eyes, same
   // bob — which meant the palette offered a distinction it did not draw.
@@ -210,7 +221,7 @@ export const TAGS: Tag[] = [
   // because depth is a fact about playback and this table is a fact about the body.
   { tag: '[giggles]', kind: 'reaction', group: 'Reactions', viseme: 'smile',
     perform: 'hold', eyes: 'none', giggling: true,
-    clip: true, prefer: 'voice-converted', denoise: true, levelDb: -3 },
+    clip: true, prefer: 'voice-converted', denoise: false, levelDb: -3 },
 
   // Panting keeps the pulse, and is the only thing left that has one. It survives the
   // argument above because it alternates between two poses that differ only in how far
@@ -226,13 +237,13 @@ export const TAGS: Tag[] = [
   // conversion: there is a vowel in a yawn for a speech model to carry into the voice.
   { tag: '[yawn]', kind: 'reaction', group: 'Reactions', viseme: 'aa',
     perform: 'arc', edge: 'uh', eyes: 'closed',
-    clip: true, prefer: 'voice-converted', denoise: true, levelDb: -2 },
+    clip: true, prefer: 'voice-converted', denoise: false, levelDb: -2 },
 
   // A sigh has a shape over time: the lips part, hold, and trail shut. The blink is
   // what a sigh looks like as much as the mouth is.
   { tag: '[sighs]', kind: 'reaction', group: 'Reactions', viseme: 'uh',
     perform: 'arc', edge: 'rest', eyes: 'blink',
-    clip: true, prefer: 'original', denoise: false, levelDb: -6 },
+    clip: true, prefer: 'voice-converted', denoise: false, levelDb: -6 },
 
   // A gasp snaps open and STAYS open — the one place a held pose is literally correct.
   // Eyes deliberately left alone: a gasp widens them, and no kit has wide-eye artwork,
@@ -241,18 +252,18 @@ export const TAGS: Tag[] = [
   // stands as made unless somebody auditions a conversion and prefers it.
   { tag: '[gasps]', kind: 'reaction', group: 'Reactions', viseme: 'aa',
     perform: 'hold', eyes: 'none',
-    clip: true, prefer: 'original', denoise: false, levelDb: 3 },
+    clip: true, prefer: 'voice-converted', denoise: false, levelDb: 3 },
 
   // Lips slightly parted, the sound made in the throat, and over quickly.
   { tag: '[clears throat]', kind: 'reaction', group: 'Reactions', viseme: 'uh',
     perform: 'hold', eyes: 'none',
-    clip: true, prefer: 'original', denoise: false, levelDb: -3 },
+    clip: true, prefer: 'voice-converted', denoise: false, levelDb: -3 },
 
   // Swallowing keeps the lips shut. The throat does the work and a portrait has no
   // throat, so a closed mouth is not an approximation — it is all there is.
   { tag: '[gulps]', kind: 'reaction', group: 'Reactions', viseme: 'mbp',
     perform: 'hold', eyes: 'none',
-    clip: true, prefer: 'original', denoise: false, levelDb: -10 },
+    clip: true, prefer: 'voice-converted', denoise: false, levelDb: -10 },
 
   // A sniff is nasal, and `rest` was the worst answer in the table: indistinguishable
   // from saying nothing. Compressed lips and a blink is what one looks like from the
@@ -261,7 +272,7 @@ export const TAGS: Tag[] = [
   // exactly what an isolation model is trained to consider noise. See `denoise` above.
   { tag: '[sniffs]', kind: 'reaction', group: 'Reactions', viseme: 'mbp',
     perform: 'hold', eyes: 'blink',
-    clip: true, prefer: 'original', denoise: false, levelDb: -8 },
+    clip: true, prefer: 'voice-converted', denoise: false, levelDb: -8 },
 
   // Pacing. The first three are silence, which the aligner handles correctly unaided.
   { tag: '[pause]', kind: 'pause', group: 'Pacing' },

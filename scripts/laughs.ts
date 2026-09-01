@@ -128,10 +128,23 @@ for (const tag of TAGS) {
   assert.equal(tag.kind, 'reaction', `${tag.tag} is a reaction if it is spliceable`);
 }
 
-// --- per-kind treatment defaults -------------------------------------------------------
-assert.equal(preferredFor('laughs'), 'voice-converted', 'a laugh carries timbre worth converting');
-assert.equal(preferredFor('gulps'), 'original', 'a throat click has nothing for a speech model');
-assert.equal(preferredFor('yawn'), 'voice-converted', 'a yawn is voiced and sustained');
+// --- treatment defaults ------------------------------------------------------------------
+// Every kind matches the tutor by default. This varied briefly, on the argument that
+// speech-to-speech has nothing to work with in a short unvoiced sound; a conversion turned
+// out to cost single-digit credits, so hearing one beats theorising about it. The field is
+// still per kind, so this asserts what it currently says rather than that it must be equal.
+for (const kind of REACTION_CLIP_KINDS) {
+  assert.equal(
+    preferredFor(kind),
+    'voice-converted',
+    `[${kind}] matches the voice by default`,
+  );
+  assert.equal(
+    tagForKind(kind)?.denoise,
+    false,
+    `[${kind}] keeps its edges by default — the isolation model removes what is not speech`,
+  );
+}
 
 const sniffLib: ReactionLibraryIndex = {
   sources: [source('s-sniff', 'female', 'sniffs')],
@@ -142,8 +155,13 @@ const sniffLib: ReactionLibraryIndex = {
 };
 assert.deepEqual(
   eligible(sniffLib, 'sniffs', 'voice-f', 'female').map((c) => c.id),
+  ['sniff-voice'],
+  'the exact-voice conversion is what a voice uses when it has one',
+);
+assert.deepEqual(
+  eligible(sniffLib, 'sniffs', 'other-f', 'female').map((c) => c.id),
   ['sniff-original'],
-  'a sniff prefers the recording even where an exact conversion exists',
+  'another voice, with no conversion of its own, still gets the recording',
 );
 assert.deepEqual(
   eligible(sniffLib, 'laughs', 'voice-f', 'female').map((c) => c.id),
@@ -228,20 +246,20 @@ assert.equal(
 
   // An explicit per-voice choice outranks the kind, in both directions.
   const lib = both('sniffs');
-  assert.equal(treatmentOf(chosenFor(lib, lib.sources[0], 'voice-f')!), 'original');
-  lib.sources[0].preferredTreatmentByVoice = { 'voice-f': 'voice-converted' };
+  assert.equal(treatmentOf(chosenFor(lib, lib.sources[0], 'voice-f')!), 'voice-converted');
+  lib.sources[0].preferredTreatmentByVoice = { 'voice-f': 'original' };
   assert.equal(
     treatmentOf(chosenFor(lib, lib.sources[0], 'voice-f')!),
-    'voice-converted',
+    'original',
     'the author overrides the kind for one voice',
   );
   assert.deepEqual(
     eligible(lib, 'sniffs', 'voice-f', 'female').map((r) => r.id),
-    ['sniffs-voice'],
+    ['sniffs-original'],
     'and generation follows that override too',
   );
 
-  // Another voice is unaffected by that choice and falls back to the recording.
+  // Another voice is unaffected by that choice, and has no conversion of its own.
   assert.equal(
     treatmentOf(chosenFor(lib, lib.sources[0], 'other-f')!),
     'original',
