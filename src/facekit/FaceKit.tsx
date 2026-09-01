@@ -1603,7 +1603,7 @@ export default function FaceKit({ situation = false }: { situation?: boolean } =
                 </div>
               </div>
 
-              {situation && (
+              {kit.situation && (
                 <Guidance label="How to frame a situation">
                   Chest-up, not full-length. The person can be at a desk with the room behind
                   them and the props that say who they are — that is the whole point of this
@@ -1663,8 +1663,29 @@ export default function FaceKit({ situation = false }: { situation?: boolean } =
               Placement is `md:` only: in one column the cells fall back to
               source order, which is heading, picker, heading, strip.
             */}
-            <section className="grid gap-x-5 gap-y-3 md:grid-cols-2">
-              <div className="flex flex-col justify-end gap-2 md:col-start-1 md:row-start-1">
+            {/*
+              Two columns for a portrait, one for a situation, and the reason is
+              the picture rather than the page. Both panels below draw the whole
+              1024 frame, so a column costs half of it — which on a headshot is
+              free, because the face fills what is left, and on a person at a
+              desk is most of what there was: the head is already a fraction of
+              the frame, and half a frame at 490px leaves a mouth a few dozen
+              pixels wide to place a rectangle on.
+
+              Stacked, each panel gets the container's full width, which at
+              max-w-5xl is 1024px — the base's own resolution, so the picker
+              shows the artwork at exactly 1:1 and nothing is being judged
+              through a downscale.
+
+              The placements go with the columns. They are `md:` only and would
+              otherwise survive into the single-column layout and re-impose the
+              grid the class above just dropped; in source order the cells
+              already fall out as heading, picker, heading, strip.
+            */}
+            <section
+              className={`grid gap-x-5 gap-y-3 ${kit.situation ? '' : 'md:grid-cols-2'}`}
+            >
+              <div className={`flex flex-col justify-end gap-2 ${kit.situation ? '' : 'md:col-start-1 md:row-start-1'}`}>
                 <div className="flex items-center justify-between gap-3">
                   <h2 className="text-sm font-medium text-slate-300">Regions</h2>
                   <div className="flex gap-1 rounded-lg border border-slate-800 p-0.5 text-xs">
@@ -1714,7 +1735,7 @@ export default function FaceKit({ situation = false }: { situation?: boolean } =
                 </div>
               </div>
 
-              <div className="space-y-3 md:col-start-1 md:row-start-2">
+              <div className={`space-y-3 ${kit.situation ? '' : 'md:col-start-1 md:row-start-2'}`}>
                 <BoxPicker
                   base={
                     shownBase
@@ -1837,7 +1858,7 @@ export default function FaceKit({ situation = false }: { situation?: boolean } =
                           the mouth enough pixels at all, before where inside it
                           the chin sits.
                         */}
-                        {situation && <FramingNote box={kit.boxes.mouth} />}
+                        {kit.situation && <FramingNote box={kit.boxes.mouth} />}
                         <ChinNote box={kit.boxes.mouth} locked={committed[region] > 0} />
                       </>
                     )}
@@ -1892,11 +1913,11 @@ export default function FaceKit({ situation = false }: { situation?: boolean } =
                 )}
               </div>
 
-              <div className="flex flex-col justify-end md:col-start-2 md:row-start-1">
+              <div className={`flex flex-col justify-end ${kit.situation ? '' : 'md:col-start-2 md:row-start-1'}`}>
                 <h2 className="text-sm font-medium text-slate-300">In motion</h2>
               </div>
 
-              <div className="space-y-3 md:col-start-2 md:row-start-2">
+              <div className={`space-y-3 ${kit.situation ? '' : 'md:col-start-2 md:row-start-2'}`}>
                 <Filmstrip kit={kit} />
                 <p className="text-xs text-slate-500">
                   Drift between generations is invisible in stills and obvious here. If the face

@@ -284,7 +284,7 @@ export default function EyewearPanel({
       </div>
 
       {!candidate && !kit.eyewear && (
-        <div className="grid gap-4 md:grid-cols-2">
+        <div className={`grid gap-4 ${kit.situation ? '' : 'md:grid-cols-2'}`}>
           <RectPicker image={neutral} box={box} onChange={setBox} />
           <div className="space-y-3 text-xs text-slate-400">
             <p>
@@ -306,7 +306,7 @@ export default function EyewearPanel({
       )}
 
       {kit.eyewear && !candidate && (
-        <div className="grid gap-4 md:grid-cols-2">
+        <div className={`grid gap-4 ${kit.situation ? '' : 'md:grid-cols-2'}`}>
           <RectPicker image={neutral} box={kit.eyewear.box} onChange={() => undefined} locked />
           <div className="relative aspect-square overflow-hidden rounded-xl border border-slate-800 bg-slate-950">
             <img src={neutral} alt="" className="h-full w-full" />

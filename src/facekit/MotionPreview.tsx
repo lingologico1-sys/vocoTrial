@@ -334,7 +334,18 @@ export default function MotionPreview({ kit, focus, note }: MotionPreviewProps) 
 
   return (
     <div className="space-y-2">
-      <div className="relative mx-auto aspect-square w-full max-w-[18rem] overflow-hidden rounded-xl border border-slate-800 bg-slate-950">
+      {/*
+        Capped at 18rem for a portrait and uncapped for a situation. The cap is
+        not a size, it is a statement that a head does not need to be bigger
+        than this to judge whether it seams — true of a face that fills its
+        frame, and false the moment the face is a quarter of one, where 288px
+        of picture is well under a hundred of head.
+      */}
+      <div
+        className={`relative mx-auto aspect-square w-full overflow-hidden rounded-xl border border-slate-800 bg-slate-950 ${
+          kit.situation ? '' : 'max-w-[18rem]'
+        }`}
+      >
         {/*
           Scaled on a wrapper rather than by narrowing the face's viewBox,
           because the viewBox belongs to the component that ships and this panel
