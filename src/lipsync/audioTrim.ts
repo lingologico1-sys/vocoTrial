@@ -242,7 +242,25 @@ export function peakOf(buffer: AudioBuffer, fromMs: number, toMs: number): numbe
  * resampling here would be a second lossy step before the one that matters, and
  * speech-to-speech is content to take whatever rate it is handed.
  */
-export function toWav(buffer: AudioBuffer, startMs: number, endMs: number): Uint8Array {
+export function toWav(
+  buffer: AudioBuffer,
+  startMs: number,
+  endMs: number,
+  /**
+   * The same multiplier toMp3 takes, and it has to be the same one.
+   *
+   * THE WAV IS WHAT SPEECH-TO-SPEECH CONVERTS FROM, which is why this is not merely a
+   * consistency nicety. Applying the level to the encoded MP3 and not to this left the two
+   * treatments of one clip at different loudnesses — and once conversion became the
+   * default, the import slider was adjusting the copy almost nobody would hear.
+   *
+   * It does mean the kept recording is the selection *at the level you chose* rather than
+   * as it came off the file. That is the honest reading of what this archive is for: it
+   * already stores your trim rather than the whole file, and the level is the same kind of
+   * decision. Nothing is lost that the headroom cap would have let you clip.
+   */
+  gain = 1,
+): Uint8Array {
   const rate = buffer.sampleRate;
   const from = Math.max(0, Math.floor((startMs / 1000) * rate));
   const to = Math.min(buffer.length, Math.ceil((endMs / 1000) * rate));
@@ -269,10 +287,11 @@ export function toWav(buffer: AudioBuffer, startMs: number, endMs: number): Uint
   view.setUint32(40, samples.length * 2, true);
 
   for (let i = 0; i < samples.length; i++) {
-    // Clamped before scaling: decodeAudioData can return values outside -1..1 on audio that
-    // was mastered hot, and letting one wrap through setInt16 turns a loud peak into a
-    // full-scale spike of the opposite sign — an audible click in the middle of the laugh.
-    const clamped = Math.max(-1, Math.min(1, samples[i]));
+    // Clamped AFTER the gain and before scaling: decodeAudioData can return values outside
+    // -1..1 on audio that was mastered hot, and letting one wrap through setInt16 turns a
+    // loud peak into a full-scale spike of the opposite sign — an audible click in the
+    // middle of the laugh. A lift can put a sample there just as easily as a hot master.
+    const clamped = Math.max(-1, Math.min(1, samples[i] * gain));
     view.setInt16(44 + i * 2, clamped * 0x7fff, true);
   }
 

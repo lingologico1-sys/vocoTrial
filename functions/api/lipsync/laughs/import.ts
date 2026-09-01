@@ -29,6 +29,16 @@ interface ImportBody {
   convert?: boolean;
   durationMs?: number;
   removeBackgroundNoise?: boolean;
+  /**
+   * The level the page applied before encoding, and the peak it ended at.
+   *
+   * RECORDED BECAUSE IT CANNOT BE RECOVERED. Once samples are scaled and encoded there is
+   * nothing in the bytes that says what they were scaled by, so without this every clip
+   * arrives claiming an unknown level and the row's control has no reference point to
+   * count from. The peak is what tells that control whether the clip can go up at all.
+   */
+  gainDb?: number;
+  peak?: number;
 }
 
 /**
@@ -185,6 +195,10 @@ export async function onRequestPost(
     durationMs,
     bytes: wav.length,
   };
+  const level = {
+    ...(typeof body.gainDb === 'number' ? { gainDb: body.gainDb } : {}),
+    ...(typeof body.peak === 'number' ? { peak: body.peak } : {}),
+  };
   const original: ReactionRender = {
     id: crypto.randomUUID(),
     createdAt: Date.now(),
@@ -195,6 +209,7 @@ export async function onRequestPost(
     label,
     durationMs: originalResult.scan.durationMs,
     bytes: originalResult.bytes.length,
+    ...level,
   };
   const converted: ReactionRender | undefined = convertedResult && !isFailure(convertedResult)
     ? {
@@ -209,6 +224,11 @@ export async function onRequestPost(
         voiceName: body.voiceName,
         durationMs: convertedResult.scan.durationMs,
         bytes: convertedResult.bytes.length,
+        // The same level, because the WAV it was made from carried it. The peak is NOT
+        // copied: speech-to-speech renders at the target voice's own level, so what came
+        // back has a ceiling of its own that nothing here has measured. Absent reads as
+        // unknown, and the page measures it on first use.
+        ...(typeof body.gainDb === 'number' ? { gainDb: body.gainDb } : {}),
       }
     : undefined;
   if (converted) source.preferredTreatmentByVoice = { [voiceId]: 'voice-converted' };

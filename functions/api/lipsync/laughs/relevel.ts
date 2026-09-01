@@ -29,6 +29,8 @@ interface RelevelBody {
   rawMp3Base64?: string;
   /** What the page applied, recorded so the row can show where it currently sits. */
   gainDb?: number;
+  /** Where the re-encoded bytes peak, which is what decides if they can go up again. */
+  peak?: number;
 }
 
 const decode = (base64: string) => Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
@@ -77,6 +79,7 @@ export async function onRequestPost(
     durationMs: encoded.scan.durationMs,
     bytes: encoded.bytes.length,
     gainDb: typeof body.gainDb === 'number' ? body.gainDb : render.gainDb,
+    peak: typeof body.peak === 'number' ? body.peak : render.peak,
   };
 
   await writeClips(env.LIPSYNC, {

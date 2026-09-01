@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Loader2, Play, Trash2, Upload, Wand2 } from 'lucide-react';
+import { Loader2, Play, RotateCcw, Trash2, Upload, Wand2 } from 'lucide-react';
 import {
   audioUrl,
   addOriginalClip,
@@ -15,6 +15,7 @@ import {
 import {
   MAX_GAIN_DB,
   MIN_GAIN_DB,
+  dbFromGain,
   decodeFile,
   gainFromDb,
   headroomDb,
@@ -180,6 +181,14 @@ export default function LaughLibrary({
   const [gainDb, setGainDb] = useState(0);
   /** True until the slider is touched, so the suggestion may keep following the clip. */
   const [gainAuto, setGainAuto] = useState(true);
+  /**
+   * The row whose level is being typed into, and what has been typed so far.
+   *
+   * Held here rather than per row because the rows are a map over the library: a hook
+   * inside that would be a hook count that changes with the data. One field is open at a
+   * time anyway, which is what this shape says.
+   */
+  const [typing, setTyping] = useState<{ id: string; value: string } | null>(null);
 
   /**
    * Whether a conversion is possible at all right now.
@@ -271,7 +280,9 @@ export default function LaughLibrary({
     setBusy(true);
     setWorking('import');
     try {
-      const wav = toWav(picked.buffer, fromMs, toMs);
+      // BOTH get the gain. The WAV is what speech-to-speech converts from, so gaining only
+      // the MP3 left the two treatments of one clip at different loudnesses.
+      const wav = toWav(picked.buffer, fromMs, toMs, gainFromDb(gainDb));
       const mp3 = await toMp3(picked.buffer, fromMs, toMs, gainFromDb(gainDb));
       const { source, original, converted, render, conversionError, audioBase64 } =
         await importClip({
@@ -286,6 +297,10 @@ export default function LaughLibrary({
           convert: willConvert,
           durationMs: toMs - fromMs,
           removeBackgroundNoise: denoise,
+          gainDb,
+          // Clamped, because that is what the encoders did to it. Reporting the unclamped
+          // figure would tell the row it has negative headroom, which is not a thing.
+          peak: Math.min(1, peak * gainFromDb(gainDb)),
         });
       setLibrary((l) => ({
         sources: [source, ...l.sources],
@@ -432,7 +447,23 @@ export default function LaughLibrary({
    * drag. The import panel is where a continuous control makes sense, because the waveform
    * is in front of you.
    */
-  async function nudgeLevel(render: ReactionRender, byDb: number) {
+  /**
+   * Re-encode one clip at a new level, and then play it.
+   *
+   * ONE PATH FOR ALL THREE CONTROLS, because they differ only in how the delta is worked
+   * out and every other step — fetch, decode, check the ceiling, encode, store, audition —
+   * is identical. `decide` is handed the decoded audio and its current level so that
+   * "back to where this kind belongs" can be answered from the clip rather than from a
+   * number somebody typed.
+   *
+   * IT PLAYS THE RESULT UNPROMPTED, and that is the point rather than a courtesy. A level
+   * you cannot hear is a level you cannot judge; this control was reported as broken
+   * precisely because a clamped lift changed nothing audible and said nothing about it.
+   */
+  async function relevel(
+    render: ReactionRender,
+    decide: (level: number | null, room: number) => number,
+  ) {
     setProblem(null);
     setNote(null);
     setWorking(`level:${render.id}`);
@@ -449,17 +480,18 @@ export default function LaughLibrary({
       // louder and nothing says why. See headroomDb.
       const span = buffer.duration * 1000;
       const room = headroomDb(buffer, 0, span);
-      let applied = byDb;
-      if (byDb > 0) {
-        if (room < 0.5) {
-          setProblem(
-            `"${render.label}" is already at full scale, so it cannot be made louder — ` +
-              'a lift would only flatten its peaks. Cut the others instead, or re-import ' +
-              'the recording at a lower level.',
-          );
-          return;
-        }
-        applied = Math.min(byDb, room);
+      const wanted = decide(levelOf(buffer, 0, span), room);
+      const applied = wanted > 0 ? Math.min(wanted, room) : wanted;
+
+      if (Math.abs(applied) < 0.1) {
+        setProblem(
+          wanted > 0.1
+            ? `"${render.label}" is already at full scale, so it cannot go louder — a lift ` +
+                'would only flatten its peaks. Cut the other clips instead, or re-import ' +
+                'this recording at a lower level.'
+            : `"${render.label}" is already there.`,
+        );
+        return;
       }
 
       const encoded = await toMp3(buffer, 0, span, gainFromDb(applied));
@@ -467,18 +499,22 @@ export default function LaughLibrary({
         renderId: render.id,
         rawMp3Base64: toBase64(encoded),
         gainDb: (render.gainDb ?? 0) + applied,
+        peak: Math.min(1, peakOf(buffer, 0, span) * gainFromDb(applied)),
       });
       setLibrary(await listClips());
 
       const at = updated.gainDb ?? 0;
       setNote(
-        `"${updated.label}" ${applied > 0 ? 'up' : 'down'} ${Math.abs(applied).toFixed(1)} dB` +
-          ` — now ${at > 0 ? '+' : ''}${at.toFixed(1)} dB from as recorded.` +
-          (applied < byDb
-            ? ` Only ${applied.toFixed(1)} of the ${byDb} fitted before clipping.`
-            : '') +
-          ' Press play to hear it.',
+        `"${updated.label}" ${applied > 0 ? 'up' : 'down'} ${Math.abs(applied).toFixed(1)} dB — ` +
+          `now ${at > 0 ? '+' : ''}${at.toFixed(1)} dB from as recorded.` +
+          (applied < wanted - 0.1
+            ? ` Only ${applied.toFixed(1)} of the ${wanted.toFixed(1)} fitted before clipping.`
+            : ''),
       );
+
+      // Played rather than offered. See the note above.
+      const fresh = await fetchClip(updated.id, 'render');
+      play(fresh.audioBase64, fresh.contentType);
     } catch (error) {
       setProblem(
         error instanceof LipsyncError ? error.message : 'Could not re-encode that clip.',
@@ -710,44 +746,111 @@ export default function LaughLibrary({
                   {/* Acts on the ACTIVE render, so the thing being made louder is the
                       thing that will be heard. Pointing it at the original would have let
                       somebody spend three clicks levelling a clip this voice never uses. */}
-                  {activeRender && (
-                    <span className="inline-flex items-center overflow-hidden rounded-md border border-slate-800">
-                      <button
-                        type="button"
-                        onClick={() => void nudgeLevel(activeRender, -3)}
-                        disabled={busy}
-                        title="Re-encode 3 dB quieter"
-                        className="px-1.5 py-1 text-[10px] text-slate-500 transition-colors hover:text-slate-200 disabled:text-slate-700"
-                      >
-                        −
-                      </button>
-                      <span
-                        className="border-x border-slate-800 px-1 py-1 font-mono text-[10px] text-slate-600"
-                        title={
-                          activeRender.gainDb === undefined
-                            ? 'Encoded before the level control existed, so at whatever level it was recorded'
-                            : 'How far this clip has been moved from the recording as provided'
-                        }
-                      >
-                        {working === `level:${activeRender.id}` ? (
-                          <Loader2 size={10} className="animate-spin" />
-                        ) : activeRender.gainDb === undefined ? (
-                          '—'
+                  {/* THE CEILING IS KNOWN WITHOUT FETCHING THE AUDIO, from the peak stored
+                      when these bytes were encoded, which is what lets `+` be greyed rather
+                      than merely refusing on click. A clip at full scale cannot be made
+                      louder at all — a lift only flattens its peaks — and a control that
+                      looks available there is the one thing worse than not having it.
+                      Down is never disabled: you can always go quieter.
+
+                      Unknown peak means a clip written before this was stored. The button
+                      stays live and the check in `relevel` catches it on use. */}
+                  {activeRender && (() => {
+                    const at = activeRender.gainDb ?? 0;
+                    const room =
+                      activeRender.peak === undefined
+                        ? MAX_GAIN_DB
+                        : Math.max(0, -dbFromGain(Math.max(activeRender.peak, 1e-6)));
+                    const ceiling = room < 0.5;
+                    const spinning = working === `level:${activeRender.id}`;
+                    const editing = typing?.id === activeRender.id;
+                    const commit = () => {
+                      const wanted = Number(typing?.value);
+                      setTyping(null);
+                      if (!Number.isFinite(wanted)) return;
+                      void relevel(activeRender, () => wanted - at);
+                    };
+                    return (
+                      <span className="inline-flex items-center overflow-hidden rounded-md border border-slate-800">
+                        <button
+                          type="button"
+                          onClick={() => void relevel(activeRender, () => -3)}
+                          disabled={busy}
+                          title="Re-encode 3 dB quieter, and play it"
+                          className="px-1.5 py-1 text-[10px] text-slate-500 transition-colors hover:text-slate-200 disabled:text-slate-700"
+                        >
+                          −
+                        </button>
+                        {editing ? (
+                          <input
+                            autoFocus
+                            type="number"
+                            step={0.5}
+                            value={typing.value}
+                            onChange={(e) => setTyping({ id: activeRender.id, value: e.target.value })}
+                            onBlur={commit}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') commit();
+                              if (e.key === 'Escape') setTyping(null);
+                            }}
+                            className="w-12 border-x border-slate-800 bg-slate-900 px-1 py-1 text-center font-mono text-[10px] text-slate-200 outline-none"
+                          />
                         ) : (
-                          `${activeRender.gainDb > 0 ? '+' : ''}${activeRender.gainDb.toFixed(1)}`
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setTyping({ id: activeRender.id, value: at.toFixed(1) })
+                            }
+                            disabled={busy}
+                            title={
+                              activeRender.gainDb === undefined
+                                ? 'Encoded before the level control existed. Click to set a level in dB.'
+                                : `${at.toFixed(1)} dB from the recording as provided. Click to type a level.`
+                            }
+                            className="w-12 border-x border-slate-800 px-1 py-1 text-center font-mono text-[10px] text-slate-500 transition-colors hover:text-slate-200 disabled:text-slate-700"
+                          >
+                            {spinning ? (
+                              <Loader2 size={10} className="mx-auto animate-spin" />
+                            ) : activeRender.gainDb === undefined ? (
+                              '—'
+                            ) : (
+                              `${at > 0 ? '+' : ''}${at.toFixed(1)}`
+                            )}
+                          </button>
                         )}
+                        <button
+                          type="button"
+                          onClick={() => void relevel(activeRender, () => 3)}
+                          disabled={busy || ceiling}
+                          title={
+                            ceiling
+                              ? 'Already at full scale — a lift would only flatten the peaks, so there is nothing to hear. Cut the other clips instead.'
+                              : room < 3
+                                ? `Only ${room.toFixed(1)} dB of room left before it clips.`
+                                : 'Re-encode 3 dB louder, and play it'
+                          }
+                          className="px-1.5 py-1 text-[10px] text-slate-500 transition-colors hover:text-slate-200 disabled:cursor-not-allowed disabled:text-slate-800"
+                        >
+                          +
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            void relevel(activeRender, (level) =>
+                              suggestedGainDb(level, tagForKind(source.kind)?.levelDb),
+                            )
+                          }
+                          disabled={busy}
+                          title={`Reset: put this back where a ${source.kind} usually sits (${
+                            (tagForKind(source.kind)?.levelDb ?? 0) > 0 ? '+' : ''
+                          }${tagForKind(source.kind)?.levelDb ?? 0} dB against speech), measured from the clip itself.`}
+                          className="border-l border-slate-800 px-1.5 py-1 text-[10px] text-slate-500 transition-colors hover:text-slate-200 disabled:text-slate-700"
+                        >
+                          <RotateCcw size={10} />
+                        </button>
                       </span>
-                      <button
-                        type="button"
-                        onClick={() => void nudgeLevel(activeRender, 3)}
-                        disabled={busy}
-                        title="Re-encode 3 dB louder. A clip already at full scale cannot go up at all."
-                        className="px-1.5 py-1 text-[10px] text-slate-500 transition-colors hover:text-slate-200 disabled:text-slate-700"
-                      >
-                        +
-                      </button>
-                    </span>
-                  )}
+                    );
+                  })()}
                   {here && original && voiceGender && (
                     <button
                       type="button"

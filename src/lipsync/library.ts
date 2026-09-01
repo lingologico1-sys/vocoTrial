@@ -197,6 +197,9 @@ export interface ImportRequest {
   convert?: boolean;
   durationMs: number;
   removeBackgroundNoise?: boolean;
+  /** The level applied before encoding, and where the result peaked. See relevel.ts. */
+  gainDb?: number;
+  peak?: number;
 }
 
 /**
@@ -260,6 +263,7 @@ export function relevelClip(request: {
   renderId: string;
   rawMp3Base64: string;
   gainDb: number;
+  peak: number;
 }): Promise<{ render: ReactionRender }> {
   return changed(post('laughs/relevel', request));
 }

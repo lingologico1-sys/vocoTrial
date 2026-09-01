@@ -143,6 +143,20 @@ export interface ReactionRender {
    * zero — those clips were encoded at whatever level they were recorded at.
    */
   gainDb?: number;
+  /**
+   * The loudest sample in these bytes, 0..1, measured when they were encoded.
+   *
+   * STORED SO THAT A ROW KNOWS ITS CEILING WITHOUT FETCHING ITS AUDIO. Whether a clip can
+   * be made louder at all is a fact about its peak, and a level control that looks
+   * available on a clip with no headroom is worse than one that does not: pressing it
+   * re-encodes a slightly harder version of the same loudness and reports success. The
+   * alternative to storing this is decoding every render on mount, which is a download per
+   * row to grey out a button.
+   *
+   * Absent on anything written before this existed, which reads as "unknown" — the control
+   * stays available, and the pre-flight check in the page catches it on use.
+   */
+  peak?: number;
 }
 
 export const LAUGHS_INDEX_KEY = 'laughs/index.json';
