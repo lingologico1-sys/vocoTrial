@@ -84,7 +84,7 @@ const MODELS: Array<{ id: LipsyncModel; label: string; hint: string }> = [
   {
     id: 'eleven_multilingual_v2',
     label: 'multilingual v2 — stable',
-    hint: 'Well proven and still returns timings, but ignores tags entirely.',
+    hint: 'Tags are stripped, not performed. Often keeps an accent v3 would flatten.',
   },
 ];
 
@@ -580,8 +580,10 @@ export default function Compose({ onGenerated, onVoiceChange, busy, setBusy }: C
               </>
             ) : (
               <>
-                Not applied on multilingual v2, which reads tags aloud instead of acting
-                on them. Kept as typed, and back in force on v3.
+                Not applied on multilingual v2, which cannot act on tags &mdash; every
+                tag is stripped there rather than spoken aloud. v2 tends to keep an
+                accent the voice already has, so it often needs less help than v3 does.
+                Kept as typed, and back in force on v3.
               </>
             )}
           </p>

@@ -338,15 +338,29 @@ export async function onRequestPost(
     return json({ error: 'That is all tags and no words', code: 'no_script' }, 400);
   }
 
-  // The accent goes on last, after the laughs have been lifted out, so that a line left
-  // holding nothing but a laugh does not get an accent tag stapled to it and slip past
-  // the emptiness check above as a "line" made entirely of stage direction.
+  // What the model is actually asked to say, and the two models are asked very
+  // differently.
   //
-  // v3 ONLY, and for the same reason the laugh lift is unconditional there. v2 does not
-  // read tags, it reads text — an accent tag on that model is a voice saying the words
-  // "strong French-African accent" out loud at the top of every line. Nothing about that
-  // is recoverable, so v2 gets the accent it would have had anyway, which is the voice's.
-  const sent = model === 'eleven_v3' ? applyAccent(spoken, accent) : spoken;
+  // ON v3 the accent goes on last, after the laughs have been lifted out, so that a line
+  // left holding nothing but a laugh does not get an accent tag stapled to it and slip
+  // past the emptiness check above as a "line" made entirely of stage direction.
+  //
+  // ON v2 EVERY TAG COMES OUT, which is `script` — the same words the aligner is given.
+  // The lift above already took the laughs on this model and the note there explains why:
+  // v2 does not read tags, it reads *text*, so a tag left standing is a voice saying the
+  // word "laughs" in the middle of a lesson. That reasoning was never laugh-specific and
+  // the code was: `[gulps]` came out as the spoken word "gulp", `[happy]` as "happy", and
+  // an accent tag would have been the whole phrase read aloud at the head of every line.
+  //
+  // It cost twice over, too. The tag survived into ElevenLabs' returned alignment, so
+  // reactionSpans found it and overlaid a shut mouth across exactly the moment the voice
+  // was saying "gulp" — the face contradicting the audio, from one root cause.
+  //
+  // `script` and not another strip of `spoken`: they are the same string — stripTags
+  // removes laugh tags along with the rest — and `script` is already guarded against
+  // being empty above, so this cannot send a blank line. It also states the invariant
+  // worth having on this model, that the words v2 is given are the words MFA is given.
+  const sent = model === 'eleven_v3' ? applyAccent(spoken, accent) : script;
 
   // --- 1. Synthesise, keeping the timings the synthesiser stamped -------------------
   const speech = await fetch(
