@@ -10,11 +10,15 @@ import LipSync from './lipsync/LipSync';
 import Takes from './lipsync/Takes';
 import Eleve from './eleve/Eleve';
 import Watch from './watch/Watch';
+import FaceEmbed from './watch/FaceEmbed';
 import PasswordGate from './PasswordGate';
 import './index.css';
 
 /**
- * Seven pages, no router.
+ * Every page, no router.
+ *
+ * The heading used to count them. It said seven while the table held nine, which is
+ * what a number in a comment does — so it names the table instead, and cannot drift.
  *
  * public/_redirects already serves index.html for every path, so a path is all
  * another page needs — and a router would be a dependency, a bundle and an
@@ -70,15 +74,23 @@ const PAGES: Record<string, () => JSX.Element> = {
 /**
  * The pages that are not behind the site password.
  *
- * One entry, and it should stay hard to add a second: a page here can be opened by
- * anyone with its address, so the only thing that belongs is a page carrying its own
- * credential. /watch carries a share token — see src/lipsync/shared.ts — which opens
- * exactly one take and one face and reaches no route that spends money. Everything the
- * page needs comes from /api/share/*, the matching exemption in
- * functions/api/_middleware.ts.
+ * It should stay hard to add one: a page here can be opened by anyone with its address,
+ * so the only thing that belongs is a page that reaches nothing worth gating. /watch
+ * carries a share token — see src/lipsync/shared.ts — which opens exactly one take and
+ * one face and reaches no route that spends money. Everything it needs comes from
+ * /api/share/*, the matching exemption in functions/api/_middleware.ts.
+ *
+ * /face-embed is the second, and it passes the same test more easily than the first:
+ * it carries no credential at all. It makes no API call, reads no bucket and takes
+ * everything it draws from the page embedding it, so a stranger opening the bare path
+ * gets a resting face and nothing else — strictly less exposed than /watch, which at
+ * least has a token in its address bar. It is here rather than behind the gate because
+ * the page embedding it is LingoLecto, whose students have never had our password and
+ * should not need one to see a mouth move. See src/watch/FaceEmbed.tsx.
  */
 const OPEN_PAGES: Record<string, () => JSX.Element> = {
   '/watch': Watch,
+  '/face-embed': FaceEmbed,
 };
 
 const page = window.location.pathname.replace(/\/+$/, '').toLowerCase();

@@ -17,15 +17,26 @@
  * Everything under /api/* needs both, including the WebSocket upgrade — the
  * relay spends the Google key directly for as long as the socket is open, and
  * image generation spends on every request. Two prefixes are exempt from the
- * cookie, and only from the cookie:
+ * cookie:
  *
- *  - /api/auth/*, which is how a caller gets a cookie in the first place.
+ *  - /api/auth/*, which is how a caller gets a cookie in the first place. It is
+ *    exempt from the cookie and NOTHING ELSE — the origin check still applies,
+ *    and on this prefix it is load-bearing, because it is the only thing between
+ *    a stranger's curl and unlimited password guesses (see below).
  *  - /api/share/*, which serves one take and one face to somebody holding a
  *    link. It carries its own credential instead — a 128-bit token naming
  *    exactly what it opens — and it spends nothing: two R2 reads, no provider,
  *    no key, no listing. See src/lipsync/shared.ts for why the key is cut per
  *    take rather than the gate being widened, and functions/api/share/_token.ts
  *    for the check that replaces this one.
+ *
+ *    THIS ONE IS ALSO EXEMPT FROM THE ORIGIN CHECK, and answers any caller.
+ *    isSameOrigin refuses a request carrying neither Origin nor Referer, which
+ *    is every server-to-server fetch, and LingoLecto's Worker makes exactly one
+ *    of those: it imports a take when a teacher publishes a Phono. Nothing is
+ *    given up by allowing it — as the note above says, an Origin header stops
+ *    other sites and never curl, so on a route whose real credential is a
+ *    128-bit token it was buying nothing. See docs/phono-embed.md.
  *
  * STILL NOT DONE: per-caller rate limiting. Workers have no shared counter
  * without KV or a Durable Object, so there is nothing here slowing down
@@ -123,6 +134,31 @@ function withCors(response: Response, origin: string | null): Response {
   return out;
 }
 
+/** The one prefix whose credential is in the body rather than in a cookie. */
+function isShareRoute(url: URL): boolean {
+  return url.pathname.startsWith('/api/share/');
+}
+
+/**
+ * CORS for a route whose credential is the token it was handed.
+ *
+ * A wildcard rather than an echoed origin, and **without** Allow-Credentials, which is
+ * the difference that matters: withCors above pairs an echoed origin with
+ * `Allow-Credentials: true`, and saying that to any origin that asks would let any page
+ * on the internet make authenticated requests with the visitor's session cookie. These
+ * routes need neither — they read a token out of the body and ignore cookies entirely —
+ * so the safe pairing is `*` with credentials off, and the browser will refuse to send
+ * the cookie even if a caller asks it to.
+ *
+ * No Vary: the answer does not depend on who asked.
+ */
+function withShareCors(response: Response): Response {
+  const out = new Response(response.body, response);
+  out.headers.set('Access-Control-Allow-Origin', '*');
+  out.headers.set('Access-Control-Allow-Headers', 'Content-Type');
+  return out;
+}
+
 export async function onRequest(
   context: EventContext<GateEnv, string, Record<string, unknown>>,
 ): Promise<Response> {
@@ -130,19 +166,39 @@ export async function onRequest(
   const url = new URL(request.url);
   const origin = request.headers.get('Origin');
 
-  if (!isSameOrigin(request, url)) {
+  // The two prefixes described at the top of this file, and nothing else.
+  // Scoped to exact prefixes: a route added elsewhere is covered by default.
+  const isOpenRoute =
+    url.pathname.startsWith('/api/auth/') || url.pathname.startsWith('/api/share/');
+
+  /*
+   * Share routes answer a caller with no Origin at all, and only those.
+   *
+   * isSameOrigin returns false when neither Origin nor Referer is present, which is
+   * every server-to-server fetch — so before this branch existed, a share link could
+   * only be opened by a browser on one of our own pages. LingoLecto's Worker imports a
+   * take once, when a teacher publishes a Phono, and it is not a browser.
+   *
+   * This gives up nothing the origin check was buying. Its own note at the top of this
+   * file says so: an Origin header is "trivially forged by anything that is not a
+   * browser", so it stops other *sites*, never curl. The thing with teeth on these
+   * routes is the 128-bit token, which is unchanged — see functions/api/share/_token.ts.
+   * And they spend nothing: two R2 reads, no provider, no key, no listing.
+   *
+   * /api/auth/ is NOT included. It mints the credential everything else trusts, and the
+   * origin check is the only thing standing between a stranger's curl and unlimited
+   * password guesses — there is still no rate limiting (see above).
+   */
+  if (!isSameOrigin(request, url) && !isShareRoute(url)) {
     return json({ error: 'Forbidden', code: 'cross_origin' }, 403);
   }
 
   // Preflight reveals nothing and carries no body; answer it directly.
   if (request.method === 'OPTIONS') {
-    return withCors(new Response(null, { status: 204 }), origin);
+    return isShareRoute(url)
+      ? withShareCors(new Response(null, { status: 204 }))
+      : withCors(new Response(null, { status: 204 }), origin);
   }
-
-  // The two prefixes described at the top of this file, and nothing else.
-  // Scoped to exact prefixes: a route added elsewhere is covered by default.
-  const isOpenRoute =
-    url.pathname.startsWith('/api/auth/') || url.pathname.startsWith('/api/share/');
 
   if (!isOpenRoute && !(await hasValidSession(request, env))) {
     // 401 rather than 403 — the client tells these apart to decide whether to
@@ -159,8 +215,13 @@ export async function onRequest(
   }
 
   if (request.method !== 'POST') {
-    return withCors(json({ error: 'Method not allowed' }, 405), origin);
+    return isShareRoute(url)
+      ? withShareCors(json({ error: 'Method not allowed' }, 405))
+      : withCors(json({ error: 'Method not allowed' }, 405), origin);
   }
 
-  return withCors(await next(), origin);
+  // A share response must never go out through withCors: it would echo whatever origin
+  // asked and pair it with Allow-Credentials, which is the one combination that turns a
+  // public read into a cross-site authenticated one.
+  return isShareRoute(url) ? withShareCors(await next()) : withCors(await next(), origin);
 }
