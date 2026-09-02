@@ -2,7 +2,9 @@ import { useEffect, useRef, useState } from 'react';
 import {
   AlertTriangle,
   AudioLines,
+  Check,
   Download,
+  Link2,
   Loader2,
   Maximize2,
   Minimize2,
@@ -18,9 +20,10 @@ import type { FaceKit } from '../facekit/kit';
 import type { PublishedFace } from '../facekit/published';
 import SpeakingFace from '../live/SpeakingFace';
 import Diagnostics from './Diagnostics';
-import { audioUrl, deleteLine, fetchLine, listLines } from './library';
+import { audioUrl, deleteLine, fetchLine, listLines, shareLine } from './library';
 import { loadPrefs, savePrefs } from './prefs';
 import type { LipsyncPackage, PublishedLine } from './published';
+import { shareUrl } from './shared';
 
 interface OpenTake {
   pkg: LipsyncPackage;
@@ -69,6 +72,8 @@ export default function Takes() {
   const [faceId, setFaceId] = useState(remembered.faceId);
   const [started, setStarted] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  const [sharingId, setSharingId] = useState<string | null>(null);
+  const [sharedId, setSharedId] = useState<string | null>(null);
   const stage = useRef<HTMLDivElement | null>(null);
   const audioElement = useRef<HTMLAudioElement | null>(null);
   const audioObjectUrl = useRef<string | null>(null);
@@ -187,6 +192,39 @@ export default function Takes() {
       }
     } finally {
       if (request === requestNumber.current) setOpeningId(null);
+    }
+  }
+
+  /**
+   * Cuts a link to one take, and puts it on the clipboard.
+   *
+   * The face is whatever is selected below, because a package stores audio and movement
+   * and not artwork — so the choice has to be made by whoever shares, and the link the
+   * recipient opens has no picker on it. Sharing the same take again returns the same
+   * link with the face updated, so a link already sent stays the link somebody holds.
+   *
+   * The clipboard can refuse — a browser without permission, a page that is not focused —
+   * and a share that succeeded server-side but could not be copied is not a failure worth
+   * reporting as one, so the URL goes into a prompt() instead of vanishing.
+   */
+  async function share(line: PublishedLine) {
+    setSharingId(line.id);
+    setProblem(null);
+    try {
+      const { token } = await shareLine(line.id, faceId);
+      if (!token) return;
+      const url = shareUrl(window.location.origin, token);
+      try {
+        await navigator.clipboard.writeText(url);
+        setSharedId(line.id);
+        window.setTimeout(() => setSharedId((id) => (id === line.id ? null : id)), 2000);
+      } catch {
+        window.prompt('Share link', url);
+      }
+    } catch (error) {
+      setProblem(error instanceof Error ? error.message : 'Could not share that take.');
+    } finally {
+      setSharingId(null);
     }
   }
 
@@ -318,6 +356,24 @@ export default function Takes() {
                             <span className="text-amber-500">{line.oovCount} unknown</span>
                           )}
                         </div>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void share(line)}
+                        disabled={Boolean(deletingId) || sharingId === line.id}
+                        title={`Copy a public link to ${line.name}, wearing ${
+                          faces.find((face) => face.id === faceId)?.name ||
+                          (faceId ? faceId : 'the deployment’s own face')
+                        }. Anyone with the link can watch it without the password.`}
+                        className="w-10 shrink-0 text-slate-700 transition-colors hover:bg-slate-800/60 hover:text-slate-300 disabled:cursor-wait"
+                      >
+                        {sharingId === line.id ? (
+                          <Loader2 size={14} className="mx-auto animate-spin" />
+                        ) : sharedId === line.id ? (
+                          <Check size={14} className="mx-auto text-emerald-400" />
+                        ) : (
+                          <Link2 size={14} className="mx-auto" />
+                        )}
                       </button>
                       <button
                         type="button"
@@ -455,7 +511,8 @@ export default function Takes() {
                       ))}
                     </select>
                     <span className="text-[11px] text-slate-700">
-                      The take stores audio and movement, not a face. This choice is remembered for previews.
+                      The take stores audio and movement, not a face. This choice is remembered for
+                      previews, and it is the face a share link hands to whoever opens it.
                     </span>
                   </label>
                 </div>

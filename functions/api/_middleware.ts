@@ -16,8 +16,16 @@
  *
  * Everything under /api/* needs both, including the WebSocket upgrade — the
  * relay spends the Google key directly for as long as the socket is open, and
- * image generation spends on every request. The only exemption is /api/auth/*
- * itself, which spends nothing.
+ * image generation spends on every request. Two prefixes are exempt from the
+ * cookie, and only from the cookie:
+ *
+ *  - /api/auth/*, which is how a caller gets a cookie in the first place.
+ *  - /api/share/*, which serves one take and one face to somebody holding a
+ *    link. It carries its own credential instead — a 128-bit token naming
+ *    exactly what it opens — and it spends nothing: two R2 reads, no provider,
+ *    no key, no listing. See src/lipsync/shared.ts for why the key is cut per
+ *    take rather than the gate being widened, and functions/api/share/_token.ts
+ *    for the check that replaces this one.
  *
  * STILL NOT DONE: per-caller rate limiting. Workers have no shared counter
  * without KV or a Durable Object, so there is nothing here slowing down
@@ -131,11 +139,12 @@ export async function onRequest(
     return withCors(new Response(null, { status: 204 }), origin);
   }
 
-  // The login route is how a caller gets a cookie, so it cannot require one.
-  // Scoped to the exact prefix: a route added elsewhere is covered by default.
-  const isAuthRoute = url.pathname.startsWith('/api/auth/');
+  // The two prefixes described at the top of this file, and nothing else.
+  // Scoped to exact prefixes: a route added elsewhere is covered by default.
+  const isOpenRoute =
+    url.pathname.startsWith('/api/auth/') || url.pathname.startsWith('/api/share/');
 
-  if (!isAuthRoute && !(await hasValidSession(request, env))) {
+  if (!isOpenRoute && !(await hasValidSession(request, env))) {
     // 401 rather than 403 — the client tells these apart to decide whether to
     // re-prompt for the password or report a genuine refusal.
     return json({ error: 'Password required', code: 'unauthorized' }, 401);

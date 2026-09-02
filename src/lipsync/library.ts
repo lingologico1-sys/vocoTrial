@@ -171,6 +171,25 @@ export function deleteLine(id: string): Promise<unknown> {
 }
 
 /**
+ * Cuts a public link for one take, wearing one face — or, with `revoke`, throws it away.
+ *
+ * The face has to be named here because the person opening the link has no library and
+ * no picker: a package stores audio and movement, not artwork, so whoever shares chooses
+ * the face and the choice travels with the link. Sharing the same take twice returns the
+ * same token with its face updated, so a link already handed out stays the link.
+ *
+ * Minting is gated like everything else on this page; only reading is public. See
+ * functions/api/lipsync/share.ts and functions/api/share/.
+ */
+export function shareLine(
+  id: string,
+  faceId: string,
+  revoke = false,
+): Promise<{ token: string | null }> {
+  return post<{ token: string | null }>('share', { id, faceId, revoke });
+}
+
+/**
  * The laugh library.
  *
  * Split in two the way the store is: a sound you provided is a `ReactionSource` and belongs

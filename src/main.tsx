@@ -9,6 +9,7 @@ import Teach from './teach/Teach';
 import LipSync from './lipsync/LipSync';
 import Takes from './lipsync/Takes';
 import Eleve from './eleve/Eleve';
+import Watch from './watch/Watch';
 import PasswordGate from './PasswordGate';
 import './index.css';
 
@@ -66,16 +67,37 @@ const PAGES: Record<string, () => JSX.Element> = {
   '/eleve': Eleve,
 };
 
+/**
+ * The pages that are not behind the site password.
+ *
+ * One entry, and it should stay hard to add a second: a page here can be opened by
+ * anyone with its address, so the only thing that belongs is a page carrying its own
+ * credential. /watch carries a share token — see src/lipsync/shared.ts — which opens
+ * exactly one take and one face and reaches no route that spends money. Everything the
+ * page needs comes from /api/share/*, the matching exemption in
+ * functions/api/_middleware.ts.
+ */
+const OPEN_PAGES: Record<string, () => JSX.Element> = {
+  '/watch': Watch,
+};
+
 const page = window.location.pathname.replace(/\/+$/, '').toLowerCase();
+const Open = OPEN_PAGES[page];
 const Page = PAGES[page || '/'] ?? Start;
 
 // The gate wraps the page rather than living inside it so that nothing mounts
 // unauthenticated — nothing in either page can fire a request before the check
-// lands.
+// lands. An open page skips the gate entirely rather than being rendered inside
+// a gate that waves it through: a gate with an exception in it is a gate whose
+// next reader has to work out whether the exception still holds.
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <PasswordGate>
-      <Page />
-    </PasswordGate>
+    {Open ? (
+      <Open />
+    ) : (
+      <PasswordGate>
+        <Page />
+      </PasswordGate>
+    )}
   </StrictMode>,
 );
