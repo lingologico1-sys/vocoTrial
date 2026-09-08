@@ -109,6 +109,24 @@ LingoLecto's own dev server. That branch cannot fire in production, where
 reaching this deployment requires a Host that Cloudflare routes here — the same
 argument `functions/api/_middleware.ts` makes about its own localhost case.
 
+**LingoLecto is one Worker on three hostnames**, and all three belong on the
+list: `lecto.lingomondo.app`, `phono.lingomondo.app`, and its workers.dev
+fallback. A phono opens on whichever one the student was handed.
+
+Know what a missing hostname looks like, because it does not announce itself as
+an origin problem. Both halves of the check fail together, so one absent string
+produces two symptoms at once:
+
+| Symptom | Which half failed |
+| --- | --- |
+| The default face, not the phono's own | the kit fetch, answering `kit_origin` |
+| That face does not move with the audio | every clock message dropped |
+
+Read together those look like a broken face kit or a broken audio clock, and
+neither is. `phono.lingomondo.app` was missing until 2026-09-08 and was found
+from a classroom rather than from a test — if a face is ever wrong in exactly
+this pair of ways, check this list first.
+
 ## The clock, and why extrapolation is safe
 
 The frame holds the host's last sync and reads the wall clock between them:
