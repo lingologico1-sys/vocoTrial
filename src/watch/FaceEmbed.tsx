@@ -42,8 +42,21 @@ import { MARK_LOOKAHEAD_MS } from '../live/polly';
  * own dev server, which are on different ports by construction. That branch cannot fire
  * in production, where reaching this deployment requires a Host that Cloudflare routes
  * here, and localhost is not and cannot be one — the same argument _middleware.ts makes.
+ *
+ * IT IS ONE APP WITH THREE HOSTNAMES, and all three belong here. LingoLecto's Worker
+ * answers on lecto.lingomondo.app, phono.lingomondo.app and its workers.dev fallback —
+ * see the `routes` in its wrangler.jsonc — and a phono opens on whichever one the
+ * student was given. phono.lingomondo.app was missing until now, so a phono opened on
+ * the domain named after it got both refusals at once: the kit fetch answered
+ * `kit_origin`, which is the default face, and every clock message was dropped, which is
+ * why that face did not move. Adding a hostname here widens who may drive the mouth, so
+ * add one only when it is this same app under another name.
  */
-const ALLOWED_HOSTS = ['lecto.lingomondo.app', 'lingoreader.lingologico1.workers.dev'];
+const ALLOWED_HOSTS = [
+  'lecto.lingomondo.app',
+  'phono.lingomondo.app',
+  'lingoreader.lingologico1.workers.dev',
+];
 
 function isAllowedOrigin(origin: string): boolean {
   try {
