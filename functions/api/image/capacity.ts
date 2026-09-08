@@ -1,6 +1,6 @@
 import { findImageModel } from '../../../src/facekit/imageModels';
 import { type GateEnv, json } from '../_middleware';
-import { VERTEX_KEY_NAMES, vertexGenerateContentUrl, vertexKey } from '../_vertex';
+import { VERTEX_CRED_NAMES, vertexAuth } from '../_vertex';
 
 /**
  * Whether a Gemini image model can serve anything right now, asked for nothing.
@@ -52,16 +52,16 @@ export async function onRequestPost(
     return json({ error: `Unknown model "${body.model}"`, code: 'bad_model' }, 400);
   }
 
-  const key = vertexKey(env);
-  if (!key) {
-    return json({ error: `${VERTEX_KEY_NAMES} is not configured`, code: 'no_key' }, 500);
+  const vertex = await vertexAuth(env);
+  if (!vertex) {
+    return json({ error: `${VERTEX_CRED_NAMES} is not configured`, code: 'no_key' }, 500);
   }
 
   let upstream: Response;
   try {
-    upstream = await fetch(vertexGenerateContentUrl(model.id), {
+    upstream = await fetch(vertex.url(model.id), {
       method: 'POST',
-      headers: { 'x-goog-api-key': key, 'Content-Type': 'application/json' },
+      headers: { ...vertex.headers, 'Content-Type': 'application/json' },
       body: PROBE,
     });
   } catch (error) {

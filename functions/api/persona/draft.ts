@@ -3,7 +3,7 @@ import {
   PERSONA_MODEL,
 } from '../../../src/facekit/persona';
 import { type GateEnv, json } from '../_middleware';
-import { VERTEX_KEY_NAMES, vertexGenerateContentUrl, vertexKey } from '../_vertex';
+import { VERTEX_CRED_NAMES, vertexAuth } from '../_vertex';
 
 /**
  * Writes a tutor's background from their portrait: one picture in, text out.
@@ -110,16 +110,16 @@ export async function onRequestPost(
     return json({ error: 'That image is too large to send', code: 'image_too_large' }, 413);
   }
 
-  const key = vertexKey(env);
-  if (!key) {
-    return json({ error: `${VERTEX_KEY_NAMES} is not configured`, code: 'no_key' }, 500);
+  const vertex = await vertexAuth(env);
+  if (!vertex) {
+    return json({ error: `${VERTEX_CRED_NAMES} is not configured`, code: 'no_key' }, 500);
   }
 
   let upstream: Response;
   try {
-    upstream = await fetch(vertexGenerateContentUrl(PERSONA_MODEL.id), {
+    upstream = await fetch(vertex.url(PERSONA_MODEL.id), {
       method: 'POST',
-      headers: { 'x-goog-api-key': key, 'Content-Type': 'application/json' },
+      headers: { ...vertex.headers, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         // THE PICTURE GOES FIRST, and it is the one ordering decision here.
         //

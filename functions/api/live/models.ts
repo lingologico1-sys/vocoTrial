@@ -1,6 +1,6 @@
 import { MODELS } from '../../../src/realtime/models';
 import { IMAGE_MODELS } from '../../../src/facekit/imageModels';
-import { VERTEX_KEY_NAMES, vertexGenerateContentUrl, vertexKey } from '../_vertex';
+import { VERTEX_CRED_NAMES, type VertexAuth, vertexAuth } from '../_vertex';
 import { type GateEnv, json } from '../_middleware';
 
 /**
@@ -52,11 +52,11 @@ const PROBE_BODY = JSON.stringify({
   generationConfig: { maxOutputTokens: 1 },
 });
 
-async function probe(id: string, key: string): Promise<Record<string, unknown>> {
+async function probe(id: string, vertex: VertexAuth): Promise<Record<string, unknown>> {
   try {
-    const response = await fetch(vertexGenerateContentUrl(id), {
+    const response = await fetch(vertex.url(id), {
       method: 'POST',
-      headers: { 'x-goog-api-key': key, 'Content-Type': 'application/json' },
+      headers: { ...vertex.headers, 'Content-Type': 'application/json' },
       body: PROBE_BODY,
     });
 
@@ -81,9 +81,9 @@ export async function onRequestPost(
 ): Promise<Response> {
   const { env } = context;
 
-  const key = vertexKey(env);
-  if (!key) {
-    return json({ error: `${VERTEX_KEY_NAMES} is not configured`, code: 'no_key' }, 500);
+  const vertex = await vertexAuth(env);
+  if (!vertex) {
+    return json({ error: `${VERTEX_CRED_NAMES} is not configured`, code: 'no_key' }, 500);
   }
 
   // Whatever the pickers offer today, plus the spellings worth discovering.
@@ -99,8 +99,8 @@ export async function onRequestPost(
   const unique = (ids: string[]) => [...new Set(ids)];
 
   const [liveResults, imageResults] = await Promise.all([
-    Promise.all(unique(live).map((id) => probe(id, key))),
-    Promise.all(unique(image).map((id) => probe(id, key))),
+    Promise.all(unique(live).map((id) => probe(id, vertex))),
+    Promise.all(unique(image).map((id) => probe(id, vertex))),
   ]);
 
   return json({ surface: 'vertex', live: liveResults, image: imageResults });

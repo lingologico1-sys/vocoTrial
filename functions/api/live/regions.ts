@@ -1,5 +1,5 @@
 import { IMAGE_MODELS } from '../../../src/facekit/imageModels';
-import { VERTEX_KEY_NAMES, vertexGenerateContentUrl, vertexHost, vertexKey } from '../_vertex';
+import { VERTEX_CRED_NAMES, type VertexAuth, vertexAuth, vertexHost } from '../_vertex';
 import { type GateEnv, json } from '../_middleware';
 
 /**
@@ -144,21 +144,25 @@ interface Probe {
   servedBy?: string;
 }
 
-async function ask(url: string, key: string, body: string): Promise<{ status: number; detail: string }> {
+async function ask(
+  url: string,
+  vertex: VertexAuth,
+  body: string,
+): Promise<{ status: number; detail: string }> {
   const response = await fetch(url, {
     method: 'POST',
-    headers: { 'x-goog-api-key': key, 'Content-Type': 'application/json' },
+    headers: { ...vertex.headers, 'Content-Type': 'application/json' },
     body,
   });
   return { status: response.status, detail: response.ok ? '' : await response.text() };
 }
 
-/** Phase 1: is this host reachable with this key, and which region answers? */
-async function probeHost(region: string | undefined, key: string): Promise<Probe> {
+/** Phase 1: is this host reachable with this credential, and which region answers? */
+async function probeHost(region: string | undefined, vertex: VertexAuth): Promise<Probe> {
   try {
     const { status, detail } = await ask(
-      vertexGenerateContentUrl(BOGUS_MODEL, region),
-      key,
+      vertex.url(BOGUS_MODEL, region),
+      vertex,
       ROUTING_PROBE,
     );
     console.error('region probe', vertexHost(region), status, detail);
@@ -189,11 +193,11 @@ async function probeHost(region: string | undefined, key: string): Promise<Probe
 }
 
 /** Phase 2: is this model published in this region? 400 is the hit. */
-async function probeModel(id: string, region: string | undefined, key: string): Promise<Probe> {
+async function probeModel(id: string, region: string | undefined, vertex: VertexAuth): Promise<Probe> {
   try {
     const { status, detail } = await ask(
-      vertexGenerateContentUrl(id, region),
-      key,
+      vertex.url(id, region),
+      vertex,
       VALIDATION_PROBE,
     );
     console.error('region model probe', vertexHost(region), id, status, detail);
@@ -223,9 +227,9 @@ export async function onRequestPost(
 ): Promise<Response> {
   const { request, env } = context;
 
-  const key = vertexKey(env);
-  if (!key) {
-    return json({ error: `${VERTEX_KEY_NAMES} is not configured`, code: 'no_key' }, 500);
+  const vertex = await vertexAuth(env);
+  if (!vertex) {
+    return json({ error: `${VERTEX_CRED_NAMES} is not configured`, code: 'no_key' }, 500);
   }
 
   // Optional narrowing, which is what makes this usable as an A/B during a
@@ -248,7 +252,7 @@ export async function onRequestPost(
   }
 
   const hosts = await Promise.all(
-    wanted.map(async (region) => ({ region, probe: await probeHost(region, key) })),
+    wanted.map(async (region) => ({ region, probe: await probeHost(region, vertex) })),
   );
 
   // Only regions that took the key are worth asking about models — everywhere
@@ -262,7 +266,7 @@ export async function onRequestPost(
       const models = reachable
         ? Object.fromEntries(
             await Promise.all(
-              ids.map(async (id) => [id, await probeModel(id, region, key)] as const),
+              ids.map(async (id) => [id, await probeModel(id, region, vertex)] as const),
             ),
           )
         : undefined;

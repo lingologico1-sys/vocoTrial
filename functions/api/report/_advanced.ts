@@ -12,7 +12,7 @@ import {
 import { ANCHOR_FOR_PROMPT } from '../../../src/realtime/oralAnchors';
 import { MAX_TRANSCRIPT, type ReportTurn } from '../../../src/realtime/report';
 import type { MarkingCost } from '../../../src/realtime/cost';
-import { vertexGenerateContentUrl } from '../_vertex';
+import type { VertexAuth } from '../_vertex';
 
 /**
  * The advanced marker's server half: three stages, one call, one mark.
@@ -110,15 +110,15 @@ class MarkerError extends Error {
 
 /** One marking call. Throws MarkerError; the caller decides about retrying. */
 async function callOnce(
-  key: string,
+  vertex: VertexAuth,
   instruction: string,
   transcript: string,
 ): Promise<{ llm: OralLlmOutput; usage: Usage | undefined }> {
   let upstream: Response;
   try {
-    upstream = await fetch(vertexGenerateContentUrl(ORAL_MODEL.id), {
+    upstream = await fetch(vertex.url(ORAL_MODEL.id), {
       method: 'POST',
-      headers: { 'x-goog-api-key': key, 'Content-Type': 'application/json' },
+      headers: { ...vertex.headers, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         systemInstruction: { parts: [{ text: instruction }] },
         contents: [{ role: 'user', parts: [{ text: transcript }] }],
@@ -201,7 +201,9 @@ async function callOnce(
 }
 
 export interface AdvancedRequest {
-  key: string;
+  /* The authenticated credential, not a key: the caller resolves one from the
+     pool and both retries below spend the same account. See _vertex.ts. */
+  vertex: VertexAuth;
   language: LanguageChoice;
   l1: LanguageChoice;
   face: AdvancedFace;
@@ -222,7 +224,7 @@ export type AdvancedResult =
  * backstop for the cases that get past it.
  */
 export async function markAdvanced({
-  key,
+  vertex,
   language,
   l1,
   face,
@@ -294,7 +296,7 @@ export async function markAdvanced({
     let llm: OralLlmOutput;
     let usage: Usage | undefined;
     try {
-      ({ llm, usage } = await callOnce(key, instruction, transcript));
+      ({ llm, usage } = await callOnce(vertex, instruction, transcript));
     } catch (error) {
       if (error instanceof MarkerError) {
         return {

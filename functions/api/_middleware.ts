@@ -55,9 +55,21 @@ import { readToken, tokenIsValid } from './auth/_cookie';
  * this is a declaration rather than a migration.
  */
 export interface GateEnv {
-  /** Vertex AI key (GCP billing), primary then fallback — see _vertex.ts. */
-  GEMINI_API_KEY?: string;
-  GEMINI_API_KEY2?: string;
+  /*
+   * Vertex service accounts, one JSON key each — see _vertex.ts and
+   * _google-auth.ts. They replaced GEMINI_API_KEY / GEMINI_API_KEY2, which were
+   * express-mode API keys onto a single project; these are three accounts in
+   * three projects, which is what makes the pool worth having.
+   *
+   * They are ordinary Worker secrets rather than Secrets Store entries, and
+   * have to be: a store value is capped at 1024 characters and one of these is
+   * about 2.3 KB, most of it the private key.
+   */
+  GEMINI_JSON01?: string;
+  GEMINI_JSON02?: string;
+  GEMINI_JSON03?: string;
+  GEMINI_JSON04?: string;
+  GEMINI_JSON05?: string;
   /**
    * AI Studio key (AI Studio billing) — see _aistudio.ts. Not a fallback for
    * the Vertex keys: it reaches a different catalogue on a different meter, and

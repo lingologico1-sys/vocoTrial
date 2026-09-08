@@ -1,5 +1,5 @@
 import { geminiSetup } from './_setup';
-import { VERTEX_KEY_NAMES, VERTEX_LIVE_URL, vertexKey, vertexModel } from '../_vertex';
+import { VERTEX_CRED_NAMES, VERTEX_LIVE_URL, VERTEX_LOCATION, vertexAuth } from '../_vertex';
 import { AISTUDIO_KEY_NAME, AISTUDIO_LIVE_URL, aiStudioKey, aiStudioModel } from '../_aistudio';
 import { resolveInstructions, resolveSettings } from './_resolve';
 import {
@@ -83,14 +83,32 @@ export async function onRequest(
    * retry somewhere else.
    */
   const aiStudio = choice.surface === 'aistudio';
-  const key = aiStudio ? aiStudioKey(env) : vertexKey(env);
-  if (!key) {
-    const names = aiStudio ? AISTUDIO_KEY_NAME : VERTEX_KEY_NAMES;
+
+  /*
+   * THE TWO SURFACES NO LONGER CARRY THEIR CREDENTIAL THE SAME WAY, which is the
+   * one asymmetry to keep in mind here. AI Studio still takes an API key, and
+   * takes it in the query string. Vertex takes an OAuth bearer token from a
+   * service account, in a header — see _vertex.ts for why it left express mode.
+   * Both are resolved before either is used so a missing one is still a single
+   * `no_key` answer rather than two.
+   */
+  const studioKey = aiStudio ? aiStudioKey(env) : undefined;
+  const vertex = aiStudio ? null : await vertexAuth(env);
+  if (aiStudio ? !studioKey : !vertex) {
+    const names = aiStudio ? AISTUDIO_KEY_NAME : VERTEX_CRED_NAMES;
     return json({ error: `${names} is not configured`, code: 'no_key' }, 500);
   }
 
   const liveUrl = aiStudio ? AISTUDIO_LIVE_URL : VERTEX_LIVE_URL;
-  const modelPath = aiStudio ? aiStudioModel(choice.id) : vertexModel(choice.id);
+
+  /*
+   * VERTEX_LOCATION, not the `global` this app's REST calls use. The bidi
+   * service is regional and the model path has to agree with the host it is
+   * sent to; a mismatch closes the socket with a 1007 or 1008 that reads like a
+   * wrong model id. See the note on VERTEX_LIVE_URL.
+   */
+  const modelPath =
+    aiStudio || !vertex ? aiStudioModel(choice.id) : vertex.model(choice.id, VERTEX_LOCATION);
 
   const language = findLanguage(params.get('language') ?? defaultLanguageCode());
   if (!language) {
@@ -98,16 +116,29 @@ export async function onRequest(
   }
 
   /**
-   * The key rides in the query string because that is the only credential form
-   * Google's Live endpoint accepts, so anything logged about this request has
-   * to be scrubbed first. It is not hypothetical: the wss:// scheme bug that
-   * VERTEX_LIVE_URL still carries a note about threw a TypeError whose message
-   * quoted the whole URL, and the key went straight into the Worker log with it.
+   * Nothing spendable may reach a log, whichever form it took.
+   *
+   * Not hypothetical: the wss:// scheme bug that VERTEX_LIVE_URL still carries a
+   * note about threw a TypeError whose message quoted the whole URL, and the
+   * credential went into the Worker log with it. On AI Studio that is still the
+   * risk exactly as described, because the key is still in the URL. On Vertex
+   * the token is in a header and no longer appears in the URL at all — but it is
+   * scrubbed the same way regardless, because an error's message is not
+   * something this code chooses the contents of.
    */
-  const scrub = (text: string) => text.split(key).join('<redacted>');
+  const secret = aiStudio ? (studioKey as string) : (vertex as NonNullable<typeof vertex>).token;
+  const scrub = (text: string) => text.split(secret).join('<redacted>');
 
   const upstreamUrl = new URL(liveUrl);
-  upstreamUrl.searchParams.set('key', key);
+  if (aiStudio) upstreamUrl.searchParams.set('key', studioKey as string);
+
+  /*
+   * A Worker opens an outbound socket by fetching with an Upgrade header, which
+   * is the whole reason the bearer token can travel here at all: a browser's
+   * WebSocket cannot set a header, and this is not a browser.
+   */
+  const upgradeHeaders: Record<string, string> = { Upgrade: 'websocket' };
+  if (!aiStudio && vertex) Object.assign(upgradeHeaders, vertex.headers);
 
   /**
    * How long the Worker took to reach Google, in ms.
@@ -123,7 +154,7 @@ export async function onRequest(
   const reachedAt = Date.now();
   let upstream: Response;
   try {
-    upstream = await fetch(upstreamUrl.toString(), { headers: { Upgrade: 'websocket' } });
+    upstream = await fetch(upstreamUrl.toString(), { headers: upgradeHeaders });
   } catch (error) {
     console.error('gemini live fetch failed', scrub(error instanceof Error ? error.message : String(error)));
     return json({ error: 'Could not reach Google', code: 'upstream' }, 502);

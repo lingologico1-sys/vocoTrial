@@ -843,9 +843,10 @@ gates the build.
 
    ```bash
    npx wrangler secret put SITE_PASSWORD
-   npx wrangler secret put GEMINI_API_KEY      # Vertex — a particular kind, see below
-   npx wrangler secret put GEMINI_API_KEY2     # optional fallback Vertex key
-   npx wrangler secret put GOOGLE_API_KEY      # ordinary AI Studio key
+   npx wrangler secret put GEMINI_JSON01      # Vertex service account, one JSON key
+   npx wrangler secret put GEMINI_JSON02      # a second, in a second GCP project
+   npx wrangler secret put GEMINI_JSON03      # and a third
+   npx wrangler secret put GOOGLE_API_KEY     # ordinary AI Studio key
    npx wrangler secret put OPENAI_API_KEY      # the realtime relay
    npx wrangler secret put ELEVENLABS_API_KEY  # lip-sync speech
    npx wrangler secret put LIPSYNC_URL         # the Modal lip-sync backend
@@ -868,54 +869,37 @@ gates the build.
    and then quietly disappears. Secrets are exempt from that; vars are not.
 
    These are the same values the Pages project held. Migrating means copying
-   them across, not minting new ones — a Pages secret cannot be read back, so
-   if the originals are lost, they are lost, and the Vertex ones have to be
-   re-made with the recipe below.
-   - `SITE_PASSWORD`
-   - `GEMINI_API_KEY` (Vertex AI key — see below, it is a particular kind)
-   - `GEMINI_API_KEY2` (optional fallback Vertex key)
-   - `GOOGLE_API_KEY` (ordinary AI Studio key, for models with no Vertex build)
+   them across, not minting new ones — a Pages secret cannot be read back, so if
+   the originals are lost, they are lost.
 
-   **A Vertex key is not an ordinary API key**, and the difference is invisible:
-   both are 39–53 characters of `AIza…`. Vertex refuses a plain one with `403`
-   *"Requests to this API … are blocked"*. What it wants is an **authorization
-   key** — an API key bound to a service account — which cannot be made from the
-   Credentials page (the console greys out Agent Platform there, because the API
-   does not accept unbound keys). Make it with gcloud:
+   **The Vertex credential is a service-account JSON, not an API key.** It used
+   to be an express-mode key and the runbook here used to explain how to mint
+   one; that whole apparatus is gone. See [functions/api/_vertex.ts](functions/api/_vertex.ts)
+   for what changed and why. What matters when setting these up:
 
-   ```bash
-   gcloud services enable aiplatform.googleapis.com
-   gcloud iam service-accounts create vocotrial-vertex --display-name="vocoTrial Vertex"
-   gcloud projects add-iam-policy-binding PROJECT_ID \
-     --member="serviceAccount:vocotrial-vertex@PROJECT_ID.iam.gserviceaccount.com" \
-     --role="roles/aiplatform.user"
-   gcloud beta services api-keys create --display-name="vocoTrial Vertex" \
-     --api-target=service=aiplatform.googleapis.com \
-     --service-account=vocotrial-vertex@PROJECT_ID.iam.gserviceaccount.com
-   ```
+   - Paste the **entire JSON file** as the secret value, on one line. A
+     service-account key is ~2.3 KB, which fits a Worker secret (5 KB) and does
+     **not** fit a Secrets Store entry (1 KB) — that is why these are per-Worker
+     secrets while shorter keys can be shared from the store.
+   - The account needs `roles/aiplatform.user` on its project, and that project
+     needs `aiplatform.googleapis.com` enabled.
+   - **Use a different GCP project per account if you can.** Quota on these
+     models is per project, so three accounts in three projects is three times
+     the headroom; three in one project is one pool wearing three hats. The
+     three in use are exactly this, and are shared with PanelForge.
+   - `GEMINI_JSON04` and `05` are read if present — see `POOL_SIZE`.
 
-   If that last command fails with
-   `FLOW_APIKEY_SERVICE_ACCOUNT_BINDING_FAILED_PRECONDITION`, an org policy is
-   blocking it — `constraints/iam.managed.disableServiceAccountApiKeyCreation`,
-   which Google enforces by default. Exempt the one project (needs
-   `roles/orgpolicy.policyAdmin`), and expect a few minutes before the API Keys
-   service notices:
+   Prove a key before trusting it, which costs nothing because a rejected
+   request is not billed:
 
    ```bash
-   gcloud org-policies set-policy policy.yaml   # spec.rules[0].enforce: false
+   npm run vertex:sa -- --file path/to/key.json --live
    ```
 
-   Verify before pasting anything — free, because a rejected request is not
-   billed. `404` means the credential authenticated and only the fake model id
-   was refused; `401` means it is not a Vertex credential; `403` means it is
-   blocked by restriction or a disabled API:
-
-   ```bash
-   curl -s -o /dev/null -w '%{http_code}\n' -X POST \
-     -H "x-goog-api-key: KEY" -H 'Content-Type: application/json' \
-     -d '{"contents":[{"role":"user","parts":[{"text":"probe"}]}]}' \
-     'https://aiplatform.googleapis.com/v1/publishers/google/models/gemini-no-such-model-probe:generateContent'
-   ```
+   That mints a token, proves it on REST against a model id that cannot exist,
+   then opens the Live socket and waits for `setupComplete`. If the last step
+   fails, read [scripts/vertex-sa.ts](scripts/vertex-sa.ts) — a wrong region and
+   a wrong model path both close the socket with a message about a model id.
 
 4. **Create the seven buckets**, once, and do it *before the deploy that adds
    the binding* rather than before the first save:

@@ -18,7 +18,7 @@ import {
 } from '../../../src/realtime/report';
 import type { MarkingCost } from '../../../src/realtime/cost';
 import { type GateEnv, json } from '../_middleware';
-import { VERTEX_KEY_NAMES, vertexGenerateContentUrl, vertexKey } from '../_vertex';
+import { VERTEX_CRED_NAMES, vertexAuth } from '../_vertex';
 import { type LibraryEnv, readLibrary } from '../evaluators/_library';
 
 /** The key that pays for the call, and the bucket of scales. */
@@ -219,13 +219,13 @@ export async function onRequestPost(
       return json({ error: 'The learner did not say anything', code: 'no_learner_turns' }, 400);
     }
 
-    const advancedKey = vertexKey(env);
-    if (!advancedKey) {
-      return json({ error: `${VERTEX_KEY_NAMES} is not configured`, code: 'no_key' }, 500);
+    const advancedVertex = await vertexAuth(env);
+    if (!advancedVertex) {
+      return json({ error: `${VERTEX_CRED_NAMES} is not configured`, code: 'no_key' }, 500);
     }
 
     const result = await markAdvanced({
-      key: advancedKey,
+      vertex: advancedVertex,
       language,
       l1,
       face,
@@ -274,16 +274,16 @@ export async function onRequestPost(
     return json({ error: 'That conversation is too long to report on', code: 'transcript_too_long' }, 413);
   }
 
-  const key = vertexKey(env);
-  if (!key) {
-    return json({ error: `${VERTEX_KEY_NAMES} is not configured`, code: 'no_key' }, 500);
+  const vertex = await vertexAuth(env);
+  if (!vertex) {
+    return json({ error: `${VERTEX_CRED_NAMES} is not configured`, code: 'no_key' }, 500);
   }
 
   let upstream: Response;
   try {
-    upstream = await fetch(vertexGenerateContentUrl(REPORT_MODEL.id), {
+    upstream = await fetch(vertex.url(REPORT_MODEL.id), {
       method: 'POST',
-      headers: { 'x-goog-api-key': key, 'Content-Type': 'application/json' },
+      headers: { ...vertex.headers, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         systemInstruction: {
           parts: [{ text: reportInstruction({ language, l1, evaluator }) }],

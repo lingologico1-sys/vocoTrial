@@ -10,7 +10,7 @@ import {
   dictionaryInstruction,
   looksLikeDictionaryResult,
 } from '../../../src/realtime/dictionary';
-import { VERTEX_KEY_NAMES, vertexGenerateContentUrl, vertexKey } from '../_vertex';
+import { VERTEX_CRED_NAMES, vertexAuth } from '../_vertex';
 
 /**
  * One word looked up, for the student page.
@@ -69,9 +69,9 @@ export async function onRequestPost(
   // lookup.
   const spoken = typeof body?.context === 'string' ? body.context.trim().slice(0, MAX_CONTEXT) : '';
 
-  const key = vertexKey(env);
-  if (!key) {
-    return json({ error: `${VERTEX_KEY_NAMES} is not configured`, code: 'no_key' }, 500);
+  const vertex = await vertexAuth(env);
+  if (!vertex) {
+    return json({ error: `${VERTEX_CRED_NAMES} is not configured`, code: 'no_key' }, 500);
   }
 
   const ask = spoken
@@ -80,9 +80,9 @@ export async function onRequestPost(
 
   let upstream: Response;
   try {
-    upstream = await fetch(vertexGenerateContentUrl(DICTIONARY_MODEL.id), {
+    upstream = await fetch(vertex.url(DICTIONARY_MODEL.id), {
       method: 'POST',
-      headers: { 'x-goog-api-key': key, 'Content-Type': 'application/json' },
+      headers: { ...vertex.headers, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         systemInstruction: { parts: [{ text: dictionaryInstruction(l1.name) }] },
         contents: [

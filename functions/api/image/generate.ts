@@ -1,6 +1,6 @@
 import { IMAGE_MODELS, findImageModel, type ImageModelChoice } from '../../../src/facekit/imageModels';
 import { type GateEnv, json } from '../_middleware';
-import { VERTEX_KEY_NAMES, vertexGenerateContentUrl, vertexKey } from '../_vertex';
+import { VERTEX_CRED_NAMES, type VertexAuth, vertexAuth } from '../_vertex';
 
 /**
  * Generates one face-kit patch, on whichever model was asked for.
@@ -124,7 +124,7 @@ function googleRetryDelayMs(body: unknown): number | undefined {
  */
 async function generateGemini(
   model: ImageModelChoice,
-  key: string,
+  vertex: VertexAuth,
   prompt: string,
   image: string,
   imageFirst: boolean,
@@ -150,10 +150,10 @@ async function generateGemini(
     : [{ text: prompt }, { inline_data: { mime_type: 'image/png', data: image } }];
 
   const upstream = await fetch(
-    vertexGenerateContentUrl(model.id),
+    vertex.url(model.id),
     {
       method: 'POST',
-      headers: { 'x-goog-api-key': key, 'Content-Type': 'application/json' },
+      headers: { ...vertex.headers, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         contents: [{ role: 'user', parts }],
         generationConfig: {
@@ -274,9 +274,9 @@ export async function onRequestPost(
     temperature = body.temperature;
   }
 
-  const key = vertexKey(env);
-  if (!key) {
-    return json({ error: `${VERTEX_KEY_NAMES} is not configured`, code: 'no_key' }, 500);
+  const vertex = await vertexAuth(env);
+  if (!vertex) {
+    return json({ error: `${VERTEX_CRED_NAMES} is not configured`, code: 'no_key' }, 500);
   }
 
   const image = rawBase64(body.image);
@@ -286,7 +286,7 @@ export async function onRequestPost(
   try {
     attempt = await generateGemini(
       model,
-      key,
+      vertex,
       prompt,
       image,
       body.imageFirst === true,
