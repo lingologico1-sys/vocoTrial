@@ -38,7 +38,7 @@ import { MARK_LOOKAHEAD_MS } from '../live/polly';
  *
  * Both directions are checked against the same list, because they are the same trust: a
  * page allowed to tell the mouth what to say is a page allowed to say what it wears.
- * localhost on any port is here for `wrangler pages dev` running alongside LingoLecto's
+ * localhost on any port is here for `wrangler dev` running alongside LingoLecto's
  * own dev server, which are on different ports by construction. That branch cannot fire
  * in production, where reaching this deployment requires a Host that Cloudflare routes
  * here, and localhost is not and cannot be one — the same argument _middleware.ts makes.

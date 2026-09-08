@@ -80,10 +80,10 @@ export function json(body: unknown, status = 200): Response {
 /**
  * True when the request came from this deployment's own page.
  *
- * `wrangler pages dev` serves the SPA from a different port than Vite, so a
- * localhost origin is accepted on any port. That branch cannot fire in
- * production: reaching a deployed Pages Function requires a Host that
- * Cloudflare routes to this project, and localhost is not and cannot be one.
+ * `wrangler dev` serves the SPA from a different port than Vite, so a localhost
+ * origin is accepted on any port. That branch cannot fire in production:
+ * reaching the deployed Worker requires a Host that Cloudflare routes to it,
+ * and localhost is not and cannot be one.
  */
 function isSameOrigin(request: Request, url: URL): boolean {
   const origin = request.headers.get('Origin');

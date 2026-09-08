@@ -25,3 +25,9 @@ GEMINI_API_KEY2=...
 # AI Studio has no such notion, which is precisely why Vertex refuses these.
 # Not a fallback for the keys above; it reaches a different catalogue.
 GOOGLE_API_KEY=...
+
+# Lip-sync: ElevenLabs speech, and the Modal backend that bakes the marks.
+# Read by functions/api/lipsync/.
+ELEVENLABS_API_KEY=
+LIPSYNC_URL=
+LIPSYNC_API_KEY=

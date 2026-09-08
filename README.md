@@ -1,7 +1,7 @@
 # vocoTrial
 
-A live voice agent — you talk, the model talks back — running on Cloudflare
-Pages, on **Gemini Live** or **OpenAI realtime**, over a relayed WebSocket
+A live voice agent — you talk, the model talks back — running on a Cloudflare
+Worker, on **Gemini Live** or **OpenAI realtime**, over a relayed WebSocket
 either way.
 
 > **OpenAI came back, and not by the door it left through.** The removed path
@@ -824,12 +824,53 @@ Cloudflare builds and ships this repo itself, from the Git integration. Nothing
 deploys from CI — [.github/workflows/ci.yml](.github/workflows/ci.yml) only
 gates the build.
 
-1. **Cloudflare dashboard → Workers & Pages → Create → Pages → Connect to Git**,
-   pick `lingologico1-sys/vocoTrial`.
-2. Build command `npm run build`, output directory `dist`. Cloudflare reads the
-   rest from [wrangler.toml](wrangler.toml).
-3. **Settings → Variables and Secrets**, add these **Secrets** (encrypted, not
-   plain text) to Production *and* Preview:
+> **This was a Pages project until the move to Workers.** What changed is the
+> hosting, not the code: `functions/` is untouched, and `npm run build` now
+> compiles it with `wrangler pages functions build` into `worker/index.js`,
+> which [wrangler.toml](wrangler.toml) names as `main`. The routing template
+> that file emits is the one Pages ran, so `onRequest`, `context.next()` and the
+> `_middleware` gate behave identically. Two things did change and are called
+> out below: `_redirects` is gone (step 6), and the secrets moved off the
+> dashboard (step 3).
+
+1. **Cloudflare dashboard → Workers & Pages → Create → Workers → Connect to
+   Git** (Workers Builds), pick `lingologico1-sys/vocoTrial`.
+2. Build command `npm run build`, deploy command `npx wrangler deploy`.
+   Cloudflare reads everything else from [wrangler.toml](wrangler.toml).
+3. **Set the secrets.** Unlike Pages, these are not a dashboard-only affair —
+   `wrangler deploy` never touches secrets, so setting them once is enough and
+   no push can overwrite them:
+
+   ```bash
+   npx wrangler secret put SITE_PASSWORD
+   npx wrangler secret put GEMINI_API_KEY      # Vertex — a particular kind, see below
+   npx wrangler secret put GEMINI_API_KEY2     # optional fallback Vertex key
+   npx wrangler secret put GOOGLE_API_KEY      # ordinary AI Studio key
+   npx wrangler secret put OPENAI_API_KEY      # the realtime relay
+   npx wrangler secret put ELEVENLABS_API_KEY  # lip-sync speech
+   npx wrangler secret put LIPSYNC_URL         # the Modal lip-sync backend
+   npx wrangler secret put LIPSYNC_API_KEY     # and its key
+   ```
+
+   The last three are read by `functions/api/lipsync/` and were absent from the
+   list this runbook used to give — they are in `.dev.vars.example` now too, so
+   the local file and the deployed Worker can be checked against each other. The
+   authoritative list is whatever `functions/` actually reads:
+
+   ```bash
+   grep -rhoE 'env\.[A-Z_0-9]{3,}' functions | sort -u
+   ```
+
+   The Worker's **Settings → Variables and Secrets** page does the same job if
+   you would rather paste than type. What you must NOT do is put a plain-text
+   var there: `wrangler deploy` replaces the Worker's vars with what is in
+   `wrangler.toml`, so a var set in the dashboard survives until the next push
+   and then quietly disappears. Secrets are exempt from that; vars are not.
+
+   These are the same values the Pages project held. Migrating means copying
+   them across, not minting new ones — a Pages secret cannot be read back, so
+   if the originals are lost, they are lost, and the Vertex ones have to be
+   re-made with the recipe below.
    - `SITE_PASSWORD`
    - `GEMINI_API_KEY` (Vertex AI key — see below, it is a particular kind)
    - `GEMINI_API_KEY2` (optional fallback Vertex key)
@@ -876,9 +917,7 @@ gates the build.
      'https://aiplatform.googleapis.com/v1/publishers/google/models/gemini-no-such-model-probe:generateContent'
    ```
 
-   They have to go in the dashboard: because `wrangler.toml` exists, Pages takes
-   plain-text vars from that file and the dashboard will only accept Secrets.
-4. **Create the five buckets**, once, and do it *before the deploy that adds
+4. **Create the seven buckets**, once, and do it *before the deploy that adds
    the binding* rather than before the first save:
 
    ```bash
@@ -887,18 +926,27 @@ gates the build.
    npx wrangler r2 bucket create vocotrial-sessions
    npx wrangler r2 bucket create vocotrial-sheets
    npx wrangler r2 bucket create vocotrial-house
+   npx wrangler r2 bucket create vocotrial-prompts
+   npx wrangler r2 bucket create vocotrial-lipsync
    ```
+
+   Migrating from the Pages project creates none of these: buckets are account
+   resources and do not belong to a project, so the existing seven carry over
+   with their contents and the commands above are a no-op.
+
+   `npx wrangler deploy --dry-run` prints the bindings it resolved, which is the
+   cheapest way to confirm the list here matches [wrangler.toml](wrangler.toml).
 
    `vocotrial-sheets` holds Voco Sessions; the bucket name predates the rename
    and is not worth a migration to fix, so the binding is `VOCO_SESSIONS` and
    the bucket is not. See [wrangler.toml](wrangler.toml).
 
    The bindings are already in [wrangler.toml](wrangler.toml) — a binding name
-   is not a credential, so unlike the keys they belong in the file. **Pages
-   validates every binding when it builds**, so a block naming a bucket that
-   does not exist fails the whole deployment and the site stays on the previous
-   commit. It reads as a build failure rather than as a missing bucket; the fix
-   is to create it and redeploy, and nothing needs reverting.
+   is not a credential, so unlike the keys they belong in the file. **A binding
+   naming a bucket that does not exist is refused**, so the deploy fails and the
+   site stays on the previous version. It reads as a deploy error rather than as
+   a missing bucket; the fix is to create it and deploy again, and nothing needs
+   reverting.
 
    Each is independently survivable if you skip it. Without `vocotrial-faces`,
    faceKit's save and the face grid say no library is configured. Without
@@ -912,11 +960,31 @@ gates the build.
    **After the first deploy, open `/studio` and press *Publish as a tutor
    style* once.** Nothing else works until there is one; that is the only
    required setup step beyond the buckets.
-5. Push to `main`. Every push deploys; every PR gets a preview URL.
+5. **Point `voco.lingomondo.app` at the Worker.** The custom domain is declared
+   in [wrangler.toml](wrangler.toml) under `routes`, so a deploy claims it and
+   creates the DNS record; nothing to do in the dashboard. `workers_dev` is left
+   on beside it deliberately, as the hostname to reach for when DNS is the thing
+   being debugged.
+
+   **This hostname is load-bearing outside this repo.** LingoLecto pins it in
+   `VOCO_ORIGIN`, and every published Phono loads its speaking face from it —
+   see [docs/phono-embed.md](docs/phono-embed.md). It replaces the old
+   `vocotrial.pages.dev`, which is why a custom domain rather than a
+   `workers.dev` one: it is the last hostname this app needs, so that pin never
+   has to move again.
+6. Push to `main`. Every push deploys; every PR gets a preview URL.
 
 Set `SITE_PASSWORD` **before** the first deploy that includes the gate. It fails
 closed, so a deployment without it locks out everyone, you included — the sign-in
 screen says as much rather than looking like a wrong password.
+
+There is no `public/_redirects` any more, and adding one back will not do what
+you want. Workers static assets honour only real redirect statuses in that file;
+the `/*  /index.html  200` rewrite that gives the client-side router its deep
+links is `not_found_handling = "single-page-application"` in
+[wrangler.toml](wrangler.toml) instead. `public/_headers` is unchanged and still
+honoured — `wrangler dev` prints how many rules it parsed, which is the quickest
+way to catch a typo in it.
 
 Model ids are not configuration — they live in
 [src/realtime/models.ts](src/realtime/models.ts), because the picker and the
@@ -933,6 +1001,12 @@ npm run dev:api                  # SPA + functions, which is what you want
 `npm run dev` alone serves the SPA but not `functions/`, so `/api/live/*`
 returns 404 and no call can start. Use `dev:api` for anything touching audio.
 
+**`dev:api` no longer hot-reloads.** Under Pages it was `wrangler pages dev --
+npm run dev`, which put Vite's dev server behind the Functions runtime and kept
+HMR. `wrangler dev` has no equivalent, so `dev:api` builds first and serves the
+built bundle: correct, but a rebuild per change. Work against `npm run dev` and
+switch to `dev:api` once the change reaches `functions/`.
+
 Getting a microphone requires a secure context: `localhost` counts, an IP on
 your LAN does not.
 
@@ -947,9 +1021,9 @@ npm run lint
 
 | Path | State |
 | --- | --- |
-| SPA, `_headers`, `_redirects`, Git-integration deploys | working |
+| SPA, `_headers`, Git-integration deploys | working — the SPA's deep links are `not_found_handling` now, not `_redirects`; see [wrangler.toml](wrangler.toml) |
 | Same-origin gate (`403` on a forged Origin) | working |
-| Password gate (`401` on every `/api/*` without a cookie, fetch and WebSocket alike) | working — verified against `wrangler pages dev`, including a tampered cookie and an unset `SITE_PASSWORD` |
+| Password gate (`401` on every `/api/*` without a cookie, fetch and WebSocket alike) | working — verified against `wrangler dev` on the Worker, including a tampered cookie, an unset `SITE_PASSWORD`, and a WebSocket upgrade reaching the relay through the gate |
 | `/api/live/gemini` | **working on both surfaces** — `setupComplete` through the relay on Vertex *and* AI Studio |
 | `/api/live/models` | probes candidate ids with `generateContent`, the only call this key may make |
 | `/api/live/regions` | **run 2026-08-16** — all twelve hosts take the key; Pro is global-endpoint-only, Flash is in seven regions |

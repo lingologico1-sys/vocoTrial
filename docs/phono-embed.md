@@ -104,7 +104,7 @@ trust: a page allowed to tell the mouth what to say is a page allowed to say wha
 it wears. A `kitUrl` pointing anywhere else answers `error: kit_origin` and is
 not fetched.
 
-localhost on any port is accepted, for `wrangler pages dev` running beside
+localhost on any port is accepted, for `wrangler dev` running beside
 LingoLecto's own dev server. That branch cannot fire in production, where
 reaching this deployment requires a Host that Cloudflare routes here — the same
 argument `functions/api/_middleware.ts` makes about its own localhost case.

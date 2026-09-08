@@ -31,3 +31,8 @@ lipsync/assets/*.json
 lipsync/*-frames/
 lipsync/*.png
 lipsync/*.jpg
+
+# The compiled Functions worker, emitted by `npm run build` from functions/.
+# Build output, like dist/ — and deliberately outside it, so it is never served
+# as a public asset. See wrangler.toml.
+worker/

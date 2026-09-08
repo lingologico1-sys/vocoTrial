@@ -99,7 +99,7 @@ export function readToken(request: Request): string | null {
 }
 
 /**
- * `Secure` is set only over https so that `wrangler pages dev` on plain
+ * `Secure` is set only over https so that `wrangler dev` on plain
  * http://localhost still works. SameSite=Strict costs nothing here — every
  * caller is our own page, and same-origin is same-site, so the WebSocket
  * handshake still gets the cookie.
