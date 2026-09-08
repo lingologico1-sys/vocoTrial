@@ -62,7 +62,7 @@ not_found_handling = "single-page-application"
 #   here      anything not sensitive. `wrangler deploy` REPLACES the Worker's
 #             vars with what is in this file, so a plain-text var set in the
 #             dashboard is overwritten by the next deploy. Put it here.
-#   secrets   SITE_PASSWORD, GEMINI_API_KEY, GEMINI_API_KEY2, GOOGLE_API_KEY,
+#   secrets   GEMINI_JSON01..03 and GOOGLE_API_KEY —
 #             OPENAI_API_KEY — `npx wrangler secret put NAME`, or the Worker's
 #             Variables and Secrets page. Deploys never touch these, so they are
 #             set once and survive every push.
@@ -121,7 +121,7 @@ not_found_handling = "single-page-application"
 
 [[secrets_store_secrets]]
 binding = "SITE_PASSWORD"
-secret_name = "VOCOTRIAL_SITE_PASSWORD"
+secret_name = "ADMIN_PASSWORD"
 store_id = "ab2656b141cc49a2833f33f1023737d7"
 
 [[secrets_store_secrets]]
