@@ -44,6 +44,7 @@
  */
 
 import { readToken, tokenIsValid } from './auth/_cookie';
+import { resolveSecrets } from './_secrets';
 
 /*
  * `OPENAI_API_KEY` left this list and has come back, which is the whole of its
@@ -177,6 +178,33 @@ export async function onRequest(
   const { request, next, env } = context;
   const url = new URL(request.url);
   const origin = request.headers.get('Origin');
+
+  /*
+   * Secrets first, before any check that reads one.
+   *
+   * The secrets below arrive from the account's Secrets Store as objects rather
+   * than strings, and every handler behind this gate was written against
+   * strings — see _secrets.ts, which explains why this is resolved once here
+   * instead of at twenty call sites.
+   *
+   * A FAILURE HERE IS A 503 AND NOT A SHRUG. An unreadable secret must not be
+   * allowed to look like an unset one: hasValidSession below would refuse
+   * everybody, which is safe, but auth/status.ts would report `configured:
+   * false` and the sign-in screen would announce that this deployment has no
+   * password — a store outage dressed up as an invitation.
+   */
+  try {
+    await resolveSecrets(env as unknown as Record<string, unknown>);
+  } catch (error) {
+    console.error('secrets store unreadable', error);
+    return json(
+      {
+        error: 'Server configuration is unavailable',
+        code: 'secrets_unavailable',
+      },
+      503,
+    );
+  }
 
   // The two prefixes described at the top of this file, and nothing else.
   // Scoped to exact prefixes: a route added elsewhere is covered by default.

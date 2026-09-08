@@ -841,25 +841,56 @@ gates the build.
    `wrangler deploy` never touches secrets, so setting them once is enough and
    no push can overwrite them:
 
+   **They live in two places, and which one is not arbitrary.**
+
+   Five are in the account's **Secrets Store**, declared as bindings in
+   [wrangler.toml](wrangler.toml) and created once with:
+
    ```bash
-   npx wrangler secret put SITE_PASSWORD
+   STORE=ab2656b141cc49a2833f33f1023737d7
+   npx wrangler secrets-store secret create $STORE --name OPENAI_API_KEY            --scopes workers --remote
+   npx wrangler secrets-store secret create $STORE --name ELEVENLABS_API_KEY        --scopes workers --remote
+   npx wrangler secrets-store secret create $STORE --name VOCOTRIAL_SITE_PASSWORD   --scopes workers --remote
+   npx wrangler secrets-store secret create $STORE --name VOCOTRIAL_LIPSYNC_URL     --scopes workers --remote
+   npx wrangler secrets-store secret create $STORE --name VOCOTRIAL_LIPSYNC_API_KEY --scopes workers --remote
+   ```
+
+   The two unprefixed names are credentials any other Worker would want and are
+   shared; the `VOCOTRIAL_` ones are nobody else's business and are mapped back
+   to their short names by the `binding`/`secret_name` pair in wrangler.toml.
+
+   Four stay **ordinary Worker secrets**, because a store value is capped at
+   1024 characters and a service-account JSON is about 2.3 KB:
+
+   ```bash
    npx wrangler secret put GEMINI_JSON01      # Vertex service account, one JSON key
    npx wrangler secret put GEMINI_JSON02      # a second, in a second GCP project
    npx wrangler secret put GEMINI_JSON03      # and a third
    npx wrangler secret put GOOGLE_API_KEY     # ordinary AI Studio key
-   npx wrangler secret put OPENAI_API_KEY      # the realtime relay
-   npx wrangler secret put ELEVENLABS_API_KEY  # lip-sync speech
-   npx wrangler secret put LIPSYNC_URL         # the Modal lip-sync backend
-   npx wrangler secret put LIPSYNC_API_KEY     # and its key
    ```
 
-   The last three are read by `functions/api/lipsync/` and were absent from the
-   list this runbook used to give — they are in `.dev.vars.example` now too, so
-   the local file and the deployed Worker can be checked against each other. The
-   authoritative list is whatever `functions/` actually reads:
+   **A store secret is not a string.** It arrives as an object with an async
+   `get()`, and every handler here was written against strings — so
+   [functions/api/\_secrets.ts](functions/api/_secrets.ts) resolves them once in
+   the middleware, in front of every `/api/*` route. Adding a binding means
+   adding its name to `SECRET_BINDING_NAMES` there, or it is never resolved and
+   reads as "not configured".
+
+   **Deploying replaces a same-named Worker secret with the store binding**, so
+   moving one into the store needs no cleanup — the next `wrangler deploy` drops
+   the old copy on its own.
+
+   Local development is unaffected by any of this: `.dev.vars` supplies plain
+   strings, the resolver leaves strings alone, and there is no store to read.
+
+   To check the deployed Worker against this list, read both halves — the grep
+   below misses `GEMINI_JSON01..03`, because _vertex.ts builds those names
+   rather than writing them out:
 
    ```bash
-   grep -rhoE 'env\.[A-Z_0-9]{3,}' functions | sort -u
+   grep -rhoE 'env\.[A-Z_0-9]{3,}' functions | sort -u   # plus the GEMINI_JSON pool
+   npx wrangler secret list --name vocotrial
+   npx wrangler secrets-store secret list ab2656b141cc49a2833f33f1023737d7 --remote
    ```
 
    The Worker's **Settings → Variables and Secrets** page does the same job if

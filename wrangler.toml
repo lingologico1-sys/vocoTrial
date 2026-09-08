@@ -82,6 +82,68 @@ not_found_handling = "single-page-application"
 # provider recommends — see the header of that file for the other half of the
 # reason, which is about the audio.
 
+# ---------------------------------------------------------------------------
+# SECRETS STORE — the account's one store, id below, created 2025-05-09.
+# ---------------------------------------------------------------------------
+#
+# There is exactly ONE store per account (`store create` fails with
+# maximum_stores_exceeded), so this id is not going to change. List what it
+# holds with:
+#   npx wrangler secrets-store secret list ab2656b141cc49a2833f33f1023737d7 --remote
+#
+# `binding` is the name the code sees; `secret_name` is the name in the store.
+# They do not have to match, and that is what makes an account-wide store
+# usable: OPENAI_API_KEY and ELEVENLABS_API_KEY are the same credentials any
+# other Worker would want, so they keep plain names and are shared. The three
+# that are nobody else's business are prefixed VOCOTRIAL_ and mapped back to
+# their short names here — the same convention bannerMaker uses for
+# BANNERMAKER_ACCESS_CODE.
+#
+# EVERY SECRET MUST CARRY THE `workers` SCOPE or the deploy is rejected, and a
+# binding naming a secret that does not exist fails the deploy outright.
+#
+# DECLARE BINDINGS HERE, NOT IN THE DASHBOARD. A binding added through the
+# Worker's Bindings page is configuration this file does not know about, and the
+# next `wrangler deploy` replaces the Worker's configuration with what is
+# written here — silently dropping it. The same trap as `routes`.
+#
+# THE VERTEX SERVICE ACCOUNTS CANNOT LIVE HERE. A store value is capped at 1024
+# characters and a service-account JSON is about 2.3 KB, most of it the private
+# key. Ordinary Worker secrets allow 5 KB, so GEMINI_JSON01..03 stay on
+# `wrangler secret put`. That split is what the store is designed for: short
+# keys shared between Workers go in the store, credential files stay per-Worker.
+#
+# Reading these needs functions/api/_secrets.ts — a bound secret arrives as an
+# object with an async get(), not a string, and the middleware resolves them
+# before any handler runs. Adding a block here means adding the binding name to
+# SECRET_BINDING_NAMES in that file, or it is simply never resolved and reads as
+# "not configured".
+
+[[secrets_store_secrets]]
+binding = "SITE_PASSWORD"
+secret_name = "VOCOTRIAL_SITE_PASSWORD"
+store_id = "ab2656b141cc49a2833f33f1023737d7"
+
+[[secrets_store_secrets]]
+binding = "OPENAI_API_KEY"
+secret_name = "OPENAI_API_KEY"
+store_id = "ab2656b141cc49a2833f33f1023737d7"
+
+[[secrets_store_secrets]]
+binding = "ELEVENLABS_API_KEY"
+secret_name = "ELEVENLABS_API_KEY"
+store_id = "ab2656b141cc49a2833f33f1023737d7"
+
+[[secrets_store_secrets]]
+binding = "LIPSYNC_URL"
+secret_name = "VOCOTRIAL_LIPSYNC_URL"
+store_id = "ab2656b141cc49a2833f33f1023737d7"
+
+[[secrets_store_secrets]]
+binding = "LIPSYNC_API_KEY"
+secret_name = "VOCOTRIAL_LIPSYNC_API_KEY"
+store_id = "ab2656b141cc49a2833f33f1023737d7"
+
 # CREATE A BUCKET BEFORE PUSHING A BINDING FOR IT. This was true under Pages,
 # where a binding naming a missing bucket failed the whole build and left the
 # site on the previous commit, and it is still true here: `wrangler deploy`
